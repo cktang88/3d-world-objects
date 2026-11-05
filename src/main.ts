@@ -5,6 +5,11 @@ import { loadManifest, allModels } from './assets';
 import { Player } from './player';
 import { CityLevel } from './city';
 import { InteriorLevel } from './interior';
+import { NycLevel } from './nyc';
+import { ShopLevel } from './shop';
+import { AtriumLevel, GalleryLevel } from './museum';
+import { loadMuseum, museum } from './museumData';
+import { DATASET_LABEL, type RemoteEntry } from './remote';
 import type { Env, Level, LevelDesc, Portal } from './level';
 import { skyTex } from './textures';
 import { hashStr } from './rng';
@@ -32,10 +37,10 @@ const sun = new THREE.DirectionalLight('#ffffff', 2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera;
-sc.left = sc.bottom = -60;
-sc.right = sc.top = 60;
+sc.left = sc.bottom = -70;
+sc.right = sc.top = 70;
 sc.near = 1;
-sc.far = 260;
+sc.far = 320;
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.04;
 scene.add(hemi, ambient, sun, sun.target);
@@ -47,6 +52,7 @@ addEventListener('resize', () => {
 });
 
 const player = new Player(camera, renderer.domElement);
+const coarse = matchMedia('(pointer: coarse)').matches;
 
 // ---------------------------------------------------------------- HUD
 
@@ -55,16 +61,18 @@ const hud = {
   crumbs: $('crumbs'),
   depth: $('depth'),
   prompt: $('prompt'),
+  promptKey: $('prompt-key'),
   promptLabel: $('prompt-label'),
   promptSub: $('prompt-sub'),
   fade: $('fade'),
   start: $('start'),
-  startBtn: $('start-btn') as HTMLButtonElement,
   loading: $('loading'),
   credits: $('credits'),
   creditsList: $('credits-list'),
   toast: $('toast'),
   touch: $('touch'),
+  info: $('info'),
+  help: $('help'),
 };
 
 let toastTimer = 0;
@@ -72,28 +80,52 @@ function toast(text: string) {
   hud.toast.textContent = text;
   hud.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => hud.toast.classList.remove('show'), 3200);
+  toastTimer = window.setTimeout(() => hud.toast.classList.remove('show'), 3400);
 }
 
 // ---------------------------------------------------------------- level stack
+
+type Mode = 'world' | 'museum';
+let mode: Mode = 'world';
 
 interface Frame {
   desc: LevelDesc;
   pos: THREE.Vector3;
   yaw: number;
-  scale: number; // how small you are compared to where you started
+  exact: boolean;
+  scale: number;
 }
 const stack: Frame[] = [];
 let level: Level;
+let currentDesc: LevelDesc;
 let scale = 1;
+let roomsVisited = 0;
 
 function build(desc: LevelDesc): Level {
-  return desc.kind === 'city' ? new CityLevel(desc) : new InteriorLevel(desc);
+  switch (desc.kind) {
+    case 'city': return new CityLevel(desc);
+    case 'nyc': return new NycLevel(desc);
+    case 'atrium': return new AtriumLevel();
+    case 'gallery': return new GalleryLevel(desc);
+    case 'interior': return desc.shop ? new ShopLevel(desc) : new InteriorLevel(desc);
+  }
 }
 
+function descName(d: LevelDesc): string {
+  switch (d.kind) {
+    case 'atrium': return 'Atrium';
+    case 'gallery': {
+      const t = museum().themes[d.theme];
+      return t ? t.name + (d.page ? ` ${d.page + 1}` : '') : 'Gallery';
+    }
+    case 'interior': return d.floor > 0 ? `${d.name} · floor ${d.floor + 1}` : d.name;
+    default: return d.name;
+  }
+}
+
+const sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
 function applyEnv(env: Env) {
   scene.background = skyTex(env.skyTop, env.skyBottom, env.stars, hashStr(env.skyTop));
-  scene.backgroundIntensity = 1;
   scene.fog = env.fog ? new THREE.Fog(env.fog, env.fogNear, env.fogFar) : null;
   hemi.color.set(env.hemi.sky);
   hemi.groundColor.set(env.hemi.ground);
@@ -108,13 +140,10 @@ function applyEnv(env: Env) {
     const el = THREE.MathUtils.degToRad(env.sun.elev);
     const az = THREE.MathUtils.degToRad(env.sun.azim);
     sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
-  } else {
-    sun.visible = false;
-  }
-  camera.far = env.fog ? env.fogFar + 40 : 200;
+  } else sun.visible = false;
+  camera.far = env.fog ? env.fogFar + 60 : 220;
   camera.updateProjectionMatrix();
 }
-const sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
 
 function setLevel(next: Level, pos?: THREE.Vector3, yaw?: number) {
   if (level) {
@@ -129,21 +158,21 @@ function setLevel(next: Level, pos?: THREE.Vector3, yaw?: number) {
 }
 
 function renderCrumbs() {
-  const names = [...stack.map((f) => levelName(f.desc)), level.name];
+  const names = [...stack.map((f) => descName(f.desc)), level.name];
+  const shown = names.length > 6 ? ['…', ...names.slice(-5)] : names;
   hud.crumbs.innerHTML = '';
-  names.forEach((n, i) => {
+  shown.forEach((n, i) => {
     const s = document.createElement('span');
     s.textContent = n;
-    if (i === names.length - 1) s.className = 'here';
+    if (i === shown.length - 1) s.className = 'here';
     hud.crumbs.appendChild(s);
   });
-  const depth = stack.length;
-  hud.depth.innerHTML = `<b>depth ${depth}</b><span>you are ${formatScale(scale)} your original size</span>`;
-}
-
-function levelName(d: LevelDesc) {
-  if (d.kind === 'interior' && d.floor > 0) return `${d.name} · floor ${d.floor + 1}`;
-  return d.name;
+  if (mode === 'museum') {
+    const t = currentDesc.kind === 'gallery' ? museum().themes[currentDesc.theme] : null;
+    hud.depth.innerHTML = `<b>${t ? t.collection : 'The sand3d Museum'}</b><span>${stack.length} room${stack.length === 1 ? '' : 's'} deep · ${roomsVisited} visited</span><span>${museum().total.toLocaleString()} objects · ${museum().themes.length.toLocaleString()} rooms</span>`;
+  } else {
+    hud.depth.innerHTML = `<b>depth ${stack.length}</b><span>you are ${formatScale(scale)} your original size</span>`;
+  }
 }
 
 function formatScale(s: number) {
@@ -151,14 +180,12 @@ function formatScale(s: number) {
   const inv = 1 / s;
   if (inv < 1000) return `1/${inv.toFixed(inv < 10 ? 1 : 0)}`;
   const exp = Math.floor(Math.log10(inv));
-  const man = inv / 10 ** exp;
-  return `1/${man.toFixed(1)}×10<sup>${exp}</sup>`;
+  return `1/${(inv / 10 ** exp).toFixed(1)}×10<sup>${exp}</sup>`;
 }
 
 // ---------------------------------------------------------------- transitions
 
 let transitioning = false;
-const tmpV = new THREE.Vector3();
 
 async function fadeTo(opacity: number, ms: number) {
   hud.fade.style.transition = `opacity ${ms}ms ease`;
@@ -166,7 +193,7 @@ async function fadeTo(opacity: number, ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-/** Dolly the camera toward a point while narrowing the FOV: you are shrinking into it. */
+/** Dolly toward a point while narrowing the FOV: shrinking into it. */
 async function zoomInto(target: THREE.Vector3, ms: number) {
   const start = camera.position.clone();
   const fov0 = camera.fov;
@@ -188,25 +215,12 @@ async function zoomInto(target: THREE.Vector3, ms: number) {
   camera.updateProjectionMatrix();
 }
 
-async function zoomOut(ms: number) {
-  const fov0 = camera.fov;
-  const t0 = performance.now();
-  await new Promise<void>((resolve) => {
-    const step = () => {
-      const t = Math.min(1, (performance.now() - t0) / ms);
-      camera.fov = fov0 + (1 - t) * 40;
-      camera.updateProjectionMatrix();
-      if (t < 1) requestAnimationFrame(step);
-      else resolve();
-    };
-    step();
-  });
-  camera.fov = fov0;
-  camera.updateProjectionMatrix();
-}
-
 async function enter(p: Portal) {
   if (transitioning) return;
+  if (p.target === 'inspect') {
+    if (p.inspect) openInfo(p.inspect);
+    return;
+  }
   transitioning = true;
   hud.prompt.classList.remove('show');
   if (p.target === 'back') {
@@ -214,115 +228,177 @@ async function enter(p: Portal) {
     transitioning = false;
     return;
   }
-  const isCity = p.target.kind === 'city';
-  p.box.getCenter(tmpV);
-  hud.fade.style.background = isCity ? '#fff' : '#000';
-  const zoom = zoomInto(tmpV.clone(), isCity ? 900 : 450);
-  await new Promise((r) => setTimeout(r, isCity ? 450 : 150));
-  await Promise.all([zoom, fadeTo(1, isCity ? 450 : 300)]);
-  stack.push({ desc: currentDesc, pos: player.pos.clone(), yaw: player.yaw, scale });
-  currentDesc = p.target;
-  if (isCity && p.shrink) scale *= p.shrink / 1000; // a whole ~1 km world fits inside the object
-  setLevel(build(p.target));
-  if (isCity) toast(`You shrink into ${p.target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
-  else toast(p.target.kind === 'interior' && p.target.floor > 0 ? `Floor ${p.target.floor + 1}` : `Welcome to ${p.target.name}`);
-  const zo = isCity ? zoomOut(900) : Promise.resolve();
-  await Promise.all([fadeTo(0, isCity ? 700 : 350), zo]);
+  const target = p.target;
+  const shrink = target.kind === 'city';
+  const quick = target.kind === 'gallery' || target.kind === 'atrium';
+  hud.fade.style.background = shrink ? '#fff' : '#000';
+  if (shrink) {
+    const c = new THREE.Vector3();
+    p.box.getCenter(c);
+    const zoom = zoomInto(c, 900);
+    await new Promise((r) => setTimeout(r, 450));
+    await Promise.all([zoom, fadeTo(1, 450)]);
+  } else await fadeTo(1, quick ? 220 : 300);
+  stack.push({ desc: currentDesc, pos: (p.returnPos ?? player.pos).clone(), yaw: p.returnYaw ?? player.yaw, exact: !!p.returnPos, scale });
+  currentDesc = target;
+  if (shrink && p.shrink) scale *= p.shrink / 1000;
+  roomsVisited++;
+  setLevel(build(target));
+  if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
+  else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
+  else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} wing — every doorway leads somewhere similar`);
+  await fadeTo(0, shrink ? 700 : quick ? 260 : 350);
   transitioning = false;
 }
 
 async function goBack() {
   const f = stack.pop();
   if (!f) {
-    toast('This is the outermost world.');
+    toast(mode === 'museum' ? 'This is the atrium — pick a wing.' : 'This is the outermost world.');
     return;
   }
   const wasCity = currentDesc.kind === 'city';
   hud.fade.style.background = wasCity ? '#fff' : '#000';
-  await fadeTo(1, wasCity ? 500 : 300);
+  await fadeTo(1, wasCity ? 450 : 240);
   currentDesc = f.desc;
   scale = f.scale;
-  // step back a little from the portal so you are not standing inside it
-  const back = new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)).multiplyScalar(0.6);
-  setLevel(build(f.desc), f.pos.clone().add(back), f.yaw + Math.PI);
-  await fadeTo(0, wasCity ? 600 : 300);
+  if (f.exact) setLevel(build(f.desc), f.pos, f.yaw);
+  else {
+    const back = new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)).multiplyScalar(0.8);
+    setLevel(build(f.desc), f.pos.clone().add(back), f.yaw + Math.PI);
+  }
+  await fadeTo(0, wasCity ? 600 : 260);
 }
 
-// ---------------------------------------------------------------- portal targeting
+// ---------------------------------------------------------------- aiming at things
 
 const ray = new THREE.Ray();
 const fwd = new THREE.Vector3();
 const hit = new THREE.Vector3();
 let aimed: Portal | null = null;
 const outline = new THREE.Box3Helper(new THREE.Box3(), new THREE.Color('#ffe58a'));
-(outline.material as THREE.LineBasicMaterial).transparent = true;
-(outline.material as THREE.LineBasicMaterial).depthTest = false;
+const outlineMat = outline.material as THREE.LineBasicMaterial;
+outlineMat.transparent = true;
+outlineMat.depthTest = false;
 outline.renderOrder = 10;
 outline.visible = false;
 scene.add(outline);
 
+function volume(b: THREE.Box3) {
+  return (b.max.x - b.min.x) * (b.max.y - b.min.y) * (b.max.z - b.min.z);
+}
+
 function target(): Portal | null {
   camera.getWorldDirection(fwd);
   ray.set(camera.position, fwd);
-  const reach = currentDesc.kind === 'city' ? 7 : 3.6;
-  let best: Portal | null = null;
-  let bestD = Infinity;
-  let bestVol = Infinity;
+  const reach = currentDesc.kind === 'city' || currentDesc.kind === 'nyc' ? 7 : 4.2;
   const hits: { p: Portal; d: number; v: number }[] = [];
   for (const p of level.portals()) {
+    if (p.auto) continue;
     if (p.box.containsPoint(camera.position)) {
-      // standing in a door frame counts as looking at it
       hits.push({ p, d: 0.01, v: volume(p.box) });
       continue;
     }
     const h = ray.intersectBox(p.box, hit);
     if (!h) continue;
     const d = h.distanceTo(camera.position);
-    if (d > reach) continue;
-    hits.push({ p, d, v: volume(p.box) });
+    if (d <= reach) hits.push({ p, d, v: volume(p.box) });
   }
   if (!hits.length) return null;
   const nearest = Math.min(...hits.map((h) => h.d));
-  // prefer the smallest thing near the front: the cup on the table, not the table
-  for (const h of hits) {
-    if (h.d <= nearest + 0.9 && h.v < bestVol) {
-      best = h.p;
-      bestVol = h.v;
-      bestD = h.d;
-    }
-  }
-  void bestD;
+  let best: Portal | null = null;
+  let bestV = Infinity;
+  for (const h of hits) if (h.d <= nearest + 0.9 && h.v < bestV) { best = h.p; bestV = h.v; }
   return best;
 }
-function volume(b: THREE.Box3) {
-  return (b.max.x - b.min.x) * (b.max.y - b.min.y) * (b.max.z - b.min.z);
+
+const feet = new THREE.Vector3();
+function autoPortal(): Portal | null {
+  feet.set(player.pos.x, 1, player.pos.z);
+  for (const p of level.portals()) if (p.auto && p.box.containsPoint(feet)) return p;
+  return null;
+}
+
+// ---------------------------------------------------------------- info panel
+
+let infoOpen = false;
+function esc(s: string) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+}
+function openInfo(e: RemoteEntry) {
+  infoOpen = true;
+  document.exitPointerLock();
+  const hf = `https://huggingface.co/datasets/Sandflow/sand3d-${e.ds}/viewer/default/${e.split}?row=${e.row}`;
+  hud.info.innerHTML = `
+    <button class="close" id="info-close">×</button>
+    <div class="kicker">${esc(DATASET_LABEL[e.ds] ?? e.ds)}${e.family && !/^\d+$/.test(e.family) ? ` · ${esc(e.family.replace(/_/g, ' '))}` : ''}</div>
+    <h2>${esc(e.title)}</h2>
+    <div class="meta">
+      ${e.author ? `<div><span>original by</span>${esc(e.author)}</div>` : ''}
+      ${e.entry ? `<div><span>sand3d entry</span><code>${esc(e.entry)}()</code></div>` : ''}
+      ${e.attribution ? `<div><span>size</span>${esc(e.attribution)}</div>` : ''}
+      ${e.joints ? `<div><span>joints</span>${e.joints} — it moves</div>` : ''}
+      <div><span>match to source</span>${(e.f * 100).toFixed(0)}% F-score</div>
+      <div><span>licence</span>${esc(e.license || 'CC-BY-4.0')} (program and USD: CC BY 4.0, Sandflow)</div>
+    </div>
+    <div class="links">
+      ${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">source model</a>` : ''}
+      <a href="${hf}" target="_blank" rel="noopener">dataset row</a>
+    </div>
+    <div id="info-render"></div>
+    <button id="info-prog" class="prog">Show its sand3d program</button>
+    <pre id="info-code" hidden></pre>
+    <p class="hint">Esc or E to close</p>`;
+  hud.info.classList.add('show');
+  $('info-close').addEventListener('click', closeInfo);
+  $('info-prog').addEventListener('click', async () => {
+    const btn = $('info-prog') as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = 'Loading program…';
+    try {
+      const res = await fetch(`https://datasets-server.huggingface.co/rows?dataset=Sandflow/sand3d-${e.ds}&config=default&split=${e.split}&offset=${e.row}&length=1`);
+      const d = await res.json();
+      const row = d.rows?.[0]?.row;
+      const code = $('info-code');
+      code.textContent = row?.program ?? 'Program unavailable right now.';
+      code.hidden = false;
+      if (row?.render?.src) $('info-render').innerHTML = `<img src="${esc(row.render.src)}" alt="Sandflow's render of this object">`;
+      btn.textContent = `${(row?.program ?? '').split('\n').length} lines of Python`;
+    } catch {
+      btn.textContent = 'Could not reach Hugging Face';
+    }
+  });
+}
+function closeInfo() {
+  infoOpen = false;
+  hud.info.classList.remove('show');
+  if (started) lock();
 }
 
 // ---------------------------------------------------------------- input
 
 let started = false;
 function lock() {
-  if (matchMedia('(pointer: coarse)').matches) return; // touch devices use the on-screen controls
+  if (coarse) return;
   renderer.domElement.requestPointerLock();
 }
 
-hud.startBtn.addEventListener('click', () => {
-  started = true;
-  hud.start.classList.add('hidden');
-  lock();
-});
 renderer.domElement.addEventListener('click', () => {
-  if (started && !player.locked) lock();
+  if (started && !player.locked && !infoOpen) lock();
 });
 document.addEventListener('pointerlockchange', () => {
-  if (!player.locked && started && !hud.credits.classList.contains('show') && !matchMedia('(pointer: coarse)').matches) {
+  if (!player.locked && started && !infoOpen && !hud.credits.classList.contains('show') && !coarse) {
     hud.start.classList.remove('hidden');
-    hud.startBtn.textContent = 'Resume';
+    hud.start.classList.add('paused');
     started = false;
   }
 });
 
 addEventListener('keydown', (e) => {
+  if (infoOpen && (e.code === 'Escape' || e.code === 'KeyE')) {
+    closeInfo();
+    return;
+  }
   if (!started) return;
   if (e.code === 'KeyE' || e.code === 'Enter') {
     if (aimed) enter(aimed);
@@ -331,9 +407,7 @@ addEventListener('keydown', (e) => {
       transitioning = true;
       goBack().then(() => (transitioning = false));
     }
-  } else if (e.code === 'KeyC') {
-    toggleCredits();
-  }
+  } else if (e.code === 'KeyC') toggleCredits();
 });
 
 function toggleCredits() {
@@ -361,9 +435,8 @@ $('credits-link').addEventListener('click', (e) => {
   toggleCredits();
 });
 
-// touch: left half moves, right half looks, buttons enter / back
 function setupTouch() {
-  if (!matchMedia('(pointer: coarse)').matches) return;
+  if (!coarse) return;
   hud.touch.classList.add('on');
   let moveId: number | null = null, lookId: number | null = null;
   const o = new THREE.Vector2(), last = new THREE.Vector2();
@@ -402,21 +475,24 @@ function setupTouch() {
 
 // ---------------------------------------------------------------- loop
 
-let currentDesc: LevelDesc;
 const clock = new THREE.Clock();
 let time = 0;
 
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   time += dt;
-  if (!transitioning) {
-    player.update(dt, level.colliders(player.pos), !started && !matchMedia('(pointer: coarse)').matches);
+  if (level && !transitioning) {
+    const active = started || coarse;
+    player.update(dt, level.colliders(player.pos), !active || infoOpen);
     level.update(dt, player.pos, time);
-    aimed = started || matchMedia('(pointer: coarse)').matches ? target() : null;
+    const auto = active ? autoPortal() : null;
+    if (auto) enter(auto);
+    aimed = active && !infoOpen ? target() : null;
     if (aimed) {
       outline.box.copy(aimed.box);
       outline.visible = true;
-      (outline.material as THREE.LineBasicMaterial).opacity = 0.55 + 0.35 * Math.sin(time * 6);
+      outlineMat.opacity = 0.55 + 0.35 * Math.sin(time * 6);
+      hud.promptKey.textContent = 'E';
       hud.promptLabel.textContent = aimed.label;
       hud.promptSub.textContent = aimed.sub ?? '';
       hud.prompt.classList.add('show');
@@ -425,30 +501,63 @@ function frame() {
       hud.prompt.classList.remove('show');
     }
     if (sun.visible) {
-      sun.position.copy(player.pos).addScaledVector(sunDir, 120);
+      sun.position.copy(player.pos).addScaledVector(sunDir, 150);
       sun.target.position.copy(player.pos);
     }
     renderer.render(scene, camera);
-  }
+  } else if (level && !transitioning) renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
-async function main() {
-  await loadManifest();
-  const params = new URLSearchParams(location.search);
-  const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;
-  const biome = params.get('biome') ?? 'town';
-  currentDesc = { kind: 'city', seed, biome, name: 'The World' };
-  setLevel(build(currentDesc));
-  hud.loading.classList.add('hidden');
-  hud.startBtn.disabled = false;
-  setupTouch();
-  if (params.has('autostart')) {
-    started = true;
-    hud.start.classList.add('hidden');
+// ---------------------------------------------------------------- start
+
+const params = new URLSearchParams(location.search);
+const ready = Promise.all([loadManifest(), loadMuseum()]);
+
+async function startMode(m: Mode) {
+  mode = m;
+  await ready;
+  stack.length = 0;
+  scale = 1;
+  roomsVisited = 0;
+  document.body.dataset.mode = m;
+  hud.help.innerHTML = m === 'museum'
+    ? '<kbd>WASD</kbd> walk · walk through a doorway to go on · <kbd>E</kbd> inspect · <kbd>Q</kbd> previous room'
+    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>C</kbd> credits';
+  if (m === 'museum') currentDesc = { kind: 'atrium' };
+  else {
+    const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;
+    currentDesc = params.get('biome') ? { kind: 'city', seed, biome: params.get('biome')!, name: 'The World' } : { kind: 'nyc', seed, name: 'Manhattan' };
   }
-  frame();
-  // expose for debugging / screenshots
-  Object.assign(window, { __world: { renderer, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, setStarted: (v: boolean) => (started = v) } });
+  setLevel(build(currentDesc));
+  started = true;
+  hud.start.classList.add('hidden');
+  hud.start.classList.remove('paused');
+  lock();
+  toast(m === 'museum' ? 'Six wings. Walk through any doorway — each leads to rooms of similar objects, forever.' : 'Walk into any shop or door. Look at anything and press E.');
 }
-main();
+
+document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
+  b.addEventListener('click', () => {
+    const m = b.dataset.mode as Mode | 'resume';
+    if (m === 'resume') {
+      started = true;
+      hud.start.classList.add('hidden');
+      lock();
+    } else startMode(m);
+  }),
+);
+
+ready.then(() => {
+  hud.loading.classList.add('hidden');
+  document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => (b.disabled = false));
+  $('museum-count').textContent = museum().total.toLocaleString();
+  setupTouch();
+  const pm = params.get('mode');
+  if (pm === 'museum' || pm === 'world') startMode(pm);
+  frame();
+});
+
+Object.assign(window, {
+  __world: { renderer, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+});

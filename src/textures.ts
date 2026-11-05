@@ -40,7 +40,7 @@ function cached<T>(key: string, make: () => T): T {
   return memo.get(key) as T;
 }
 
-export type FacadeStyle = 'brick' | 'plaster' | 'glass' | 'panel' | 'adobe' | 'timber';
+export type FacadeStyle = 'brick' | 'plaster' | 'glass' | 'panel' | 'adobe' | 'timber' | 'brownstone' | 'prewar' | 'castiron';
 
 /** 4 bays x 4 floors; each bay is 3 m wide and each floor 3.2 m tall. */
 export function facade(style: FacadeStyle, wall: string, lit: number, seed: number) {
@@ -54,7 +54,7 @@ export function facade(style: FacadeStyle, wall: string, lit: number, seed: numb
     ge.fillRect(0, 0, S, S);
     g.fillStyle = wall;
     g.fillRect(0, 0, S, S);
-    if (style === 'brick') {
+    if (style === 'brick' || style === 'prewar') {
       for (let y = 0; y < S; y += 8) {
         for (let x = (y / 8) % 2 ? -8 : 0; x < S; x += 16) {
           g.fillStyle = shade(wall, 0.85 + rng.next() * 0.3);
@@ -94,6 +94,12 @@ export function facade(style: FacadeStyle, wall: string, lit: number, seed: numb
           wx = x0; wy = y0 + 34; ww = cell; wh = 48;
         } else if (style === 'adobe') {
           wx = x0 + 44; wy = y0 + 40; ww = 40; wh = 50;
+        } else if (style === 'brownstone') {
+          wx = x0 + 38; wy = y0 + 18; ww = 52; wh = 96;
+        } else if (style === 'castiron') {
+          wx = x0 + 14; wy = y0 + 14; ww = cell - 28; wh = cell - 30;
+        } else if (style === 'prewar') {
+          wx = x0 + 36; wy = y0 + 30; ww = 56; wh = 74;
         } else {
           wx = x0 + 32; wy = y0 + 26; ww = 64; wh = 80;
         }
@@ -139,6 +145,21 @@ export function facade(style: FacadeStyle, wall: string, lit: number, seed: numb
         if (style !== 'glass' && style !== 'panel') {
           g.fillStyle = shade(wall, 1.3);
           g.fillRect(wx - 6, wy + wh, ww + 12, 7);
+        }
+        if (style === 'brownstone' || style === 'prewar') {
+          // carved lintels over the windows
+          g.fillStyle = shade(wall, style === 'brownstone' ? 1.35 : 1.5);
+          g.fillRect(wx - 8, wy - 12, ww + 16, 10);
+          g.fillStyle = 'rgba(0,0,0,0.25)';
+          g.fillRect(wx - 8, wy - 3, ww + 16, 2);
+        }
+        if (style === 'castiron') {
+          // fluted columns between bays
+          g.fillStyle = shade(wall, 1.15);
+          g.fillRect(x0, y0, 10, cell);
+          g.fillStyle = shade(wall, 0.8);
+          g.fillRect(x0 + 10, y0, 3, cell);
+          g.fillRect(x0, y0 + cell - 12, cell, 5);
         }
       }
     }

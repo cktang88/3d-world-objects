@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Biome } from './biomes';
 import type { ModelEntry } from './assets';
+import type { RemoteEntry } from './remote';
 
 export interface Rect {
   minX: number;
@@ -11,14 +12,23 @@ export interface Rect {
 
 export type LevelDesc =
   | { kind: 'city'; seed: number; biome: string; name: string; source?: ModelEntry; sourceScale?: number }
-  | { kind: 'interior'; seed: number; name: string; style: string; floor: number; floors: number; biome: string };
+  | { kind: 'interior'; seed: number; name: string; style: string; floor: number; floors: number; biome: string; shop?: string }
+  | { kind: 'nyc'; seed: number; name: string }
+  | { kind: 'atrium' }
+  | { kind: 'gallery'; theme: number; page: number; wing?: string };
 
 export interface Portal {
   box: THREE.Box3;
   label: string;
   sub?: string;
-  /** a level to enter, or 'back' to climb out */
-  target: LevelDesc | 'back';
+  /** a level to enter, 'back' to climb out, or 'inspect' to open the info panel */
+  target: LevelDesc | 'back' | 'inspect';
+  inspect?: RemoteEntry;
+  /** walk-through doorways trigger by themselves */
+  auto?: boolean;
+  /** where to stand (and face) when you come back through this portal */
+  returnPos?: THREE.Vector3;
+  returnYaw?: number;
   /** relative size of the thing being entered (for the scale counter) */
   shrink?: number;
 }

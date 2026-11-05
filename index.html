@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>Fractal World</title>
+    <title>sand3d World & Museum</title>
   </head>
   <body>
     <div id="app"></div>
@@ -11,22 +11,32 @@
       <div id="crumbs"></div>
       <div id="depth"></div>
       <div id="crosshair"></div>
-      <div id="prompt"><kbd>E</kbd><div><div id="prompt-label"></div><div id="prompt-sub"></div></div></div>
+      <div id="prompt"><kbd id="prompt-key">E</kbd><div><div id="prompt-label"></div><div id="prompt-sub"></div></div></div>
       <div id="toast"></div>
       <div id="help"><kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>E</kbd> enter · <kbd>Q</kbd> back out · <kbd>C</kbd> credits</div>
     </div>
     <div id="touch"><button id="t-back">Back</button><button id="t-enter">Enter</button></div>
     <div id="fade"></div>
     <div id="start">
-      <div class="card">
-        <h1>Fractal World</h1>
-        <p>Every building has rooms. Every room has things. Every thing has a world inside it, and so on, forever.</p>
-        <p class="small">Walk up to any door, object, vehicle or painting and press <kbd>E</kbd> to go inside. Press <kbd>Q</kbd> to climb back out.</p>
-        <button id="start-btn" disabled>Explore</button>
-        <div id="loading">loading objects…</div>
-        <p class="small">Objects: <a href="https://github.com/Sandflow-ai/sand3d" target="_blank" rel="noopener">sand3d</a> programs from <a href="https://huggingface.co/datasets/Sandflow/sand3d-objaverse" target="_blank" rel="noopener">sand3d-objaverse</a> (CC BY 4.0) · <a href="#" id="credits-link">full credits</a></p>
+      <div class="card wide">
+        <h1>sand3d World &amp; Museum</h1>
+        <p>Sandflow open-sourced 100,000+ 3D objects, each one a short program. Walk among them.</p>
+        <div class="modes">
+          <button data-mode="world" disabled>
+            <b>World</b>
+            <span>New York streets: brownstones, bodegas, cabs, subway entrances. Walk into any shop and every product is a sand3d object. Shrink into anything to find another world inside.</span>
+          </button>
+          <button data-mode="museum" disabled>
+            <b>Museum</b>
+            <span>An atrium with six wings. Every room is a group of similar objects in glass cases, and every doorway leads to more rooms like it, generated as you walk. <i id="museum-count"></i> objects.</span>
+          </button>
+        </div>
+        <button data-mode="resume" class="resume">Resume</button>
+        <div id="loading">loading the catalogue…</div>
+        <p class="small">Objects stream from <a href="https://github.com/Sandflow-ai/sand3d" target="_blank" rel="noopener">sand3d</a>'s datasets on <a href="https://huggingface.co/collections/Sandflow/sand3d-6aec268fbdcd3bc174236168" target="_blank" rel="noopener">Hugging Face</a> (CC BY 4.0) · <a href="#" id="credits-link">credits</a></p>
       </div>
     </div>
+    <div id="info"></div>
     <div id="credits">
       <div class="card">
         <button id="credits-close">×</button>
