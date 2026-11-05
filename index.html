@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Fractal World</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div id="crumbs"></div>
+      <div id="depth"></div>
+      <div id="crosshair"></div>
+      <div id="prompt"><kbd>E</kbd><div><div id="prompt-label"></div><div id="prompt-sub"></div></div></div>
+      <div id="toast"></div>
+      <div id="help"><kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>E</kbd> enter · <kbd>Q</kbd> back out · <kbd>C</kbd> credits</div>
+    </div>
+    <div id="touch"><button id="t-back">Back</button><button id="t-enter">Enter</button></div>
+    <div id="fade"></div>
+    <div id="start">
+      <div class="card">
+        <h1>Fractal World</h1>
+        <p>Every building has rooms. Every room has things. Every thing has a world inside it, and so on, forever.</p>
+        <p class="small">Walk up to any door, object, vehicle or painting and press <kbd>E</kbd> to go inside. Press <kbd>Q</kbd> to climb back out.</p>
+        <button id="start-btn" disabled>Explore</button>
+        <div id="loading">loading objects…</div>
+        <p class="small">Objects: <a href="https://github.com/Sandflow-ai/sand3d" target="_blank" rel="noopener">sand3d</a> programs from <a href="https://huggingface.co/datasets/Sandflow/sand3d-objaverse" target="_blank" rel="noopener">sand3d-objaverse</a> (CC BY 4.0) · <a href="#" id="credits-link">full credits</a></p>
+      </div>
+    </div>
+    <div id="credits">
+      <div class="card">
+        <button id="credits-close">×</button>
+        <h2>Credits</h2>
+        <p class="small">Every object is a <a href="https://github.com/Sandflow-ai/sand3d" target="_blank" rel="noopener">sand3d</a> program by <a href="https://sandflow.ai/sand3d/" target="_blank" rel="noopener">Sandflow</a>, released in <a href="https://huggingface.co/datasets/Sandflow/sand3d-objaverse" target="_blank" rel="noopener">sand3d-objaverse</a> under CC BY 4.0, rebuilding an Objaverse model by its original author (listed below). Modified: converted from OpenUSD to glTF.</p>
+        <ul id="credits-list"></ul>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

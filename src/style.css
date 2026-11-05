@@ -1,0 +1,85 @@
+:root {
+  --ink: #fff;
+  --panel: rgba(14, 14, 20, 0.62);
+  --accent: #ffe58a;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink); }
+#app canvas { display: block; }
+kbd {
+  display: inline-block; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,.4);
+  background: rgba(255,255,255,.12); font: 600 12px ui-monospace, monospace;
+}
+a { color: var(--accent); }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#crumbs {
+  position: absolute; top: 12px; left: 12px; right: 220px; display: flex; flex-wrap: wrap; gap: 4px; font-size: 13px;
+}
+#crumbs span { background: var(--panel); padding: 4px 9px; border-radius: 999px; opacity: .75; backdrop-filter: blur(6px); }
+#crumbs span + span::before { content: '›'; margin-right: 6px; opacity: .6; }
+#crumbs span.here { opacity: 1; background: rgba(30, 26, 10, .75); color: var(--accent); }
+#depth {
+  position: absolute; top: 12px; right: 12px; background: var(--panel); padding: 8px 12px; border-radius: 10px;
+  font-size: 12px; text-align: right; display: flex; flex-direction: column; gap: 2px; backdrop-filter: blur(6px);
+}
+#depth b { font-size: 15px; color: var(--accent); }
+#crosshair {
+  position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
+  background: rgba(255,255,255,.9); box-shadow: 0 0 0 1.5px rgba(0,0,0,.4);
+}
+#prompt {
+  position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%) translateY(6px); opacity: 0;
+  transition: opacity .15s, transform .15s; background: var(--panel); padding: 9px 14px; border-radius: 10px;
+  display: flex; gap: 10px; align-items: center; max-width: min(560px, 90vw); backdrop-filter: blur(6px);
+}
+#prompt.show { opacity: 1; transform: translateX(-50%); }
+#prompt kbd { font-size: 15px; padding: 3px 9px; color: var(--accent); border-color: var(--accent); }
+#prompt-label { font-weight: 650; font-size: 15px; }
+#prompt-sub { font-size: 12px; opacity: .7; margin-top: 2px; }
+#toast {
+  position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); background: var(--panel); padding: 10px 16px;
+  border-radius: 10px; opacity: 0; transition: opacity .4s; font-size: 14px; max-width: 90vw; text-align: center;
+}
+#toast.show { opacity: 1; }
+#help {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 12px; opacity: .75;
+  background: var(--panel); padding: 6px 12px; border-radius: 999px; white-space: nowrap;
+}
+#fade { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+#start, #credits {
+  position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, rgba(20,16,30,.55), rgba(0,0,0,.8));
+  padding: 16px;
+}
+#start.hidden, #loading.hidden { display: none; }
+.card {
+  background: rgba(18, 18, 26, .9); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 28px 30px;
+  max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.5); position: relative;
+}
+.card h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -.02em; }
+.card h2 { margin: 0 0 8px; }
+.card p { line-height: 1.5; opacity: .9; }
+.small { font-size: 13px; opacity: .7 !important; }
+#start-btn {
+  margin-top: 8px; font: 650 17px inherit; font-family: inherit; padding: 12px 26px; border-radius: 10px; border: 0; cursor: pointer;
+  background: var(--accent); color: #1a1406;
+}
+#start-btn:disabled { opacity: .5; cursor: wait; }
+#loading { font-size: 12px; opacity: .6; margin-top: 8px; }
+#credits { display: none; }
+#credits.show { display: grid; }
+#credits .card { max-width: 760px; max-height: 86vh; overflow: auto; }
+#credits-list { font-size: 12px; line-height: 1.6; padding-left: 18px; }
+#credits-close { position: absolute; top: 10px; right: 14px; background: none; border: 0; color: #fff; font-size: 26px; cursor: pointer; }
+#touch { display: none; }
+#touch.on { display: flex; position: fixed; right: 16px; bottom: 56px; gap: 10px; }
+#touch button {
+  font: 650 16px system-ui; padding: 16px 20px; border-radius: 50px; border: 1px solid rgba(255,255,255,.4);
+  background: rgba(0,0,0,.45); color: #fff;
+}
+@media (max-width: 640px) {
+  #help { display: none; }
+  #crumbs { right: 12px; top: 64px; font-size: 11px; }
+  .card { padding: 22px 20px; }
+  .card h1 { font-size: 28px; }
+}
