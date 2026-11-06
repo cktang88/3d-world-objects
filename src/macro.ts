@@ -8,6 +8,7 @@ import { mat } from './build';
 import { Kit } from './rooms/kit';
 import { cabinetContents } from './rooms/contents';
 import { signTex } from './textures';
+import { M } from './rooms/mats';
 
 /**
  * Shrinking into an object (E on a small thing) builds a world *from that object*, at the scale the
@@ -137,6 +138,77 @@ function ring(cols: Rect[], R: number, n = 24, t = 1.5) {
   }
 }
 
+// ---------------------------------------------------------------- circuit textures
+
+/** solder mask with silkscreen outlines, reference designators and vias; one repeat = `pitch` metres */
+function pcbMaterial(seed: number, pitch: number) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d')!;
+  const r = new Rng(hashN(seed, 77));
+  g.fillStyle = '#1f5c3b';
+  g.fillRect(0, 0, 512, 512);
+  // faint glass-weave in the mask
+  g.fillStyle = 'rgba(0,0,0,0.05)';
+  for (let i = 0; i < 512; i += 8) g.fillRect(i, 0, 2, 512);
+  // silkscreen: component outlines, pin-1 marks, reference designators
+  g.strokeStyle = '#e8eee6';
+  g.fillStyle = '#e8eee6';
+  g.lineWidth = 3;
+  g.font = 'bold 22px monospace';
+  for (let i = 0; i < 10; i++) {
+    const x = r.range(20, 400), y = r.range(30, 440), w = r.range(40, 110), h = r.range(24, 70);
+    g.strokeRect(x, y, w, h);
+    g.beginPath();
+    g.arc(x + 8, y + 8, 3, 0, Math.PI * 2);
+    g.fill();
+    g.fillText(r.pick(['R', 'C', 'U', 'D', 'Q', 'L', 'J']) + r.int(1, 48), x, y - 6);
+  }
+  // vias: gold rings with a dark hole
+  for (let i = 0; i < 40; i++) {
+    const x = r.range(0, 512), y = r.range(0, 512);
+    g.fillStyle = '#c8a050';
+    g.beginPath();
+    g.arc(x, y, 6, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#1a1208';
+    g.beginPath();
+    g.arc(x, y, 2.5, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1 / (pitch * 2), 1 / (pitch * 2));
+  t.anisotropy = 8;
+  // solder mask is glossy over the copper
+  return new THREE.MeshPhysicalMaterial({ map: t, roughness: 0.45, clearcoat: 0.7, clearcoatRoughness: 0.25 });
+}
+const chipLabels = new Map<string, THREE.Material>();
+/** a chip's laser-etched part number */
+function chipLabel(text: string) {
+  let m = chipLabels.get(text);
+  if (!m) {
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#161616';
+    g.fillRect(0, 0, 512, 128);
+    g.fillStyle = '#b8bcc0';
+    g.font = 'bold 64px monospace';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, 256, 52, 490);
+    g.font = '28px monospace';
+    g.fillText('2219 · ' + ((text.length * 7919) % 9000 + 1000), 256, 106);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    chipLabels.set(text, (m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 })));
+  }
+  return m;
+}
+
 // ---------------------------------------------------------------- the level
 
 export class MacroLevel implements Level {
@@ -153,6 +225,18 @@ export class MacroLevel implements Level {
   private cols: Rect[] = [];
   private ports: Portal[] = [];
   private ants: { o: THREE.Object3D; a: number; r: number; v: number }[] = [];
+  /** dust motes drifting in the light (garden) */
+  private motes: THREE.Points | null = null;
+  /** the object's own model, loading, whose material the vessel walls take (vessel) */
+  private skin: { obj: THREE.Object3D; wall: THREE.MeshStandardMaterial; done: boolean } | null = null;
+  private clock = 0;
+  /** first view: face the most striking thing (x, z, height to look at) */
+  focus = new THREE.Vector3();
+  private face(x: number, z: number, y = 2) {
+    const s = this.spawn.pos;
+    this.spawn.yaw = Math.atan2(-(x - s.x), -(z - s.z));
+    this.focus.set(x, y, z);
+  }
   private r: Rng;
 
   constructor(public desc: MacroDesc, opts: { staged?: boolean } = {}) {
@@ -189,6 +273,14 @@ export class MacroLevel implements Level {
     return this.ports;
   }
   update(dt: number) {
+    this.clock += dt;
+    if (this.motes) {
+      const p = this.motes.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const t = this.clock;
+      for (let i = 0; i < p.count; i++) p.setY(i, ((p.getY(i) + dt * 0.15) % 30) + Math.sin(t + i) * 0.002);
+      p.needsUpdate = true;
+    }
+    if (this.skin && !this.skin.done) this.takeSkin();
     for (const a of this.ants) {
       a.a += (a.v * dt) / a.r;
       a.o.position.set(Math.cos(a.a) * a.r, 0, Math.sin(a.a) * a.r);
@@ -238,35 +330,87 @@ export class MacroLevel implements Level {
     // (most 'plant' models are the planter itself: its rim is the wall above, in its own colour; the
     // model is not placed — its own soil or handles would be a ceiling over your head at this scale)
     const e = this.desc.source;
-    // what grows in it: seedlings 3-9 cm tall, their stems as trunks, their leaves as canopies
+    // what grows in it: a mix of seedlings 3-12 cm tall (fern fronds, clover, grass tufts, broad-leaved
+    // sprouts), their stems as trunks and their leaves as canopies: leaf cards with a leaf texture
     const pk = new Kit();
     const green = new THREE.Color(ownColour(e, '#4f7a3a'));
     if (green.g < green.r || green.g < 0.25) green.set('#4f7a3a');
     const stemM = mat('#6f8a3a', { rough: 0.7 });
+    const leafCard = M.leaf();
     const leafM = mat('#' + green.getHexString(), { rough: 0.55 });
-    const n = r.int(3, 6);
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + r.range(-0.3, 0.3), d = r.range(0.15, 0.55) * R;
-      const x = Math.cos(a) * d, z = Math.sin(a) * d;
-      if (Math.hypot(x, z - R * 0.55) < 3) continue;
-      const h = r.range(0.03, 0.09) * k, rr = r.range(0.0008, 0.0015) * k;
-      // a stem leaning a little, in three segments, a canopy of leaves at the top
+    const grassM = mat('#7a9a3a', { rough: 0.6 });
+    let tallest = { x: 0, z: -R * 0.3, h: 0 };
+    const stem = (x: number, z: number, h: number, rr: number, lean: number, tilt: number) => {
       let px = x, pz = z, py = 0;
-      const lean = r.range(0, Math.PI * 2), tilt = r.range(0.05, 0.25);
       for (let sgm = 0; sgm < 3; sgm++) {
         const len = h / 3;
         const dx = Math.cos(lean) * Math.sin(tilt * (sgm + 1)) * len, dz = Math.sin(lean) * Math.sin(tilt * (sgm + 1)) * len;
-        const mx = px + dx / 2, mz = pz + dz / 2;
-        pk.boxM(stemM, rr * 2, len * 1.05, rr * 2, mx, py + len / 2, mz, new THREE.Euler(Math.atan2(dz, len) , 0, -Math.atan2(dx, len)));
+        pk.boxM(stemM, rr * 2 * (1 - sgm * 0.2), len * 1.05, rr * 2 * (1 - sgm * 0.2), px + dx / 2, py + len / 2, pz + dz / 2, new THREE.Euler(Math.atan2(dz, len), 0, -Math.atan2(dx, len)));
         px += dx; pz += dz; py += len * Math.cos(tilt * (sgm + 1));
       }
-      for (let l = 0; l < 5; l++) {
-        const la = (l / 5) * Math.PI * 2 + r.range(0, 1), lr = h * r.range(0.18, 0.3);
-        pk.at(px + Math.cos(la) * lr * 0.7, py - lr * 0.15, pz + Math.sin(la) * lr * 0.7, -la, () => pk.sphere(leafM, lr * 0.55, 0, 0, 0, 0.12));
+      return [px, py, pz];
+    };
+    const n = r.int(6, 10);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r.range(-0.3, 0.3), d = r.range(0.12, 0.7) * R;
+      const x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if (Math.hypot(x, z - R * 0.55) < 3) continue;
+      const kind = i % 4;
+      const h = (kind === 2 ? r.range(0.02, 0.05) : r.range(0.04, 0.12)) * k, rr = r.range(0.0008, 0.0016) * k;
+      if (h > tallest.h && Math.hypot(x, z - R * 0.55) > R * 0.25) tallest = { x, z, h };
+      if (kind === 0) {
+        // fern: an arching stem with fronds of leaf cards along it
+        const [tx, ty, tz] = stem(x, z, h * 0.7, rr, r.range(0, 6.28), r.range(0.1, 0.25));
+        for (let f = 0; f < 7; f++) {
+          const fa = (f / 7) * Math.PI * 2, fl = h * r.range(0.35, 0.5);
+          pk.at(tx, ty - fl * 0.1, tz, fa, () => {
+            for (let q = 0; q < 5; q++) pk.boxM(leafCard, fl * 0.32, 0.002, fl * 0.2, 0, -q * fl * 0.05, -(q + 0.5) * fl * 0.2, new THREE.Euler(0.15 + q * 0.12, 0, 0));
+          });
+        }
+      } else if (kind === 1) {
+        // clover: thin stalks, three round leaflets each
+        for (let c = 0; c < 3; c++) {
+          const ox = x + r.range(-1, 1) * h * 0.2, oz = z + r.range(-1, 1) * h * 0.2;
+          const [tx, ty, tz] = stem(ox, oz, h * r.range(0.6, 1), rr * 0.6, r.range(0, 6.28), r.range(0.05, 0.15));
+          for (let l = 0; l < 3; l++) {
+            const la = (l / 3) * Math.PI * 2;
+            pk.sphere(leafM, h * 0.14, tx + Math.cos(la) * h * 0.12, ty, tz + Math.sin(la) * h * 0.12, 0.1);
+          }
+        }
+      } else if (kind === 2) {
+        // grass tuft: tapering blades fanning out
+        for (let b = 0; b < 9; b++) {
+          const ba = r.range(0, 6.28), bt = r.range(0.1, 0.45);
+          pk.boxM(grassM, rr * 2.5, h, rr * 0.4, x + Math.cos(ba) * h * 0.15, h / 2, z + Math.sin(ba) * h * 0.15, new THREE.Euler(Math.sin(ba) * bt, ba, Math.cos(ba) * bt));
+        }
+      } else {
+        // broad-leaved sprout: a stem, two seed leaves and true leaves as leaf cards
+        const [tx, ty, tz] = stem(x, z, h, rr, r.range(0, 6.28), r.range(0.05, 0.2));
+        for (let l = 0; l < 6; l++) {
+          const la = (l / 6) * Math.PI * 2 + r.range(0, 0.5), lr = h * r.range(0.25, 0.4);
+          pk.at(tx, ty - lr * 0.1, tz, la, () => pk.boxM(l < 2 ? leafM : leafCard, lr * 0.7, 0.002, lr, 0, 0, -lr * 0.5, new THREE.Euler(0.35, 0, 0)));
+        }
       }
       this.cols.push({ minX: x - rr * 2, maxX: x + rr * 2, minZ: z - rr * 2, maxZ: z + rr * 2 });
     }
     pk.finish(g);
+    this.face(tallest.x, tallest.z, Math.min(3, tallest.h * 0.3));
+    // a shaft of window light falling into the pot, and dust motes drifting in it
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(R * 0.05, R * 0.25, 0.06 * k, 24, 1, true),
+      new THREE.MeshBasicMaterial({ color: '#fff1d0', transparent: true, opacity: 0.035, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }),
+    );
+    shaft.userData.owned = true;
+    shaft.position.set(tallest.x * 0.5, 0.03 * k, tallest.z * 0.5);
+    shaft.rotation.z = 0.25;
+    g.add(shaft);
+    const mp: number[] = [];
+    for (let i = 0; i < 400; i++) mp.push(r.range(-R, R) * 0.6 + tallest.x * 0.4, r.range(0.5, 30), r.range(-R, R) * 0.6 + tallest.z * 0.4);
+    const mg = new THREE.BufferGeometry();
+    mg.setAttribute('position', new THREE.Float32BufferAttribute(mp, 3));
+    this.motes = new THREE.Points(mg, new THREE.PointsMaterial({ color: '#fff4dc', size: 0.06, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.motes.userData.owned = true;
+    g.add(this.motes);
     yield;
     // soil grains (0.2-1 mm), perlite (white, 2-4 mm), pebbles (5-12 mm), moss cushions
     const inDisc = () => { const a = r.range(0, Math.PI * 2), d = Math.sqrt(r.next()) * R; return [Math.cos(a) * d, Math.sin(a) * d]; };
@@ -308,13 +452,20 @@ export class MacroLevel implements Level {
     const col = ownColour(e, r.pick(['#d8d2c4', '#8a6a4a', '#5a7a9a', '#c9c4bc']));
     const round = e ? Math.abs(e.size[0] - e.size[2]) / Math.max(e.size[0], e.size[2]) < 0.2 : true;
     const H = Math.max(8, (e ? e.size[1] / Math.max(...e.size) : 1) * this.desc.sourceScale * k);
-    const wall = round ? inner(col, 0.45) : mat(col, { rough: 0.45, metal: 0.05 });
+    // the walls take the object's own material once its model has loaded (takeSkin); its colour until then
+    const wall = new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, side: round ? THREE.BackSide : THREE.FrontSide });
+    if (e) {
+      const sp = spawn(e, 1);
+      this.skin = { obj: sp.obj, wall, done: false };
+    }
     const floorM = mat(new THREE.Color(col).multiplyScalar(0.8).getStyle(), { rough: 0.6 });
     const kit = new Kit();
     if (round) {
       kit.cyl(floorM, R + 1, R + 1, 0.3, 0, -0.3, 0, 48);
       kit.cyl(wall, R + 1.2, R + 1.2, H, 0, -0.3, 0, 48, true);
       kit.cyl(wall, R + 1.6, R + 1.6, 0.4, 0, H - 0.4, 0, 48, true);
+      // the rim catching the light: a bright curved edge high above
+      kit.unshadowed(() => kit.cyl(mat('#fff2dc', { emissive: '#fff2dc', ei: 1.6 }), R + 1.25, R + 1.25, 0.25, 0, H - 0.6, 0, 48, true));
     } else {
       const s = R * 2 + 2;
       kit.box(floorM, s, 0.3, s, 0, -0.3, 0);
@@ -325,11 +476,13 @@ export class MacroLevel implements Level {
     // what is in it, at the new scale
     if (e?.role === 'storage') {
       // a cabinet's lazy contents (rooms/contents.ts), scaled by k: tins and boxes the size of houses
+      // (contents laid out for a 0.8 m cabinet, scaled to fill this one's floor)
       const c = cabinetContents(this.desc.seed, 0.8, 0.9, 0.5);
-      c.scale.setScalar(k * 0.9);
-      c.position.set(0, 0, -R * 0.2);
+      const cs = (R * 1.5) / 0.8;
+      c.scale.setScalar(cs);
+      c.position.set(0, -0.13 * cs, -R * 0.2 + 0.25 * cs); // its lower shelf is the floor you stand on
       g.add(c);
-      this.cols.push({ minX: -0.4 * k * 0.9, maxX: 0.4 * k * 0.9, minZ: -R * 0.2 - 0.5 * k * 0.9, maxZ: -R * 0.2 });
+      this.cols.push({ minX: -0.4 * cs, maxX: 0.4 * cs, minZ: -R * 0.2 - 0.25 * cs, maxZ: -R * 0.2 + 0.25 * cs });
     } else {
       // coins (24 mm), buttons (15 mm), crumbs, a paper clip's worth of wire, dust
       const inDisc = (m = 0.9) => { const a = r.range(0, Math.PI * 2), d = Math.sqrt(r.next()) * R * m; return [Math.cos(a) * d, Math.sin(a) * d]; };
@@ -338,6 +491,32 @@ export class MacroLevel implements Level {
       scatter(g, unitIco, mat('#d8c8a8', { rough: 0.9 }), 400, () => { const [x, z] = inDisc(0.98); const s = r.range(0.0003, 0.0015) * k; return [x, 0, z, s, s * 0.6, s, r.range(0, 6)]; });
     }
     this.spawn.pos.set(0, 0, R * 0.6);
+    // look across the floor at what is in it, the wall and its lit rim beyond
+    this.face(0, -R * 0.2, Math.min(4, H * 0.15));
+  }
+
+  /** vessel walls: the object's own material (map, colour, roughness) once its model is in */
+  private takeSkin() {
+    const sk = this.skin!;
+    let src: THREE.MeshStandardMaterial | null = null;
+    sk.obj.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!src && m && (m as THREE.MeshStandardMaterial).isMeshStandardMaterial) src = m;
+    });
+    if (!src) return;
+    const m = src as THREE.MeshStandardMaterial;
+    sk.done = true;
+    sk.wall.color.copy(m.color);
+    sk.wall.roughness = m.roughness;
+    sk.wall.metalness = m.metalness;
+    if (m.map) {
+      const t = m.map.clone();
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(6, 2);
+      t.needsUpdate = true;
+      sk.wall.map = t;
+      sk.wall.needsUpdate = true;
+    }
   }
 
   // ------------------------------------------------------------ a circuit board
@@ -345,7 +524,7 @@ export class MacroLevel implements Level {
   private *circuit() {
     const R = this.radius, r = this.r, k = this.k, g = this.group;
     const kit = new Kit();
-    const pcb = mat('#1e5a3a', { rough: 0.45 });
+    const pcb = pcbMaterial(this.desc.seed, Math.max(6, 0.00254 * k * 3));
     const copper = mat('#c8964a', { rough: 0.35, metal: 0.8 });
     const solder = mat('#c9ccce', { rough: 0.3, metal: 0.9 });
     kit.box(pcb, R * 2.4, 0.2, R * 2.4, 0, -0.2, 0);
@@ -384,7 +563,40 @@ export class MacroLevel implements Level {
           leds.push(new THREE.Vector3(bx, 0, bz));
         }
       }
+    // the big ICs: packages the size of blocks with their part number on top, legible from the street
+    const labels = ['ATMEGA328P', 'STM32F407', 'ESP32-S3', 'LM358N', 'NE555P', '74HC595'];
+    const big: [number, number][] = [];
+    for (let i = 0; i < 6; i++) {
+      const bx = r.range(-R * 0.6, R * 0.6), bz = r.range(-R * 0.7, R * 0.15);
+      const w = 0.007 * k, d = 0.007 * k, h = Math.max(1.2, 0.0012 * k);
+      kit.box(chip, w, h, d, bx, 0, bz);
+      for (let p = 0; p < 10; p++) for (const sx of [-1, 1]) {
+        kit.box(solder, 0.35, h * 0.35, 1.1, bx - w / 2 + (p + 0.5) * (w / 10), 0, bz + sx * (d / 2 + 0.55));
+        kit.box(solder, 1.1, h * 0.35, 0.35, bx + sx * (w / 2 + 0.55), 0, bz - d / 2 + (p + 0.5) * (d / 10));
+      }
+      kit.flat(chipLabel(labels[i % labels.length]), w * 0.85, w * 0.21, bx, h + 0.01, bz, 'keep');
+      kit.sphere(mat('#444444', { rough: 0.4 }), w * 0.04, bx - w * 0.38, h, bz - d * 0.38, 0.2);
+      this.cols.push({ minX: bx - w / 2 - 1.2, maxX: bx + w / 2 + 1.2, minZ: bz - d / 2 - 1.2, maxZ: bz + d / 2 + 1.2 });
+      big.push([bx, bz]);
+    }
+    // heat sinks: aluminium fin towers, the skyscrapers of the board
+    const alu = mat('#c9ccd0', { rough: 0.35, metal: 0.85 });
+    let tower = { x: 0, z: -R * 0.5, h: 0 };
+    for (let i = 0; i < 3; i++) {
+      const hx = r.range(-R * 0.5, R * 0.5), hz = -R * r.range(0.2, 0.8);
+      const hw = 0.012 * k, hh = 0.02 * k * r.range(0.7, 1.3);
+      kit.box(alu, hw, hh * 0.08, hw, hx, 0, hz);
+      const fins = 14;
+      for (let f = 0; f < fins; f++) kit.box(alu, hw, hh, hw * 0.02, hx, 0, hz - hw / 2 + (f + 0.5) * (hw / fins));
+      this.cols.push({ minX: hx - hw / 2, maxX: hx + hw / 2, minZ: hz - hw / 2, maxZ: hz + hw / 2 });
+      if (hh > tower.h) tower = { x: hx, z: hz, h: hh };
+    }
+    // the device's own housing far around, in its colour: the walls of this city
+    const housing = new THREE.MeshStandardMaterial({ color: ownColour(this.desc.source, '#2a2c30'), roughness: 0.5, side: THREE.BackSide });
+    kit.cyl(housing, R * 1.35, R * 1.35, R * 0.9, 0, -0.2, 0, 32, true);
     kit.finish(g);
+    this.face(tower.x, tower.z, tower.h * 0.5);
+    void big;
     yield;
     // LEDs: lit domes on the board, and a chip label or two
     const ledM = mat('#ff4030', { emissive: '#ff3020', ei: 2.4 });
