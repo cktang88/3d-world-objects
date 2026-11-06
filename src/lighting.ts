@@ -51,8 +51,8 @@ interface Preset {
 
 export const PRESETS: Record<TimeOfDay, Preset> = {
   day: {
-    label: 'Day', hdri: 'docklands_02', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 5.2,
-    sky: 0.9, clampMul: 12, exposure: 0.62, fog: 0.0016, night: 0, lit: 0.04, wet: 0,
+    label: 'Day', hdri: 'docklands_02', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 6,
+    sky: 0.6, clampMul: 12, exposure: 0.62, fog: 0.0012, night: 0, lit: 0.04, wet: 0,
     bloom: { strength: 0.12, radius: 0.4, threshold: 3.0 },
     grade: { gain: '#fffaf4', lift: '#04060a', sat: 1.04, contrast: 1.04, vignette: 0.22 },
   },
@@ -64,14 +64,14 @@ export const PRESETS: Record<TimeOfDay, Preset> = {
   },
   dusk: {
     label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: false, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
-    sky: 0.12, clampMul: 30, exposure: 1.35, fog: 0.0026, fogTint: '#6f7fa8', night: 0.75, lit: 0.42, wet: 0.35,
+    sky: 0.12, clampMul: 30, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.42, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
   },
   night: {
     label: 'Night', hdri: 'shanghai_bund', align: false, sunAz: 140, sunElev: 50, sunColor: '#8ea4d6', sunIntensity: 0.12,
-    sky: 0.025, clampMul: 400, exposure: 1.7, fog: 0.0032, fogTint: '#2a2a3a', night: 1, lit: 0.5, wet: 0.8,
-    bloom: { strength: 0.7, radius: 0.6, threshold: 0.7 },
+    sky: 0.025, clampMul: 400, exposure: 1.35, fog: 0.0022, fogTint: '#2a2a3a', night: 1, lit: 0.5, wet: 0.8,
+    bloom: { strength: 0.5, radius: 0.5, threshold: 0.8 },
     grade: { gain: '#fbfaff', lift: '#050712', sat: 1.12, contrast: 1.08, vignette: 0.38 },
   },
 };
@@ -599,7 +599,7 @@ export class Lighting {
     this.sky.visible = false;
     // atmospheric perspective: fog takes the colour of the HDRI's own horizon
     const fc = h.horizon.clone().multiplyScalar(scale);
-    if (p.fogTint) fc.lerp(new THREE.Color(p.fogTint).multiplyScalar(p.sky * 1.2), 0.5);
+    if (p.fogTint) fc.lerp(new THREE.Color(p.fogTint).multiplyScalar(p.sky * 1.2), 0.8);
     this.scene.fog = new THREE.FogExp2(fc, p.fog);
   }
 
@@ -647,7 +647,7 @@ export class Lighting {
     U.lit.value = lit;
     U.wet.value = wet;
     for (const l of this.lamps) l.intensity = 0;
-    (this.pools.material as THREE.MeshBasicMaterial).opacity = Math.min(1, n * 1.1);
+    (this.pools.material as THREE.MeshBasicMaterial).opacity = 0.7 * n;
     this.pools.visible = n > 0.05;
     for (const fn of listeners) fn(tod, n);
   }
@@ -770,7 +770,7 @@ export class Lighting {
     for (const mk of found) {
       if (n >= this.pools.instanceMatrix.count) break;
       mk.getWorldPosition(v);
-      mtx.makeScale(15, 1, 15).setPosition(v.x, 0.02, v.z);
+      mtx.makeScale(11, 1, 11).setPosition(v.x, 0.02, v.z);
       this.pools.setMatrixAt(n++, mtx);
     }
     this.pools.count = n;
@@ -784,7 +784,7 @@ export class Lighting {
       return { p: v.clone(), d: v.distanceToSquared(focus) };
     });
     list.sort((a, b) => a.d - b.d);
-    const I = 160 * night;
+    const I = 70 * night;
     this.lamps.forEach((l, i) => {
       const it = list[i];
       if (!it) {
