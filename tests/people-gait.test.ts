@@ -110,3 +110,11 @@ test('proportions: adults spread like real ones (NHANES), heads in proportion', 
   // the head: skull base (atlas) to the crown is 0.17-0.20 m on an adult, + hair or a hat
   between(C.m, 0.16, 0.27, 'skull base to crown');
 });
+
+test('a pushed stroller stands on the ground (its wheels were 8 cm in the air)', async () => {
+  const { strollerGeo } = await import('../src/nyc/peopleProps');
+  const g = strollerGeo('#2a2c30');
+  g.computeBoundingBox();
+  // held at the handlebar 1.0 m up (people.ts), the wheels' bottom is at y = 1.0 + min.y
+  between(1.0 + g.boundingBox!.min.y, -0.01, 0.01, 'stroller wheels above the ground (m)');
+});

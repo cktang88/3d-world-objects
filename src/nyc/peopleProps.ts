@@ -67,16 +67,17 @@ export function strollerGeo(fabric: string) {
       g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
       parts.push(paint(g, frame));
     };
+    // the handlebar is the origin, held 1.0 m up (people.ts): the wheels (r 0.085) stand on the ground at -1.0
     tube(-0.24, 0, 0, 0.24, 0, 0, 0.016); // handlebar
     for (const s of [-1, 1]) {
-      tube(s * 0.22, 0, 0, s * 0.22, -0.82, 0.32); // rear legs
-      tube(s * 0.22, -0.45, 0.17, s * 0.2, -0.82, 0.78); // front legs
+      tube(s * 0.22, 0, 0, s * 0.22, -0.9, 0.34); // rear legs
+      tube(s * 0.22, -0.48, 0.18, s * 0.2, -0.9, 0.8); // front legs
     }
     // seat bucket and hood
     parts.push(paint(xf(new RoundedBoxGeometry(0.4, 0.26, 0.5, 2, 0.06), 0, -0.47, 0.5, -0.15), fabric));
     parts.push(paint(xf(new THREE.SphereGeometry(0.22, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0, -0.38, 0.32, -0.6, 0, 0, 1, 0.9, 1.2), fabric));
-    for (const [x, z] of [[-0.22, 0.32], [0.22, 0.32], [-0.2, 0.78], [0.2, 0.78]])
-      parts.push(paint(xf(new THREE.CylinderGeometry(0.085, 0.085, 0.035, 14), x, -0.83, z, 0, 0, Math.PI / 2), '#101010'));
+    for (const [x, z] of [[-0.22, 0.34], [0.22, 0.34], [-0.2, 0.8], [0.2, 0.8]])
+      parts.push(paint(xf(new THREE.CylinderGeometry(0.085, 0.085, 0.035, 14), x, -0.915, z, 0, 0, Math.PI / 2), '#101010'));
     return mergeGeometries(parts)!;
   });
 }
