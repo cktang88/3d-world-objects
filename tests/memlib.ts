@@ -64,7 +64,9 @@ interface Cycle { counts: MemCounts; heap: number; alive: number; refs: number; 
  * Run `cycle` n times. It returns the WeakRefs that must be collectable once it is over.
  * Baseline: after the first cycle (session caches warm up there). Asserts no growth after it.
  */
-export async function cycles(name: string, n: number, cycle: (i: number) => Promise<WeakRef<object>[]> | WeakRef<object>[], tol = { res: 2, heapMB: 6 }) {
+/** opts.strict: every evicted object must be collected within its own cycle (nothing may wait on a load) */
+export async function cycles(name: string, n: number, cycle: (i: number) => Promise<WeakRef<object>[]> | WeakRef<object>[], tol = { res: 2, heapMB: 6 }, opts: { strict?: boolean } = {}) {
+  tol ??= { res: 2, heapMB: 6 };
   const rows: Cycle[] = [];
   let prev: WeakRef<object>[] = [];
   let shownPath = false;
@@ -102,6 +104,7 @@ export async function cycles(name: string, n: number, cycle: (i: number) => Prom
   const survivors = every.filter((r) => r.deref()).length;
   console.log(`   ${name}: of ${every.length} sampled evicted objects ${survivors} survive the end; late by a cycle in ${rows.filter((r) => r.stale).length} of ${n} cycles`);
   expect(survivors === 0, `${name}: ${survivors} evicted objects are never collected`);
+  if (opts.strict) for (const [i, r] of rows.entries()) expect(r.alive === 0, `${name}: ${r.alive} of ${r.refs} objects evicted in cycle ${i + 1} still reachable right after it`);
   const late = rows.filter((r) => r.stale).length;
   expect(late <= n / 3, `${name}: evicted objects outlive the next cycle in ${late} of ${n} cycles`);
   // heap: median of the last three vs the second cycle (gc noise allowed)

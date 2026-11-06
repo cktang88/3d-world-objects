@@ -3,7 +3,7 @@ import type { ParsedObject, JointDef } from './usda/parse';
 import { kindOf, enhance, glassFrom, enhanceTree } from './materials';
 import { gltf } from './detail';
 import { checkSize } from './rebuiltCheck';
-import { CopyTracker, disposeObject } from './dispose';
+import { ABORTED, CopyTracker, disposeObject } from './dispose';
 
 /** One object anywhere in the sand3d release, streamed from Hugging Face on demand. */
 export interface RemoteEntry {
@@ -106,7 +106,7 @@ function loadParsed(e: RemoteEntry, prio: number, signal?: AbortSignal): Promise
   return wanted(p, signal, e.id, q);
 }
 
-const aborted = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+const aborted = () => ABORTED; // shared: see dispose.ts
 /**
  * [memory] p for one caller that may give up (signal): an aborted caller is rejected at once (its
  * continuation, which may hold a whole evicted level, is released), and a queued parse nobody wants

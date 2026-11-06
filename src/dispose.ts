@@ -243,3 +243,33 @@ export class WeakList<T extends object> implements Iterable<T> {
     if (dead > 32 && dead > this.refs.length / 4) this.prune();
   }
 }
+
+/**
+ * p for a caller that may go away: settles with `gone()` as soon as `signal` aborts, so the
+ * caller's continuation (which may hold a whole disposed level) runs and is released at once
+ * instead of waiting on a shared load. The load itself goes on for its cache.
+ */
+export function untilAborted<T, F>(p: Promise<T>, signal: AbortSignal | undefined, gone: () => F): Promise<T | F> {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.resolve().then(gone);
+  return new Promise<T | F>((res, rej) => {
+    let done = false;
+    const onAbort = () => {
+      if (done) return;
+      done = true;
+      try { res(gone()); } catch (e) { rej(e); }
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then(
+      (v) => { if (!done) { done = true; signal.removeEventListener('abort', onAbort); res(v); } },
+      (e) => { if (!done) { done = true; signal.removeEventListener('abort', onAbort); rej(e); } },
+    );
+  });
+}
+
+/**
+ * The one AbortError used for cancelled loads. A shared one on purpose: an Error made inside
+ * abort() / dispose() keeps that call stack's receivers (the disposed level) alive through its
+ * captured stack trace for as long as anything holds the error, e.g. a rejected promise.
+ */
+export const ABORTED: Error = Object.assign(new Error('cancelled'), { name: 'AbortError' });

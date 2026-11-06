@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { gltf, disposeDeep } from './detail';
-import { addLods } from './meshlod'; // mesh-simplification: LOD chains for heavy scans
+import { addLods } from './meshlod';
+import { ABORTED, untilAborted } from './dispose'; // mesh-simplification: LOD chains for heavy scans
 
 /**
  * Third-party 3D model libraries: catalogs in public/libraries/ (built by
@@ -241,6 +242,8 @@ export interface LoadOptions {
   quality?: 'full' | 'low';
   /** cast/receive shadows (default true) */
   shadows?: boolean;
+  /** the caller is gone (a disposed level): reject at once with an AbortError; the load goes on for the cache */
+  signal?: AbortSignal;
 }
 
 interface Loaded {
@@ -331,6 +334,7 @@ function cacheKey(e: LibraryEntry, o: LoadOptions) {
  * userData: { library: entry, attribution, size: Vector3 }.
  */
 export async function loadLibraryModel(e: LibraryEntry, opts: LoadOptions = {}): Promise<THREE.Group> {
+  if (opts.signal?.aborted) throw ABORTED;
   const key = cacheKey(e, opts);
   let p = modelCache.get(key);
   if (!p) {
@@ -356,7 +360,9 @@ export async function loadLibraryModel(e: LibraryEntry, opts: LoadOptions = {}):
     modelCache.delete(key);
     modelCache.set(key, p); // LRU bump
   }
-  const { scene, box } = await p;
+  const { scene, box } = await untilAborted(p, opts.signal, () => {
+    throw ABORTED;
+  });
   // freed while we waited (trimModels): load it afresh
   if (modelCache.get(key) !== p) return loadLibraryModel(e, opts);
   const raw = box.getSize(new THREE.Vector3());

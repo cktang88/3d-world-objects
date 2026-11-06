@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { untilAborted } from './dispose';
 import { addLods, lodTris } from './meshlod'; // mesh-simplification: screen-space LOD chains for heavy originals
 
 /**
@@ -149,7 +150,9 @@ async function fetchOriginal(id: string, og: number, prio: number, texMax: numbe
  * An original fitted to `fit` (the sand3d object's size in metres, Y-up, base at 0).
  * Resolves null when there is none, it is too big, or originals are off.
  */
-export async function loadOriginal(id: string, og: number | undefined, fit: THREE.Vector3, opts: { prio?: number; texMax?: number } = {}): Promise<THREE.Group | null> {
+export async function loadOriginal(id: string, og: number | undefined, fit: THREE.Vector3, opts: { prio?: number; texMax?: number; signal?: AbortSignal } = {}): Promise<THREE.Group | null> {
+  // opts.signal: the caller is gone (a disposed level): resolve null at once; the fetch goes on for the cache
+  if (opts.signal?.aborted) return null;
   if (!og || !originalsEnabled || !loader || failed.has(id)) return null;
   let p = cache.get(id);
   if (!p) {
@@ -157,7 +160,10 @@ export async function loadOriginal(id: string, og: number | undefined, fit: THRE
     cache.set(id, p);
     trim();
   }
-  const c = await p;
+  const gone = Symbol();
+  const c0 = await untilAborted(p, opts.signal, () => gone);
+  if (c0 === gone) return null;
+  const c = c0 as Cached | null;
   // trimmed (and disposed, its bitmaps closed) while we waited: load it afresh
   if (c && cache.get(id) !== p) return loadOriginal(id, og, fit, opts);
   if (!c || c.tris > MAX_TRIS_EACH) {

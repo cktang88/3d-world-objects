@@ -20,6 +20,12 @@ test('memory: shop enter -> exit 10x through the seamless cache frees the shop',
   let first: Map<string, number> | null = null;
   const { Lazy } = await import('../src/lazy');
   const lazy = new Lazy(), cam = new THREE.PerspectiveCamera();
+  // remote fetches (scanned products, originals) hang like a slow network: the evicted shop must
+  // still be collected at once (ShopLevel.loads aborts them)
+  const gf = globalThis as { fetch: typeof fetch };
+  const realFetch = gf.fetch;
+  gf.fetch = ((u: RequestInfo | URL, o?: RequestInit) => (/^https?:\/\/(?!localhost)/.test(String(u)) ? new Promise<Response>(() => {}) : realFetch(u, o))) as typeof fetch;
+  try {
   await cycles('shop', 10, async (i) => {
     const s = seam.take(desc(1 + (i % 2)));
     seam.setActive(s);
@@ -35,7 +41,10 @@ test('memory: shop enter -> exit 10x through the seamless cache frees the shop',
     // (no wait: its in-flight stock loads are aborted with it, ShopLevel.loads)
     lazy.update(0, cam, other.level); // main.ts runs it every frame: forgets evicted shops' containers
     return refs;
-  });
+  }, undefined as never, { strict: true });
+  } finally {
+    gf.fetch = realFetch;
+  }
   if (first && (first as Map<string, number>).size) console.log(`   shop: not disposed (shared/pinned or leak): ${JSON.stringify([...(first as Map<string, number>)].slice(0, 8))}`);
 });
 
@@ -171,4 +180,36 @@ test('memory: lighting keeps no evicted objects (add queue idle without a rig; w
   const alive = refs.filter((r) => r.deref()).length;
   expect(alive === 0, `${alive} of 50 dropped materials kept alive by a WeakList`);
   expect(list.size === 1 && [...list][0] === kept, `WeakList holds ${list.size} live members`);
+});
+
+// ---------------------------------------------------------------- loads that outlive their level (AbortSignal)
+
+test('memory: a disposed level is collected at once even while its originals / library loads are pending', async () => {
+  const { loadOriginal } = await import('../src/detail');
+  const { loadLibraryModel } = await import('../src/libraries');
+  // remote fetches hang (a slow network) instead of failing fast as the shim makes them
+  const g = globalThis as { fetch: typeof fetch };
+  const real = g.fetch;
+  g.fetch = ((u: RequestInfo | URL, i?: RequestInit) => (/^https?:\/\/(?!localhost)/.test(String(u)) ? new Promise<Response>(() => {}) : real(u, i))) as typeof fetch;
+  try {
+    const run = (withSignal: boolean) => {
+      // an owner (a stand-in for a ShopLevel) whose continuations hold it, as shop.ts' do
+      const owner = { group: new THREE.Group(), big: new Float64Array(1 << 16), got: 0 };
+      const ac = new AbortController();
+      const signal = withSignal ? ac.signal : undefined;
+      const lib = { source: 'polyhaven', id: `qa_hang_${withSignal}`, url: `https://api.polyhaven.com/files/qa_hang_${withSignal}`, title: 'qa', category: 'qa', tags: [], licence: 'CC0' };
+      loadOriginal(`objaverse-qa${withSignal}`, 1, new THREE.Vector3(1, 1, 1), { signal }).then((o) => { if (o) owner.got++; });
+      loadLibraryModel(lib as never, { quality: 'low', signal }).then(() => owner.got++, () => owner.got--);
+      const ref = new WeakRef(owner);
+      ac.abort(); // the level is disposed
+      return ref;
+    };
+    const kept = run(false), freed = run(true);
+    await collect();
+    expect(!freed.deref(), 'an aborted owner is still held by its pending loads');
+    // control: without a signal the pending loads do hold it (so the test sees the leak it guards against)
+    expect(!!kept.deref(), 'control: pending loads without a signal did not hold their owner (the test is not measuring)');
+  } finally {
+    g.fetch = real;
+  }
 });

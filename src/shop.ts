@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, finishBuilding } from './level';
+import { ABORTED } from './dispose';
 import { registerContainer, type LazyContainer } from './lazy';
 import { mat } from './build';
 import { realScale } from './realscale';
@@ -642,7 +643,7 @@ export class ShopLevel implements Level {
     if (!qs) return [];
     try {
       const hits = (await Promise.all(qs.map((q, i) => searchLibrary({ ...q, seed: hashN(seed, 77 + i) })))).flat();
-      const objs = await Promise.all(hits.map((h) => loadLibraryModel(h, { quality: 'low', shadows: false }).catch(() => null)));
+      const objs = await Promise.all(hits.map((h) => loadLibraryModel(h, { quality: 'low', shadows: false, signal: this.loads.signal }).catch(() => null)));
       return objs.flatMap((o, i): Loaded[] => {
         if (!o) return [];
         let tris = 0;
@@ -842,7 +843,7 @@ export class ShopLevel implements Level {
     }
     for (const b of boxes) this.portalFor(e, b);
     // then the original textured model, if this product has one and the budget allows
-    loadOriginal(e.id, e.og, p.size, { prio: 50 + prio, texMax: 512 }).then((orig) => {
+    loadOriginal(e.id, e.og, p.size, { prio: 50 + prio, texMax: 512, signal: this.loads.signal }).then((orig) => {
       if (!orig) return;
       if (!this.alive) return releaseOriginal(orig);
       this.originals.push(orig); // detail.ts refcounts the cached original: released in dispose()
@@ -952,7 +953,7 @@ export class ShopLevel implements Level {
     for (const c of this.cases) c.obj.userData.disposed = true;
     clearQueue();
     this.stopWaiting?.();
-    this.loads.abort();
+    this.loads.abort(ABORTED); // (a reason made here would keep this shop alive through its stack trace)
     disposeTree(this.group); // owned geometry, instance buffers, owned materials; marks the tree disposed
     for (const m of this.models) disposeModel(m.object);
     this.models.length = 0;
