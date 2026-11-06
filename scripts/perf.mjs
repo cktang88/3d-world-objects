@@ -1,58 +1,70 @@
 #!/usr/bin/env node
 /**
- * Headless render-count baseline (WP1 in docs/research/performance.md).
+ * Headless render-count baseline (WP1 in docs/research/performance.md). COUNTS ONLY.
  *
- *   node scripts/perf.mjs [--port 5173] [--quality ultra|high|low] [--w 320] [--h 180]
- *        [--poses avenue,cross-street,...] [--out docs/research/perf-baseline.json]
- *        [--compare docs/research/perf-baseline.json] [--top 15] [--timeout 1200]
+ *   node scripts/perf.mjs --poses avenue [--small] [--port 5173] [--quality low|high|ultra]
+ *        [--max 240] [--pose-max 150] [--out docs/research/perf-baseline.json]
+ *        [--compare docs/research/perf-baseline.json] [--top 15] [--w 320] [--h 180]
  *
- * Loads the full world (?mode=world), holds the camera at fixed poses (street level on an avenue,
- * a cross-street, a corner looking down an avenue, an elevated view), then enters a shop, an
- * apartment, the museum atrium and a gallery. At each pose it waits for streaming to settle
- * (chunk count, geometry/texture/program counts unchanged over several frames), then records
- * window.__world.perf(): draw calls, triangles, programs, per-pass counts and a scene census.
+ * One browser load per run, then the listed poses in order. Outdoor poses (street level on an
+ * avenue, a cross-street, a corner looking down an avenue, an elevated view) hold the camera in
+ * the city; shop / apartment / museum-atrium / gallery enter those levels. At each pose it waits
+ * until chunk/geometry/texture/program counts stop changing, then records window.__world.perf()
+ * (draw calls, triangles, programs, exclusive per-pass counts, scene census, top triangle
+ * contributors) and the peak renderer / GPU-process RSS and JS heap.
  *
- * COUNTS ONLY. SwiftShader frame times are meaningless (and this machine is shared): frameMs is
- * deliberately not written. Counts do not depend on the viewport size, except through its aspect.
+ * Hard limits (docs/AGENTS.md): the whole run stops at --max seconds (default 240, at most 600):
+ * it kills its browser, keeps what it measured, and exits 124. Each pose stops at --pose-max.
+ * The world lock is taken with `flock -w 300` (exit 75 if it is not free in time). No retries:
+ * after a failure, shrink the run (fewer poses, --small) instead of repeating it.
  *
- * With --compare it prints per-pose differences against a previous JSON (e.g. the committed
- * baseline) and does not overwrite it unless --out is also given.
+ * --small: a small world for fast comparisons (finishes a pose in 1-3 min): the city stops
+ * streaming after the first 3x3 chunk ring, ?people=0, ?notex=1 (no HDRI/PBR downloads).
+ * Small-world results go to `posesSmall` in the output file; full-world results to `poses`.
+ * Results are merged into the output file pose by pose, so runs can be split up and resumed.
  *
- * Takes /tmp/claude-0/world-shot.lock (flock) for the whole run, so full-world runs across agents
- * happen one at a time (--no-lock to skip). Records peak renderer/GPU-process RSS and JS heap.
+ * Shop/apartment portals are found in the city once and stored in the output file (`targets`);
+ * later runs enter them directly from a museum load, without building the city.
  *
- * Requests to Hugging Face / Poly Haven / Smithsonian are fetched with curl like scripts/shot.mjs.
+ * SwiftShader frame times are meaningless and are never written.
  */
 import { createRequire } from 'module';
 import { execFile, execSync, spawnSync } from 'child_process';
-import { readFileSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 
-// Full-world runs take ~2 GB and the machine is shared: run them one at a time across all agents
-// (docs/AGENTS.md). Re-exec under flock unless we already hold the lock.
+const args = Object.fromEntries(
+  process.argv.slice(2).reduce((acc, a, i, arr) => (a.startsWith('--') ? [...acc, [a.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : '1']] : acc), []),
+);
+
+// ---- world lock: full-game runs one at a time across agents
 const LOCK = '/tmp/claude-0/world-shot.lock';
-if (!process.env.WORLD_SHOT_LOCKED && !process.argv.includes('--no-lock')) {
-  console.log(`waiting for ${LOCK} ...`);
-  const r = spawnSync('flock', [LOCK, process.execPath, ...process.argv.slice(1)], { stdio: 'inherit', env: { ...process.env, WORLD_SHOT_LOCKED: '1' } });
+if (!process.env.WORLD_SHOT_LOCKED && !args['no-lock']) {
+  console.log(`[perf] waiting up to 300 s for ${LOCK}`);
+  const r = spawnSync('flock', ['-w', '300', '-E', '75', LOCK, process.execPath, ...process.argv.slice(1)], { stdio: 'inherit', env: { ...process.env, WORLD_SHOT_LOCKED: '1' } });
+  if (r.status === 75) console.log('[perf] world lock busy for 300 s: try again later');
   process.exit(r.status ?? 1);
 }
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
-const args = Object.fromEntries(
-  process.argv.slice(2).reduce((acc, a, i, arr) => (a.startsWith('--') ? [...acc, [a.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : '1']] : acc), []),
-);
 const port = args.port ?? process.env.PORT ?? '5173';
-const quality = args.quality ?? 'ultra';
+const quality = args.quality ?? 'low';
 const W = Number(args.w ?? 320), H = Number(args.h ?? 180);
 const TOP = Number(args.top ?? 15);
-const TIMEOUT = Number(args.timeout ?? 1200) * 1000; // per pose
+const MAX = Math.min(600, Number(args.max ?? 240));
+const POSE_MAX = Number(args['pose-max'] ?? 150) * 1000;
+const SMALL = !!args.small;
 const seed = args.seed ?? '20261105';
 const tod = args.tod ?? 'day';
 const out = args.out ?? (args.compare ? null : 'docs/research/perf-baseline.json');
+const section = SMALL ? 'posesSmall' : 'poses';
+
+const t0 = Date.now();
+const log = (...a) => console.log(`[perf +${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 
 // x: avenues at x = ±60 (chunk edges), z: streets at z = ±32. All outdoor poses stay inside chunk
-// (0,0), so the resident set is the same 5x5 ring for all of them. yaw 0 looks toward -z.
+// (0,0), so the resident set is the same for all of them. yaw 0 looks toward -z.
 const POSES = [
   { name: 'avenue', desc: 'avenue sidewalk mid-block, looking across the avenue', pos: [50.5, 0, 0], yaw: -Math.PI / 2, pitch: 0 },
   { name: 'cross-street', desc: 'cross-street sidewalk mid-block, looking along the street', pos: [0, 0, 25.5], yaw: Math.PI / 2, pitch: 0 },
@@ -63,18 +75,37 @@ const POSES = [
   { name: 'museum-atrium', desc: 'museum atrium spawn', enter: 'atrium' },
   { name: 'gallery', desc: 'first gallery off the atrium', enter: 'gallery' },
 ];
-const want = args.poses ? new Set(args.poses.split(',')) : null;
-const poses = POSES.filter((p) => !want || want.has(p.name));
+if (!args.poses) {
+  console.log(`usage: node scripts/perf.mjs --poses <${POSES.map((p) => p.name).join(',')}> [--small] [--max 240]\n(one or two poses per run keeps it under the time cap)`);
+  process.exit(2);
+}
+const want = new Set(args.poses.split(','));
+const poses = POSES.filter((p) => want.has(p.name));
 
-const curl = (u) =>
-  new Promise((res) => execFile('curl', ['-sSL', '--max-time', '120', '-D', '-', u], { encoding: 'buffer', maxBuffer: 256 << 20 }, (_e, o) => res(o)));
+// ---- output file (merged pose by pose)
+const doc = out && existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : {};
+let commit = 'unknown';
+try { commit = execSync('git rev-parse --short HEAD').toString().trim(); } catch {}
+doc.note = 'COUNTS ONLY (headless SwiftShader; frame times are never recorded). Generated by scripts/perf.mjs. perPass is exclusive: "main/shadow" (quality=low) or "RenderPass/shadow" (ultra) is the shadow maps rendered inside the main pass. scene.trisInFrustum = in-frustum meshes x instances before depth/occlusion. memoryPeak = peak RSS (MB) of the Chromium renderer and GPU processes and the JS heap. posesSmall = --small world (3x3 chunks, people=0, notex=1).';
+doc.poses ??= {};
+doc.posesSmall ??= {};
+doc.failures ??= {};
+const save = () => { if (out) writeFileSync(out, JSON.stringify(doc, null, 1) + '\n'); };
 
-const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
-
+// ---- hard cap
 let browser = null, page = null, cdp = null;
+let stage = 'start';
+const at = (s) => { stage = s; log(s); };
+const results = {};
+setTimeout(() => {
+  log(`TIMEOUT after ${MAX}s at "${stage}": killing browser (fewer --poses per run, or --small)`);
+  for (const p of poses) if (!(p.name in results)) doc.failures[`${section}.${p.name}`] = { date: new Date().toISOString(), reason: `run hit --max ${MAX}s`, stage };
+  save();
+  try { browser?.process?.()?.kill('SIGKILL'); } catch {}
+  process.exit(124);
+}, MAX * 1000).unref();
 
 // ---- memory: peak RSS of Chromium's renderer and GPU processes, and the page's JS heap
-const mem = { rendererMB: 0, gpuMB: 0, jsHeapMB: 0 };
 let poseMem = { rendererMB: 0, gpuMB: 0, jsHeapMB: 0 };
 const rssMB = (pid) => { try { return Math.round(Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))[1]) / 1024); } catch { return 0; } };
 async function sampleMem() {
@@ -83,65 +114,69 @@ async function sampleMem() {
     let r = 0, g = 0;
     for (const p of processInfo) {
       if (p.type === 'renderer') r = Math.max(r, rssMB(p.id));
-      else if (p.type === 'GPU' || p.type === 'gpu-process') g = Math.max(g, rssMB(p.id));
+      else if (/gpu/i.test(p.type)) g = Math.max(g, rssMB(p.id));
     }
-    const h = Math.round(((await page.evaluate(() => performance.memory?.usedJSHeapSize ?? 0).catch(() => 0)) / 2 ** 20));
-    for (const m of [mem, poseMem]) { m.rendererMB = Math.max(m.rendererMB, r); m.gpuMB = Math.max(m.gpuMB, g); m.jsHeapMB = Math.max(m.jsHeapMB, h); }
-  } catch { /* browser gone or between launches */ }
+    const h = Math.round((await page.evaluate(() => performance.memory?.usedJSHeapSize ?? 0).catch(() => 0)) / 2 ** 20);
+    poseMem = { rendererMB: Math.max(poseMem.rendererMB, r), gpuMB: Math.max(poseMem.gpuMB, g), jsHeapMB: Math.max(poseMem.jsHeapMB, h) };
+  } catch { /* browser gone */ }
 }
-let memTick = 0;
-const memTimer = setInterval(async () => {
-  await sampleMem();
-  if (args.verbose && ++memTick % 15 === 0) {
-    const f = await page?.evaluate(() => { const p = window.__world?.perf?.last; const lv = window.__world?.level; return p ? `frame ${p.frame} chunks ${lv?.chunks?.size ?? '-'} calls ${p.calls} geo ${p.geometries} tex ${p.textures}` : ''; }).catch(() => '');
-    log(`  mem peak renderer ${poseMem.rendererMB} MB gpu ${poseMem.gpuMB} MB heap ${poseMem.jsHeapMB} MB  ${f}`);
-  }
-}, 2000);
-/** (re)launch the browser and load the world; the renderer can get OOM-killed on a busy machine */
-async function open() {
-  await browser?.close().catch(() => {});
-  browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-precise-memory-info'] });
-  page = await browser.newPage({ viewport: { width: W, height: H } });
-  page.setDefaultTimeout(TIMEOUT);
-  cdp = await browser.newBrowserCDPSession();
-  await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (route) => {
-    const buf = await curl(route.request().url());
-    if (!buf) return route.abort();
-    const s = buf.toString('latin1');
-    let idx = 0, last = 0;
-    while ((idx = s.indexOf('\r\n\r\n', last)) >= 0 && /^HTTP\//.test(s.slice(last, last + 5))) last = idx + 4;
-    const u = route.request().url();
-    const type = u.includes('rows?') || u.endsWith('.json') ? 'application/json' : /\.jpe?g/.test(u) ? 'image/jpeg' : /\.png/.test(u) ? 'image/png' : 'application/octet-stream';
-    route.fulfill({ status: 200, body: buf.subarray(last), headers: { 'access-control-allow-origin': '*', 'content-type': type } });
-  });
-  page.on('pageerror', (e) => { if (!/Pointer Lock|pointer lock/i.test(e.message)) log('PAGEERROR', e.message); });
-  page.on('console', (m) => { if (m.type() === 'error' && !/pointer lock/i.test(m.text())) log('CONSOLE', m.text().slice(0, 200)); });
+setInterval(sampleMem, 2000).unref();
 
-  const t0 = Date.now();
-  await page.goto(`http://localhost:${port}/?mode=world&quality=${quality}&seed=${seed}&tod=${tod}`, { waitUntil: 'load', timeout: TIMEOUT });
-  await page.waitForFunction(() => window.__world?.perf && window.__world.level && window.__world.perf.last.frame > 0, null, { timeout: TIMEOUT, polling: 1000 });
-  log(`world up after ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+const curl = (u) =>
+  new Promise((res) => execFile('curl', ['-sSL', '--max-time', '60', '-D', '-', u], { encoding: 'buffer', maxBuffer: 256 << 20 }, (_e, o) => res(o)));
 
-  // hold the player at a pose: re-applied after every frame (the player would otherwise fall/drift)
-  await page.evaluate(() => {
-    const w = window.__world;
-    window.__hold = null;
-    const tick = () => {
-      const h = window.__hold;
-      if (h) {
-        w.player.pos.set(h.pos[0], h.pos[1], h.pos[2]);
-        w.player.vel.set(0, 0, 0);
-        w.player.yaw = h.yaw;
-        w.player.pitch = h.pitch;
-      }
-      requestAnimationFrame(tick);
-    };
+// which page to load: the city is needed for outdoor poses and to discover shop/apartment portals
+const needCity = poses.some((p) => p.pos) || poses.some((p) => (p.enter === 'shop' || p.enter === 'apartment') && !doc.targets?.[p.enter]);
+const qs = new URLSearchParams({ mode: needCity ? 'world' : 'museum', quality, seed, tod });
+if (SMALL) { qs.set('people', '0'); qs.set('notex', '1'); }
+
+at(`launch (${needCity ? 'city' : 'museum'} page, quality=${quality}${SMALL ? ', small world' : ''})`);
+browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-precise-memory-info'] });
+page = await browser.newPage({ viewport: { width: W, height: H } });
+cdp = await browser.newBrowserCDPSession();
+await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (route) => {
+  const buf = await curl(route.request().url());
+  if (!buf) return route.abort().catch(() => {});
+  const s = buf.toString('latin1');
+  let idx = 0, last = 0;
+  while ((idx = s.indexOf('\r\n\r\n', last)) >= 0 && /^HTTP\//.test(s.slice(last, last + 5))) last = idx + 4;
+  const u = route.request().url();
+  const type = u.includes('rows?') || u.endsWith('.json') ? 'application/json' : /\.jpe?g/.test(u) ? 'image/jpeg' : /\.png/.test(u) ? 'image/png' : 'application/octet-stream';
+  route.fulfill({ status: 200, body: buf.subarray(last), headers: { 'access-control-allow-origin': '*', 'content-type': type } }).catch(() => {});
+});
+page.on('pageerror', (e) => { if (!/pointer lock/i.test(e.message)) log('PAGEERROR', e.message.slice(0, 200)); });
+page.on('crash', () => log('PAGE CRASHED (usually RAM): shrink the run (--small, fewer poses)'));
+
+at(`load /?${qs}`);
+await page.goto(`http://localhost:${port}/?${qs}`, { waitUntil: 'load', timeout: MAX * 1000 });
+await page.waitForFunction(() => window.__world?.perf && window.__world.level && window.__world.perf.last.frame > 0, null, { timeout: MAX * 1000, polling: 1000 });
+at(`level up: ${await page.evaluate(() => window.__world.level.name)}`);
+
+// small world: stop streaming after the first 3x3 ring (built in the NycLevel constructor)
+if (SMALL) await page.evaluate(() => {
+  const lv = window.__world.level;
+  if (lv.ensure) { const e = lv.ensure.bind(lv); lv.ensure = (x, z) => (Math.max(Math.abs(x), Math.abs(z)) <= 1 ? e(x, z) : false); }
+});
+
+// hold the player at a pose: re-applied after every frame (the player would otherwise fall/drift)
+await page.evaluate(() => {
+  const w = window.__world;
+  window.__hold = null;
+  const tick = () => {
+    const h = window.__hold;
+    if (h) {
+      w.player.pos.set(h.pos[0], h.pos[1], h.pos[2]);
+      w.player.vel.set(0, 0, 0);
+      w.player.yaw = h.yaw;
+      w.player.pitch = h.pitch;
+    }
     requestAnimationFrame(tick);
-  });
-}
+  };
+  requestAnimationFrame(tick);
+});
 
-/** wait until chunk/geometry/texture/program counts are unchanged for `frames` frames */
-const settle = (minFrames = 6, stableFor = 5) =>
+/** wait until chunk/geometry/texture/program counts are unchanged for `stableFor` frames */
+const settle = (minFrames = 5, stableFor = 4) =>
   page.evaluate(([minFrames, stableFor]) => new Promise((resolve) => {
     const p = window.__world.perf;
     const start = p.last.frame;
@@ -173,8 +208,7 @@ const sample = (n = 3) =>
         got.push(p({ top }));
         if (got.length >= n) {
           got.sort((a, b) => a.calls - b.calls);
-          const m = got[Math.floor(got.length / 2)];
-          return resolve({ ...m, callsRange: [got[0].calls, got[got.length - 1].calls] });
+          return resolve({ ...got[Math.floor(got.length / 2)], callsRange: [got[0].calls, got[got.length - 1].calls] });
         }
       }
       setTimeout(poll, 250);
@@ -182,108 +216,91 @@ const sample = (n = 3) =>
     poll();
   }), [n, TOP]);
 
-const waitIdle = () => page.waitForFunction(() => !document.getElementById('fade') || Number(getComputedStyle(document.getElementById('fade')).opacity) < 0.01, null, { polling: 500 }).catch(() => {});
-
-// portals to enter, collected while standing in the city
-let targets = null;
-const results = {};
-const RETRIES = Number(args.retries ?? 2);
-await open();
-for (const pose of poses) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await measure(pose);
-      break;
-    } catch (e) {
-      log(`${pose.name}: ${e.message.split('\n')[0]}`);
-      if (attempt >= RETRIES) { log('giving up on', pose.name); break; }
-      log('relaunching');
-      targets = null;
-      await open();
-    }
-  }
-  if (out) writeFileSync(out + '.partial', JSON.stringify(results, null, 1));
-}
-clearInterval(memTimer);
-await browser.close();
+const levelName = () => page.evaluate(() => window.__world.level.name);
+const limit = (p, what, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took over ${ms / 1000}s`)), ms))]);
 
 async function measure(pose) {
   const ts = Date.now();
   poseMem = { rendererMB: 0, gpuMB: 0, jsHeapMB: 0 };
   let label = null;
   if (pose.pos) {
-    if ((await page.evaluate(() => window.__world.level.name)) !== 'Manhattan') {
-      log('skip', pose.name, '(no longer in the city: put outdoor poses first)');
-      return;
-    }
+    if ((await levelName()) !== 'Manhattan') throw new Error('not in the city (list outdoor poses first)');
     await page.evaluate((h) => { window.__hold = h; }, { pos: pose.pos, yaw: pose.yaw, pitch: pose.pitch });
   } else {
-    if (!targets) {
-      targets = await page.evaluate(() => {
+    if ((pose.enter === 'shop' || pose.enter === 'apartment') && !doc.targets?.[pose.enter]) {
+      at('find shop/apartment portals in the city');
+      doc.targets = { ...doc.targets, ...(await page.evaluate(() => {
         const ps = window.__world.level.portals();
-        const shop = ps.find((p) => p.target?.kind === 'interior' && p.target.shop);
-        const apt = ps.find((p) => p.target?.kind === 'interior' && !p.target.shop);
-        return { shop: shop ? { label: shop.label, target: shop.target } : null, apartment: apt ? { label: apt.label, target: apt.target } : null };
-      });
+        const pick = (p) => (p ? { label: p.label, target: p.target } : undefined);
+        return { shop: pick(ps.find((p) => p.target?.kind === 'interior' && p.target.shop)), apartment: pick(ps.find((p) => p.target?.kind === 'interior' && !p.target.shop)) };
+      })) };
+      save();
     }
     await page.evaluate(() => { window.__hold = null; });
     if (pose.enter === 'shop' || pose.enter === 'apartment') {
-      const t = targets[pose.enter];
-      if (!t) { log('skip', pose.name, '(no portal found)'); return; }
+      const t = doc.targets?.[pose.enter];
+      if (!t) throw new Error('no portal found');
       label = t.label;
-      await page.evaluate((t) => window.__world.enter({ target: t.target, label: t.label }), t).catch((e) => log('enter failed', e.message));
-    } else if (pose.enter === 'atrium') {
-      await page.evaluate(() => window.__world.startMode('museum'));
+      at(`enter ${t.label}`);
+      await page.evaluate((t) => window.__world.enter({ target: t.target, label: t.label }), t);
+    } else {
+      if ((await levelName()) !== 'Atrium') { at('enter museum atrium'); await page.evaluate(() => window.__world.startMode('museum')); }
       label = 'atrium';
-    } else if (pose.enter === 'gallery') {
-      if ((await page.evaluate(() => window.__world.level.name)) !== 'Atrium') await page.evaluate(() => window.__world.startMode('museum'));
-      const g = await page.evaluate(() => {
-        const p = window.__world.level.portals().find((p) => p.target?.kind === 'gallery');
-        return p ? { label: p.label, target: p.target } : null;
-      });
-      if (!g) { log('skip', pose.name, '(no gallery portal in the atrium)'); return; }
-      label = g.label;
-      await page.evaluate((g) => window.__world.enter({ target: g.target, label: g.label }), g);
+      if (pose.enter === 'gallery') {
+        const g = await page.evaluate(() => {
+          const p = window.__world.level.portals().find((p) => p.target?.kind === 'gallery');
+          return p ? { label: p.label, target: p.target } : null;
+        });
+        if (!g) throw new Error('no gallery portal in the atrium');
+        label = g.label;
+        at(`enter gallery ${g.label}`);
+        await page.evaluate((g) => window.__world.enter({ target: g.target, label: g.label }), g);
+      }
     }
-    await waitIdle();
-    // hold the player where the level spawned it
     await page.evaluate(() => {
       const s = window.__world.level.spawn;
       window.__hold = { pos: [s.pos.x, s.pos.y, s.pos.z], yaw: s.yaw, pitch: 0 };
     });
   }
-  const limit = (p, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} timed out`)), TIMEOUT))]);
-  const st = await limit(settle(), 'settle');
-  const s = await limit(sample(), 'sample');
-  const lvName = await page.evaluate(() => window.__world.level.name);
-  results[pose.name] = {
-    desc: pose.desc, level: lvName, ...(label ? { portal: label } : {}), ...(pose.pos ? { pos: pose.pos, yaw: +pose.yaw.toFixed(3), pitch: pose.pitch } : {}),
-    calls: s.calls, callsRange: s.callsRange, tris: s.tris, programs: s.programs, geometries: s.geometries, textures: s.textures,
-    perPass: s.perPass, scene: s.scene, top: s.top, settleFrames: st.frames ?? null,
-    memoryPeak: { ...poseMem },
-  };
+  at(`${pose.name}: settle`);
+  const st = await settle();
+  at(`${pose.name}: sample`);
+  const s = await sample();
   await sampleMem();
-  log(`${pose.name.padEnd(20)} mem renderer ${poseMem.rendererMB} MB gpu ${poseMem.gpuMB} MB heap ${poseMem.jsHeapMB} MB`);
-  log(`${pose.name.padEnd(20)} calls ${String(s.calls).padStart(5)}  tris ${(s.tris / 1e6).toFixed(2)}M  programs ${s.programs}  inFrustum ${s.scene.meshesInFrustum}/${s.scene.meshesVisible}  (${((Date.now() - ts) / 1000).toFixed(0)} s)`);
+  const r = {
+    desc: pose.desc, level: await levelName(), ...(label ? { portal: label } : {}), ...(pose.pos ? { pos: pose.pos, yaw: +pose.yaw.toFixed(3), pitch: pose.pitch } : {}),
+    commit, date: new Date().toISOString(), quality, viewport: [W, H], seed: Number(seed), tod,
+    calls: s.calls, callsRange: s.callsRange, tris: s.tris, programs: s.programs, geometries: s.geometries, textures: s.textures,
+    perPass: s.perPass, scene: s.scene, top: s.top, settleFrames: st.frames, memoryPeak: { ...poseMem },
+  };
+  log(`${pose.name}: calls ${s.calls}  tris ${(s.tris / 1e6).toFixed(2)}M  programs ${s.programs}  inFrustum ${s.scene.meshesInFrustum}/${s.scene.meshesVisible}  mem r${poseMem.rendererMB}/g${poseMem.gpuMB}/h${poseMem.jsHeapMB} MB  (${((Date.now() - ts) / 1000).toFixed(0)} s)`);
   for (const [k, v] of Object.entries(s.perPass)) log(`    ${k.padEnd(22)} ${String(v.calls).padStart(5)} ${(v.tris / 1e6).toFixed(2).padStart(6)}M x${v.n}`);
+  return r;
 }
 
-let commit = 'unknown';
-try { commit = execSync('git rev-parse --short HEAD').toString().trim(); } catch {}
-const doc = {
-  note: 'COUNTS ONLY (headless SwiftShader; frame times are never recorded). Generated by scripts/perf.mjs. perPass is exclusive: "RenderPass/shadow" is the shadow maps rendered inside the main pass, etc. scene.trisInFrustum counts in-frustum meshes x instances before depth/occlusion.',
-  commit, date: new Date().toISOString(), quality, viewport: [W, H], seed: Number(seed), tod,
-  memoryPeak: { ...mem, note: 'peak RSS (MB) of the Chromium renderer and GPU processes and the JS heap over the whole run, sampled every 2 s; SwiftShader keeps GPU resources in the GPU process RSS' },
-  poses: results,
-};
+for (const pose of poses) {
+  try {
+    results[pose.name] = await limit(measure(pose), pose.name, POSE_MAX);
+    doc[section][pose.name] = results[pose.name];
+    delete doc.failures[`${section}.${pose.name}`];
+  } catch (e) {
+    log(`${pose.name} FAILED at "${stage}": ${e.message.split('\n')[0]}`);
+    doc.failures[`${section}.${pose.name}`] = { date: new Date().toISOString(), reason: e.message.split('\n')[0], stage, memoryPeak: poseMem };
+    results[pose.name] = null;
+    save();
+    break; // no retries: a failure usually means RAM; shrink the run instead
+  }
+  save();
+}
+try { browser.process()?.kill('SIGKILL'); } catch {}
 
 if (args.compare) {
-  const base = JSON.parse(readFileSync(args.compare, 'utf8'));
-  console.log(`\ncompare vs ${args.compare} (${base.commit}, ${base.quality})`);
+  const base = JSON.parse(readFileSync(args.compare, 'utf8'))[section] ?? {};
+  console.log(`\ncompare vs ${args.compare} (${section})`);
   const pct = (a, b) => (b ? `${a >= b ? '+' : ''}${(((a - b) / b) * 100).toFixed(1)}%` : 'n/a');
   for (const [k, v] of Object.entries(results)) {
-    const b = base.poses?.[k];
-    if (!b) { console.log(`  ${k}: no baseline`); continue; }
+    const b = base[k];
+    if (!v || !b) { console.log(`  ${k}: ${v ? 'no baseline' : 'failed'}`); continue; }
     console.log(`  ${k.padEnd(20)} calls ${b.calls} -> ${v.calls} (${pct(v.calls, b.calls)})  tris ${b.tris} -> ${v.tris} (${pct(v.tris, b.tris)})  programs ${b.programs} -> ${v.programs}`);
     for (const p of new Set([...Object.keys(b.perPass ?? {}), ...Object.keys(v.perPass)])) {
       const x = b.perPass?.[p] ?? { calls: 0, tris: 0 }, y = v.perPass[p] ?? { calls: 0, tris: 0 };
@@ -291,8 +308,5 @@ if (args.compare) {
     }
   }
 }
-if (out) {
-  writeFileSync(out, JSON.stringify(doc, null, 1) + '\n');
-  rmSync(out + '.partial', { force: true });
-  log('wrote', out);
-}
+if (out) log('wrote', out);
+process.exit(Object.values(results).every(Boolean) ? 0 : 1);
