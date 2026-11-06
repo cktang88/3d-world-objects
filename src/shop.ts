@@ -77,6 +77,13 @@ export class ShopLevel implements Level {
     skyTop: '#1a1a1a', skyBottom: '#222', stars: false, fog: null, fogNear: 0, fogFar: 0, sun: null,
     hemi: { sky: '#f4f8ff', ground: '#6a6458', intensity: 0.5 }, ambient: 0.06, envIntensity: 0.5, exposure: 0.82,
   };
+  /**
+   * The street door in level coordinates: the centre of its threshold on the shop-front plane,
+   * with the yaw of the outward normal (the shop front faces +z, so yaw 0). The door is 1.6 m
+   * wide and 2.6 m tall; the room spans x in [-room.W/2, room.W/2], z in [-room.D/2, room.D/2].
+   */
+  door = { pos: new THREE.Vector3(), yaw: 0, width: 1.6, height: 2.6 };
+  room = { W: 0, D: 0, H: 0 };
   /** resolves once the stock has been placed (for the lab) */
   stocked: Promise<void> = Promise.resolve();
   private cols: Rect[] = [];
@@ -108,6 +115,8 @@ export class ShopLevel implements Level {
     this.group.add(kit.live);
     this.cols.push(...kit.cols);
     this.spawn.pos.set(doorX, 0, D / 2 - 1.1);
+    this.door.pos.set(doorX, 0, D / 2);
+    this.room = { W, D, H: st.H };
     this.ports.push({ box: new THREE.Box3(new THREE.Vector3(doorX - 0.8, 0, D / 2 - 0.6), new THREE.Vector3(doorX + 0.8, 2.6, D / 2 + 0.3)), label: 'Back to the street', target: 'back' });
     this.stocked = this.stock(kit.segs, info.pools, desc.seed, r.fork(9), type);
   }
