@@ -74,6 +74,13 @@ export class AtriumLevel extends MuseumBase {
     let prio = 0;
     const ctx: Ctx = { lv: this, st, r, m: mats, prio: () => prio++, labelBg: '#f3ede1', labelInk: '#1f1b16', labelSub: '#5d5446' };
 
+    // the heroes start streaming before anything else in the hall
+    const heroes = [
+      this.centrepiece(ctx),
+      this.flyer(ctx, /bell x-1/i, 1.5, -10.5, 0.55, 0.06, 2.2),
+      // the Wright Flyer, as it hung in the Smithsonian's Arts and Industries hall
+      this.flyer(ctx, /wright flyer/i, 0, -23.5, 0, -0.04, 1.4),
+    ];
     this.architecture();
     this.dressing(wings.map((w) => w.name), colors);
 
@@ -132,12 +139,7 @@ export class AtriumLevel extends MuseumBase {
       );
     }
 
-    loads.push(
-      this.centrepiece(ctx),
-      this.flyer(ctx, /bell x-1/i, 1.5, -10.5, 0.55, 0.06, 2.2),
-      // the Wright Flyer, as it hung in the Smithsonian's Arts and Industries hall
-      this.flyer(ctx, /wright flyer/i, 0, -23.5, 0, -0.04, 1.4),
-    );
+    loads.push(...heroes);
     this.flush();
     this.markBuilt();
     this.ready = Promise.allSettled(loads).then(() => this.settle());

@@ -123,6 +123,9 @@ const FULL_SCANS = 3;
 
 const phMat = new THREE.MeshBasicMaterial({ color: '#ffe9b0', wireframe: true, transparent: true, opacity: 0.35 });
 const phGeo = new THREE.IcosahedronGeometry(0.5, 1);
+// a soft, unit-sized stand-in for a hero still streaming (a rounded frustum reads as "something big here")
+const standInGeo = new THREE.CylinderGeometry(0.3, 0.5, 1, 24, 1);
+const standInMat = new THREE.MeshStandardMaterial({ color: '#c9bfae', roughness: 0.6, metalness: 0.2, transparent: true, opacity: 0.35, depthWrite: false });
 
 /**
  * Merge a static model's meshes by material, in the model's own frame: draw calls drop from one
@@ -355,8 +358,10 @@ export abstract class MuseumBase implements Level {
     if (this.tick % 15 === 0) this.cullOutside(player);
     for (const s of this.slots) {
       if (!s.model) {
-        s.placeholder.rotation.y += dt;
-        s.placeholder.rotation.x += dt * 0.6;
+        if (!s.placeholder.userData.still) {
+          s.placeholder.rotation.y += dt;
+          s.placeholder.rotation.x += dt * 0.6;
+        }
         continue;
       }
       if (s.spin) s.holder.rotation.y += dt * s.spin;
@@ -536,10 +541,18 @@ export abstract class MuseumBase implements Level {
     holder.userData.exhibit = true;
     holder.position.copy(at);
     holder.rotation.y = f.rot + rot;
-    const placeholder = new THREE.Mesh(phGeo, phMat);
-    const ph = Math.min(m.real.x, m.real.y, m.real.z, 0.4);
-    placeholder.scale.setScalar(Math.max(0.03, ph));
-    placeholder.position.y = Math.min(m.real.y / 2, 0.5);
+    // heroes (progressive) get a stand-in of their real size while they stream; others a small spinner
+    const hero = !!opts.progressive;
+    const placeholder = new THREE.Mesh(hero ? standInGeo : phGeo, hero ? standInMat : phMat);
+    if (hero) {
+      placeholder.scale.set(m.real.x * 0.9, m.real.y * 0.9, m.real.z * 0.9);
+      placeholder.position.y = m.real.y * 0.45;
+      placeholder.userData.still = true;
+    } else {
+      const ph = Math.min(m.real.x, m.real.y, m.real.z, 0.4);
+      placeholder.scale.setScalar(Math.max(0.03, ph));
+      placeholder.position.y = Math.min(m.real.y / 2, 0.5);
+    }
     holder.add(placeholder);
     this.group.add(holder);
     const slot: Slot = { m, holder, at, spin: opts.spin ?? 0, placeholder };
