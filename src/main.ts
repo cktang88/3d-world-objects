@@ -48,7 +48,9 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 900);
+// near 0.1 (was 0.05): depth precision at range scales with near (24-bit, far 900: ~6 mm at 100 m instead of
+// ~12 mm), the main cause of distant flicker; still well inside the player radius (0.32 m) [zfix]
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 900);
 const pmrem = new THREE.PMREMGenerator(renderer);
 const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environment = roomEnv;
