@@ -43,7 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
-  museum: ['museum'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['seamless', 'museum'],
+  museum: ['museum'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
 /** changed file -> areas (first match wins; '*' = every test file). Add a line when you add a test file. */
 const SRC_MAP = [
@@ -62,7 +62,7 @@ const SRC_MAP = [
   [/^src\/(interior\.ts|rooms\/)/, ['interior']],
   [/^src\/(museum\.ts|museumData\.ts|museum\/|libraries\.ts)/, ['museum']],
   [/^src\/(seamless|lazy)\.ts$/, ['seamless', 'lazy']],
-  [/^src\/realscale\.ts$/, ['realscale']],
+  [/^src\/(realscale|realsize-labels)\.ts$|^scripts\/build_realsize/, ['realscale']],
   [/^src\/lighting\.ts$/, ['lighting']],
   [/^src\/materials\.ts$|^scripts\/rebuild\.py$|^public\/rebuilt\//, ['materials', 'nyc', 'interior', 'shop']],
   [/^src\/(assets|remote|materials|textures|pbr)\.ts$/, ['nyc', 'interior', 'shop']],

@@ -24,3 +24,16 @@ Minor items:
 
 - ~~`people.ts` called `toNonIndexed()` on already non-indexed geometry~~ (fixed in 787b233).
 - `public/museum/s/*.json` (offline size shards) is not in the repo. Without it, sand3d galleries in Node (and the first visit in a browser) must stream every object to measure it. The qa suite therefore tests sand3d galleries through `assemble`/`planRoom` on synthetic objects, and tests real galleries through the Smithsonian rooms, whose sizes come with the catalog.
+
+## Real scale (`src/realscale.ts`), checked by `tests/realscale.test.ts`
+
+- **Before:** objects were corrected only when the title or the entry contained a word from the hand-written SIZE table. Otherwise only very wide family ranges applied (vehicle 0.5–25 m), so a 0.6 m "BMW 4" (label `coupe`) stayed toy-sized. Title words also beat compound labels: a `puzzle_cube` became a 0.3 m "puzzle".
+- **Now:**
+  - **Label table:** `scripts/build_realsize.py` measures every object's raw size (`public/museum/t` + `public/museum/s`, 79,985 objects). It writes `src/realsize-labels.ts`: the median size for each of 2,984 entry labels (n ≥ 3), the measured 10th–90th percentile spread for 373 broad labels, and measured per-family ranges.
+  - **Lookup order:** the entry label (measured) comes first, then the hand SIZE table, then title head nouns. A guess from a title word must also fit the family range.
+  - **Corrections:** anything inside its plausible band is never touched. Clearly wrong objects are fixed by a unit factor (mm/cm/inch/ft read as metres) when that lands within 1.6× of typical; otherwise they are scaled to the typical size.
+- **Stats** (46,227 objaverse objects, measured against the new bands):
+  - Plausible as modelled: 86.8%. After the old realScale: 86.6%. After the new one: 100%.
+  - The new realScale rescales 6,111 objects (old: 8,455): 3,370 by a unit factor, 3,059 of them down (old: 3,438 down).
+  - Example: "BMW 4" at 0.6 m comes out at 4.28 m (old: 0.6 m).
+- **Hand SIZE values that disagree with the measured label medians by more than 3×** (the label wins for entry labels): tower, console, airplane, reactor, press, bridge, flower, transformer, hoop, carriage, lamp, handbag, clock, candle, warehouse, floodlight, train, crane, turbine, dryer, tugboat. These are worth a look by their owners.

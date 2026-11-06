@@ -1,7 +1,10 @@
+import { LABEL, LABEL_RANGE, FAMILY_RANGE } from './realsize-labels';
+
 /**
  * Realistic scale. sand3d objects inherit whatever scale their source used (a 1 m cottage,
- * a 4 m teacup). We know what things are from their titles and families, so we know
- * roughly how big they should be. Values: typical largest dimension in metres.
+ * a 4 m teacup). We know what things are from their entry labels (the measured typical size per
+ * label, src/realsize-labels.ts), titles and families. SIZE: hand-written typical largest
+ * dimension in metres for words in titles (and labels too rare to measure).
  */
 const SIZE: Record<string, number> = {
   // vehicles
@@ -77,7 +80,8 @@ const SIZE: Record<string, number> = {
   saddle: 0.6, collar: 0.3, leash: 1.5, horseshoe: 0.13, kennel: 1.0, doghouse: 1.0, cage: 0.6, aquarium: 0.8, birdcage: 0.5, feeder: 0.3,
 };
 
-/** plausible range of the largest dimension per family (metres) */
+/** plausible range of the largest dimension per family (metres): the measured 2nd-98th percentile of
+ *  well-scaled objects (FAMILY_RANGE, scripts/build_realsize.py), else these hand ranges */
 const FAMILY: Record<string, [number, number]> = {
   furniture: [0.3, 3.2], electronics: [0.03, 2.2], tableware: [0.03, 0.6], 'food and drink': [0.02, 0.6], vehicle: [0.5, 25], 'aircraft or spacecraft': [0.25, 80],
   watercraft: [0.5, 120], building: [3, 250], lighting: [0.05, 6], 'hand tool': [0.05, 2.5], 'power tool': [0.1, 1.2], 'toy or game': [0.02, 1.5], stationery: [0.01, 0.6],
@@ -85,46 +89,96 @@ const FAMILY: Record<string, [number, number]> = {
   'kitchen appliance': [0.1, 1.2], 'home appliance': [0.15, 2.2], 'bathroom fixture': [0.1, 2.4], 'medical or personal care': [0.01, 1.5], 'measuring instrument': [0.02, 1.5],
   'machine or industrial': [0.05, 15], 'garden or outdoor': [0.05, 12], 'architectural element': [0.1, 40], 'fastener or hardware': [0.005, 0.6], 'animal gear': [0.05, 3],
 };
+const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+/** plausible [min, max] largest dimension (m) of an object family, or null if unknown */
+export function familyRange(family: string): [number, number] | null {
+  if (!has(FAMILY, family)) return null;
+  return has(FAMILY_RANGE, family) ? FAMILY_RANGE[family] : FAMILY[family];
+}
 
 const WORD = /[a-z]+/g;
 function singular(w: string) {
-  if (SIZE[w] !== undefined) return w;
-  if (w.endsWith('ies') && SIZE[w.slice(0, -3) + 'y'] !== undefined) return w.slice(0, -3) + 'y';
-  if (w.endsWith('es') && SIZE[w.slice(0, -2)] !== undefined) return w.slice(0, -2);
-  if (w.endsWith('s') && SIZE[w.slice(0, -1)] !== undefined) return w.slice(0, -1);
+  if (has(SIZE, w)) return w;
+  if (w.endsWith('ies') && has(SIZE, w.slice(0, -3) + 'y')) return w.slice(0, -3) + 'y';
+  if (w.endsWith('es') && has(SIZE, w.slice(0, -2))) return w.slice(0, -2);
+  if (w.endsWith('s') && has(SIZE, w.slice(0, -1))) return w.slice(0, -1);
   return w;
 }
-
-/** What the object most likely is: the last known noun in its title (head nouns come last in English). */
-export function typicalSize(title: string, entry?: string | null): { word: string; size: number } | null {
-  for (const text of [title, (entry ?? '').replace(/_/g, ' ')]) {
-    const words = (text.toLowerCase().replace(/([a-z])([A-Z])/g, '$1 $2').match(WORD) ?? []).map(singular);
-    for (let i = words.length - 1; i >= 0; i--) {
-      const s = SIZE[words[i]];
-      if (s !== undefined) return { word: words[i], size: s };
-    }
-  }
+function headNoun(text: string): { word: string; size: number } | null {
+  const words = (text.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().match(WORD) ?? []).map(singular);
+  for (let i = words.length - 1; i >= 0; i--) if (has(SIZE, words[i])) return { word: words[i], size: SIZE[words[i]] };
   return null;
 }
 
 /**
- * Factor to multiply an object's size by so it is realistically sized.
- * `maxDim` is its current largest dimension in metres.
+ * What the object most likely is, and its typical largest dimension (m). `measured`: from the
+ * catalogue-wide label table rather than a hand-written guess.
+ * 1. its sand3d entry label, measured over the whole catalogue (LABEL: the median of every object
+ *    with that label, scripts/build_realsize.py), e.g. 'coupe' 4.3 m, 'puzzle_cube' 0.057 m;
+ * 2. the label in the hand table (SIZE);
+ * 3. the last known noun of the title (head nouns come last in English), then of the label.
+ */
+export function typicalSize(title: string, entry?: string | null): { word: string; size: number; measured?: boolean } | null {
+  const e = (entry ?? '').toLowerCase();
+  if (e) {
+    if (has(LABEL, e)) return { word: e, size: LABEL[e], measured: true };
+    if (has(SIZE, e)) return { word: e, size: SIZE[e] };
+  }
+  return headNoun(title) ?? (e ? headNoun(e.replace(/_/g, ' ')) : null);
+}
+
+/** within this factor of its typical size an object is left exactly as modelled */
+export const SCALE_TOLERANCE = 2.5;
+
+/**
+ * The plausible largest dimension of an object: within SCALE_TOLERANCE of its typical size (or a broad
+ * label's measured spread). A
+ * measured label is trusted on its own; a guess from a title word must also fit the family's range
+ * (a "Razor Crest" spaceship is not a razor). Null when nothing is known.
+ */
+export function plausibleRange(title: string, entry: string | null | undefined, family: string): { lo: number; hi: number; typ: number } | null {
+  const t = typicalSize(title, entry);
+  const fr = familyRange(family);
+  if (t) {
+    let lo = t.size / SCALE_TOLERANCE, hi = t.size * SCALE_TOLERANCE;
+    // broad labels ('tower': a model or a building) accept their measured 10th-90th percentile
+    if (t.measured && has(LABEL_RANGE, t.word)) [lo, hi] = LABEL_RANGE[t.word];
+    if (!t.measured && fr) {
+      if (hi < fr[0] || lo > fr[1]) return { lo: fr[0], hi: fr[1], typ: Math.sqrt(fr[0] * fr[1]) };
+      lo = Math.max(lo, fr[0]);
+      hi = Math.min(hi, fr[1]);
+    }
+    return { lo, hi, typ: Math.min(hi, Math.max(lo, t.size)) };
+  }
+  return fr ? { lo: fr[0], hi: fr[1], typ: Math.sqrt(fr[0] * fr[1]) } : null;
+}
+
+/** a unit fix must land within this factor of the typical size */
+const UNIT_FIT = 1.6;
+/** common wrong-unit factors (mm, cm, inch, ft modelled as metres, and the inverses; not 10: no common unit) */
+const UNITS = [0.001, 0.01, 0.0254, 0.3048, 1 / 0.3048, 1 / 0.0254, 100, 1000];
+
+/**
+ * Factor to multiply an object's size by so it is realistically sized (`maxDim`: its current
+ * largest dimension in metres). Objects inside their plausible range are never touched, so nothing
+ * plausible is scaled down. Clearly wrong ones are first fixed by a unit factor (centimetres or
+ * inches modelled as metres...) if one lands them within UNIT_FIT of the typical size, which keeps
+ * their own size relative to it; otherwise they are scaled to the typical size.
  */
 export function realScale(title: string, entry: string | null | undefined, family: string, maxDim: number, dataset = 'objaverse'): number {
   if (!(maxDim > 0)) return 1;
   // CAD parts, Articraft, SimReady and AutoMate are modelled at real size already
   if (dataset !== 'objaverse') return 1;
-  const t = typicalSize(title, entry);
-  if (t) {
-    const r = maxDim / t.size;
-    if (r > 2.2 || r < 1 / 2.2) return t.size / maxDim;
-    return 1;
+  const r = plausibleRange(title, entry, family);
+  if (!r) return 1;
+  if (maxDim >= r.lo * 0.999 && maxDim <= r.hi * 1.001) return 1;
+  let best = 0, bestErr = Infinity;
+  for (const u of UNITS) {
+    const s = maxDim * u;
+    if (s < r.lo || s > r.hi) continue;
+    const err = Math.abs(Math.log(s / r.typ));
+    if (err > Math.log(UNIT_FIT)) continue; // a unit must bring it close, not just into the broad band
+    if (err < bestErr) { bestErr = err; best = u; }
   }
-  const range = FAMILY[family];
-  if (range) {
-    if (maxDim > range[1]) return range[1] / maxDim;
-    if (maxDim < range[0]) return range[0] / maxDim;
-  }
-  return 1;
+  return best || r.typ / maxDim;
 }
