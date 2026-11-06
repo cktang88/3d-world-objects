@@ -1292,6 +1292,10 @@ interface Ped {
   dist: number;
   /** drawn by the far crowd */
   far?: boolean;
+  /** in the camera frustum this frame, its rank by distance among those, beyond the near cap */
+  seen?: boolean;
+  rank?: number;
+  capped?: boolean;
   /** simulated position / facing; copied to the rendered person on its animation frames */
   pos: THREE.Vector3;
   rot: number;
@@ -1315,9 +1319,20 @@ const COUNT = (() => {
     return 110;
   }
 })();
-const SHADOWS = 20;
+/** ?pcap=0: the round-7 behaviour (no near cap, far crowd from 32 m, 20 shadow casters,
+ *  unmerged head parts), for before/after counts */
+const PCAP = (() => {
+  try {
+    return new URLSearchParams(location.search).get('pcap') !== '0';
+  } catch {
+    return true;
+  }
+})();
+const SHADOWS = PCAP ? 8 : 20;
 /** switch to / from the VAT far crowd (hysteresis) */
-const FAR_IN = LOWQ ? 22 : 32, FAR_OUT = LOWQ ? 18 : 28;
+const FAR_IN = !PCAP ? (LOWQ ? 22 : 32) : LOWQ ? 16 : 20, FAR_OUT = !PCAP ? (LOWQ ? 18 : 28) : LOWQ ? 13 : 16;
+/** at most this many full skinned people (the nearest in view); everyone else is in the far crowd */
+const NEAR_MAX = !PCAP ? 1e9 : LOWQ ? 12 : 20;
 /** ?pfreeze=0 disables culling / frozen frames (for before/after perf comparisons) */
 const FREEZE = (() => {
   try {
@@ -1584,19 +1599,35 @@ export class Pedestrians {
     }
     const far = this.farCrowd?.ready ? this.farCrowd : null;
     far?.begin();
+    // distances and visibility first: only the nearest NEAR_MAX people in view are full skinned
+    // people (the rest are far-crowd instances), whatever the crowd density
+    for (const pd of this.peds) {
+      pd.dist = Math.hypot(pd.pos.x - p.x, pd.pos.z - p.z);
+      _sphere.center.set(pd.pos.x, pd.pos.y + 0.9, pd.pos.z).applyMatrix4(this.group.matrixWorld);
+      _sphere.radius = pd.p.noPhone ? 2.2 : 1.4;
+      pd.seen = !FREEZE || pd.dist < 6 || !cam || this.frustum.intersectsSphere(_sphere);
+    }
+    const order = this.order;
+    order.length = 0;
+    for (const pd of this.peds) order.push(pd);
+    order.sort((a, b) => a.dist - b.dist);
+    let rank = 0;
+    for (const pd of order) {
+      // hysteresis: someone already near keeps their place over a newcomer until 3 ranks later
+      pd.rank = pd.seen ? rank++ : 1e9;
+      pd.capped = !!far && pd.rank >= (pd.far ? NEAR_MAX : NEAR_MAX + 3);
+    }
     for (const pd of this.peds) {
       // LOD: animate near people every frame, far ones every 2nd / 4th frame, off-screen ones not
       // at all (they keep their last pose and matrices and are hidden)
-      const d = Math.hypot(pd.pos.x - p.x, pd.pos.z - p.z);
-      pd.dist = d;
+      const d = pd.dist;
       const r = pd.p.root;
       pd.acc = Math.min(pd.acc + dt, 4);
-      _sphere.center.set(pd.pos.x, pd.pos.y + 0.9, pd.pos.z).applyMatrix4(this.group.matrixWorld);
-      _sphere.radius = pd.p.noPhone ? 2.2 : 1.4;
-      const seen = !FREEZE || d < 6 || !cam || this.frustum.intersectsSphere(_sphere);
-      // beyond ~30 m: one instance of the VAT far crowd instead of a skinned person. Between
-      // FAR_OUT and FAR_IN both are drawn with complementary screen-door dither patterns.
-      const fadeNear = far ? 1 - THREE.MathUtils.smoothstep(d, FAR_OUT, FAR_IN) : 1;
+      const seen = pd.seen;
+      // beyond ~20 m (or past the nearest NEAR_MAX): one instance of the VAT far crowd instead of
+      // a skinned person. Between FAR_OUT and FAR_IN both are drawn with complementary
+      // screen-door dither patterns.
+      const fadeNear = far ? (pd.capped ? 0 : 1 - THREE.MathUtils.smoothstep(d, FAR_OUT, FAR_IN)) : 1;
       if (fadeNear < 1) {
         const farOnly = fadeNear <= 0;
         if (farOnly) {
@@ -1649,10 +1680,6 @@ export class Pedestrians {
     }
     far?.end();
     // shadows only for the nearest SHADOWS people (skinned shadow casters cost a full skinning pass)
-    const order = this.order;
-    order.length = 0;
-    for (const pd of this.peds) order.push(pd);
-    order.sort((a, b) => a.dist - b.dist);
     order.forEach((pd, i) => pd.p.setShadows(i < SHADOWS && pd.dist < 30));
   }
   private order: Ped[] = [];
