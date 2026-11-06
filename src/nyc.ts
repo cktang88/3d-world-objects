@@ -353,7 +353,7 @@ export class NycLevel implements Level {
         for (let t = run.from + 9; t < run.to - 3; t += rng.range(8, 11)) {
           const [x, z] = P(t);
           if (near(x, z, 2.6)) continue;
-          tree(stat, x, z, rng);
+          tree(stat, x, z, rng, group, run.axis);
           colliders.push(rect(x, z, 0.5, 0.5));
         }
       }

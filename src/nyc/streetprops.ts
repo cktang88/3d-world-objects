@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { Rng } from '../rng';
 import { mat, glow } from '../build';
-import { surface } from '../pbr';
 import { signTex } from '../textures';
-import { B, C, M, SIG, CURB, unitSphere, streetName } from './common';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { B, C, M, SIG, CURB, unitSphere, streetName, canvasTex } from './common';
+import { addTree, SPECIES, TREE_VARIANTS, type Species } from './streettrees';
 import { streetLightMarker } from '../lighting';
 
 /** Street furniture: signals, name signs, lamp posts, trees, hydrants, subway entrances. */
@@ -63,79 +65,178 @@ export function lampPost(parent: THREE.Object3D, group: THREE.Group, x: number, 
   group.add(streetLightMarker(hx, 7.9, hz)); // lighting.ts lights it at night
 }
 
-/** a lumpy, displaced leaf cluster (shared geometry, a few variants) */
-export const leafGeos: THREE.BufferGeometry[] = [];
-export function leafCluster(i: number) {
-  if (!leafGeos.length) {
-    for (let v = 0; v < 4; v++) {
-      const g = new THREE.IcosahedronGeometry(0.5, 2);
-      const pos = g.getAttribute('position') as THREE.BufferAttribute;
-      const tmpv = new THREE.Vector3();
-      for (let k = 0; k < pos.count; k++) {
-        tmpv.fromBufferAttribute(pos, k);
-        const n = Math.sin(tmpv.x * 13 + v) * Math.sin(tmpv.y * 11 + v * 2) * Math.sin(tmpv.z * 9 + v * 3);
-        tmpv.multiplyScalar(1 + 0.22 * n + 0.08 * Math.sin(tmpv.x * 41 + tmpv.z * 37));
-        pos.setXYZ(k, tmpv.x, tmpv.y, tmpv.z);
-      }
-      g.computeVertexNormals();
-      leafGeos.push(g);
-    }
-  }
-  return leafGeos[i % leafGeos.length];
-}
-export const LEAF_GREENS = ['#3f6b2a', '#4c7a30', '#5a8a36', '#36602a', '#6a9440', '#47722e'];
+// ---------------------------------------------------------------- shared prop helpers
 
-export function tree(parent: THREE.Object3D, x: number, z: number, rng: Rng) {
-  // tree pit with a low iron guard
-  B(parent, mat('#3b3027', { rough: 1 }), 1.2, 0.02, 1.2, x, CURB, z, false);
-  for (const s of [-1, 1]) {
-    B(parent, M.iron(), 1.25, 0.04, 0.04, x, CURB + 0.38, z + s * 0.6, false);
-    B(parent, M.iron(), 0.04, 0.04, 1.25, x + s * 0.6, CURB + 0.38, z, false);
-    for (const t of [-0.6, 0, 0.6]) {
-      B(parent, M.iron(), 0.03, 0.4, 0.03, x + t, CURB, z + s * 0.6, false);
-      B(parent, M.iron(), 0.03, 0.4, 0.03, x + s * 0.6, CURB, z + t, false);
-    }
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _s = new THREE.Vector3();
+/** add a mesh of a shared geometry with position / yaw (and optional pitch/roll, scale) — baked later */
+export function put(parent: THREE.Object3D, geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, ry = 0, shadow = true, rx = 0, rz = 0, sc: number | [number, number, number] = 1) {
+  const o = new THREE.Mesh(geo, m);
+  _e.set(rx, ry, rz, 'YXZ');
+  _q.setFromEuler(_e);
+  if (typeof sc === 'number') _s.setScalar(sc);
+  else _s.set(...sc);
+  o.matrixAutoUpdate = false;
+  o.matrix.compose(_v.set(x, y, z), _q, _s);
+  o.castShadow = shadow;
+  parent.add(o);
+  return o;
+}
+/** child transform helper: run `fn` with a group placed at (x,y,z,ry); everything added to it is baked in place */
+export function at(parent: THREE.Object3D, x: number, y: number, z: number, ry: number, fn: (g: THREE.Group) => void) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  fn(g);
+  return g;
+}
+const geoCache = new Map<string, THREE.BufferGeometry>();
+export function cachedGeo(key: string, make: () => THREE.BufferGeometry) {
+  let g = geoCache.get(key);
+  if (!g) {
+    g = make();
+    geoCache.set(key, g);
   }
-  const bark = surface('tree_bark', [1, 1], { roughness: 1, normalScale: 1.5 });
-  const h = rng.range(4.5, 7.5);
-  const trunkH = h * rng.range(0.38, 0.5);
-  // tapered trunk
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.17, trunkH, 10), bark);
-  trunk.position.set(x, CURB + trunkH / 2, z);
-  trunk.castShadow = true;
-  parent.add(trunk);
-  // limbs fanning out, each carrying a few leaf clusters
-  const limbs = rng.int(4, 6);
-  const crownR = h * rng.range(0.28, 0.36);
-  for (let i = 0; i < limbs; i++) {
-    const ang = (i / limbs) * Math.PI * 2 + rng.range(-0.3, 0.3);
-    const tilt = rng.range(0.45, 0.85);
-    const len = h * rng.range(0.32, 0.45);
-    const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.075, len, 7), bark);
-    const dir = new THREE.Vector3(Math.cos(ang) * Math.sin(tilt), Math.cos(tilt), Math.sin(ang) * Math.sin(tilt));
-    limb.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    const base = new THREE.Vector3(x, CURB + trunkH * rng.range(0.85, 1), z);
-    limb.position.copy(base).addScaledVector(dir, len / 2);
-    limb.castShadow = true;
-    parent.add(limb);
-    const tip = base.clone().addScaledVector(dir, len);
-    const clusters = rng.int(2, 3);
-    for (let c = 0; c < clusters; c++) {
-      const leaf = new THREE.Mesh(leafCluster(rng.int(0, 3)), mat(rng.pick(LEAF_GREENS), { rough: 0.85 }));
-      const rr = crownR * rng.range(0.45, 0.75);
-      leaf.scale.set(rr * 2, rr * rng.range(1.5, 1.9), rr * 2);
-      leaf.position.copy(tip).add(new THREE.Vector3(rng.range(-0.6, 0.6), rng.range(-0.3, 0.8), rng.range(-0.6, 0.6)));
-      leaf.rotation.y = rng.range(0, 6.28);
-      leaf.castShadow = true;
-      parent.add(leaf);
+  return g;
+}
+/** LatheGeometry from a [radius, y] profile */
+export function lathe(key: string, prof: [number, number][], seg = 16) {
+  return cachedGeo(`lathe:${key}`, () => new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), seg));
+}
+export function rbox(key: string, w: number, h: number, d: number, r: number, seg = 2) {
+  return cachedGeo(`rbox:${key}`, () => {
+    const g = new RoundedBoxGeometry(w, h, d, seg, r);
+    g.translate(0, h / 2, 0);
+    return g;
+  });
+}
+export function cyl(key: string, rt: number, rb: number, h: number, seg = 12, open = false) {
+  return cachedGeo(`cyl:${key}`, () => {
+    const g = new THREE.CylinderGeometry(rt, rb, h, seg, 1, open);
+    g.translate(0, h / 2, 0);
+    return g;
+  });
+}
+/** tube along a polyline/curve */
+export function tube(key: string, pts: THREE.Vector3[], r: number, tubular = 24, radial = 8) {
+  return cachedGeo(`tube:${key}`, () => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.2), tubular, r, radial, false));
+}
+
+/** painted / galvanised metals shared by all street furniture */
+export const PM = {
+  black: () => mat('#17181a', { rough: 0.45, metal: 0.55 }),
+  galv: () => mat('#8d9192', { rough: 0.42, metal: 0.85 }),
+  galvDark: () => mat('#5f6466', { rough: 0.5, metal: 0.8 }),
+  dotGreen: () => mat('#1f4a33', { rough: 0.5, metal: 0.4 }),
+  signalYellow: () => mat('#e6b414', { rough: 0.5, metal: 0.15 }),
+  signalBlack: () => mat('#141516', { rough: 0.55, metal: 0.2 }),
+  granite: () => mat('#9b968d', { rough: 0.85 }),
+  concrete: () => mat('#a39f97', { rough: 0.95 }),
+};
+
+// ---------------------------------------------------------------- street trees
+
+/** soil + mulch texture for tree pits */
+let soilMat: THREE.MeshStandardMaterial | null = null;
+function pitSoil() {
+  if (soilMat) return soilMat;
+  const t = canvasTex(256, 256, (g) => {
+    g.fillStyle = '#3a2e24';
+    g.fillRect(0, 0, 256, 256);
+    const r = new Rng(9);
+    for (let i = 0; i < 1600; i++) {
+      g.fillStyle = r.pick(['#2a211a', '#4a3a2c', '#5b4733', '#6b5238', '#26201b', '#3f4a2a']);
+      g.save();
+      g.translate(r.range(0, 256), r.range(0, 256));
+      g.rotate(r.range(0, 6.28));
+      g.fillRect(-r.range(2, 7), -1, r.range(4, 14), r.range(1.5, 3));
+      g.restore();
     }
+    // a few weeds / dead leaves
+    for (let i = 0; i < 60; i++) {
+      g.fillStyle = r.pick(['#4f6a2c', '#6b7a34', '#8a6a3a']);
+      g.beginPath();
+      g.ellipse(r.range(0, 256), r.range(0, 256), r.range(2, 5), r.range(1, 2.5), r.range(0, 3), 0, 6.28);
+      g.fill();
+    }
+  }, true);
+  soilMat = new THREE.MeshStandardMaterial({ map: t, roughness: 1 });
+  return soilMat;
+}
+
+/** NYC tree guard: black steel, 18 in high, top rail with hairpin loops and pickets */
+function guardGeo(L: number, W: number) {
+  return cachedGeo(`guard:${L}x${W}`, () => {
+    const parts: THREE.BufferGeometry[] = [];
+    const H = 0.46;
+    const add = (g: THREE.BufferGeometry, x: number, y: number, z: number, ry = 0) => {
+      g.rotateY(ry);
+      g.translate(x, y, z);
+      parts.push(g.index ? g.toNonIndexed() : g);
+    };
+    const sides: [number, number, number, number][] = [
+      [0, -W / 2, L, 0], [0, W / 2, L, 0], [-L / 2, 0, W, Math.PI / 2], [L / 2, 0, W, Math.PI / 2],
+    ];
+    for (const [cx, cz, len, ry] of sides) {
+      // top and bottom rails (flat bar)
+      add(new THREE.BoxGeometry(len, 0.02, 0.04), cx, H, cz, ry);
+      add(new THREE.BoxGeometry(len, 0.035, 0.016), cx, 0.09, cz, ry);
+      // hairpin loops hanging from the top rail
+      const n = Math.round(len / 0.16);
+      for (let i = 0; i < n; i++) {
+        const t = -len / 2 + (i + 0.5) * (len / n);
+        const loop = new THREE.TorusGeometry(0.06, 0.009, 4, 8, Math.PI);
+        loop.rotateZ(Math.PI);
+        // legs of the hairpin
+        const legs = new THREE.BoxGeometry(0.016, H - 0.09 - 0.06, 0.016);
+        const lx = Math.cos(ry) * t, lz = -Math.sin(ry) * t;
+        add(loop, cx + lx, H - 0.0, cz + lz, ry);
+        const l1 = legs.clone(), l2 = legs;
+        add(l1, cx + lx + Math.cos(ry) * 0.06, 0.09 + (H - 0.15) / 2, cz + lz - Math.sin(ry) * 0.06, ry);
+        add(l2, cx + lx - Math.cos(ry) * 0.06, 0.09 + (H - 0.15) / 2, cz + lz + Math.sin(ry) * 0.06, ry);
+      }
+    }
+    // corner posts with ball finials, driven into the soil
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      add(new THREE.BoxGeometry(0.04, H + 0.02, 0.04), (sx * L) / 2, (H + 0.02) / 2, (sz * W) / 2);
+      add(new THREE.SphereGeometry(0.028, 8, 6), (sx * L) / 2, H + 0.04, (sz * W) / 2);
+    }
+    for (const p of parts) for (const k of Object.keys(p.attributes)) if (!['position', 'normal', 'uv'].includes(k)) p.deleteAttribute(k);
+    return mergeGeometries(parts, false)!;
+  });
+}
+
+/**
+ * A street tree in its pit: granite-edged soil pit along the kerb, an optional steel guard, and an
+ * instanced procedural tree (per-chunk LOD) added to `group`.
+ */
+export function tree(stat: THREE.Object3D, x: number, z: number, rng: Rng, group: THREE.Object3D, axis: 'x' | 'z' = 'x', species?: Species) {
+  const ry = axis === 'x' ? 0 : Math.PI / 2;
+  const L = 2.4, W = 1.2;
+  at(stat, x, CURB, z, ry, (g) => {
+    // pit soil, slightly sunk, with a raised granite / concrete edge
+    put(g, cachedGeo('pitSoil', () => {
+      const p = new THREE.PlaneGeometry(L, W);
+      p.rotateX(-Math.PI / 2);
+      const uv = p.getAttribute('uv') as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * L, uv.getY(i) * W);
+      return p;
+    }), pitSoil(), 0, 0.012, 0, 0, false);
+    const edge = PM.granite();
+    put(g, rbox('pitEdgeL', L + 0.2, 0.05, 0.1, 0.012), edge, 0, -0.01, W / 2 + 0.05, 0, false);
+    put(g, rbox('pitEdgeL', L + 0.2, 0.05, 0.1, 0.012), edge, 0, -0.01, -W / 2 - 0.05, 0, false);
+    put(g, rbox('pitEdgeW', 0.1, 0.05, W, 0.012), edge, L / 2 + 0.05, -0.01, 0, 0, false);
+    put(g, rbox('pitEdgeW', 0.1, 0.05, W, 0.012), edge, -L / 2 - 0.05, -0.01, 0, 0, false);
+    if (rng.chance(0.6)) put(g, guardGeo(L, W), PM.black(), 0, 0, 0, 0, true);
+  });
+  // block-dominant species, the odd one different
+  let sp = species;
+  if (!sp) {
+    group.userData.treeSpecies ??= rng.pick(['plane', 'plane', 'plane', 'locust', 'locust', 'pear'] as Species[]);
+    group.userData.treeVariant ??= rng.int(0, TREE_VARIANTS - 1);
+    sp = rng.chance(0.85) ? group.userData.treeSpecies : rng.pick(SPECIES);
   }
-  // crown top
-  const top = new THREE.Mesh(leafCluster(rng.int(0, 3)), mat(rng.pick(LEAF_GREENS), { rough: 0.85 }));
-  top.scale.set(crownR * 1.6, crownR * 1.3, crownR * 1.6);
-  top.position.set(x, CURB + h - crownR * 0.4, z);
-  top.castShadow = true;
-  parent.add(top);
+  addTree(group, sp!, sp === group.userData.treeSpecies ? group.userData.treeVariant ?? 0 : 0, x + (axis === 'x' ? rng.range(-0.3, 0.3) : 0), CURB + 0.01, z + (axis === 'z' ? rng.range(-0.3, 0.3) : 0), rng);
 }
 
 export function hydrant(parent: THREE.Object3D, x: number, z: number) {
