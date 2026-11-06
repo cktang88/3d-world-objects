@@ -41,7 +41,12 @@ async function simulatePeople(seconds: number): Promise<PedLog> {
       if (inRoad && lightFor(pd.axis === 'x' ? 'z' : 'x', time) === 'g') log.caught++;
     }
   }
-  for (const pd of P.peds as unknown as { p: { scaleH: number; gender: string } }[]) log.heights.push((pd.p.gender === 'male' ? 1.712 : 1.655) * pd.p.scaleH);
+  // the stature as drawn (the body's box with shoes and hair; base-mesh height constants under-read short people)
+  for (const pd of P.peds as unknown as { p: { root: THREE.Object3D } }[]) {
+    pd.p.root.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(pd.p.root);
+    log.heights.push(b.max.y - b.min.y);
+  }
   log.n = P.peds.length;
   return log;
 }

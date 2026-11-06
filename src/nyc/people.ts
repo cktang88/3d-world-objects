@@ -871,6 +871,9 @@ function hairMat(base: THREE.MeshStandardMaterial, color: string) {
 
 // ---------------------------------------------------------------- one person
 export type Activity = 'walk' | 'idle' | 'phone' | 'talk';
+/** the walk clips' ground speed at a 1.83 m body (m/s), from foot-plant measurement */
+const CLIP_SPEED: Record<Gender, number> = { male: 1.045, female: 1.085 };
+
 export class Person {
   root: THREE.Group;
   mixer: THREE.AnimationMixer;
@@ -1019,8 +1022,11 @@ export class Person {
     const skirt = o.coatLen >= 0 ? coatSkirtGeo(gender, o.coatLen) : null;
     this.propSrc = { parts: [...parts, ...hairParts], skinned: headSkinned, skirt, skirtColor: o.top, geoInv: A.geoInv };
     this.buildProps(false);
-    // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
-    const target = gender === 'male' ? 1.76 * r.range(0.94, 1.06) : 1.66 * r.range(0.95, 1.05);
+    // root scale: base meshes are tall; real US adults (NHANES): men 1.755 m sd 0.073, women 1.625 m sd 0.066,
+    // normally distributed (clamped to -1.9 / +2.3 sd) - a uniform +-6% made the crowd too even and the women too tall
+    const gauss = Math.sqrt(-2 * Math.log(Math.max(1e-9, r.next()))) * Math.cos(2 * Math.PI * r.next());
+    const z = THREE.MathUtils.clamp(gauss, -1.9, 2.3);
+    const target = gender === 'male' ? 1.755 + 0.073 * z : 1.625 + 0.066 * z;
     model.scale.setScalar(target / b.height);
     if (r.chance(0.3)) this.walkClip = 'Walk_Formal_Loop';
     this.twoHands = r.chance(0.3);
@@ -1312,11 +1318,15 @@ export class Person {
     }
     if (this.phone) this.phone.visible = a === 'phone';
   }
-  /** walking speed in m/s drives the cadence (clip walks ~0.98 m/s) */
+  /**
+   * walking speed in m/s drives the cadence. The clips' own ground speed at a 1.83 m scale, measured from the
+   * planted foot (tests/people-gait.test.ts): male 1.045 m/s, female 1.085 m/s (0.98 for both made the planted
+   * foot skate backwards at 7% / 11% of the walking speed)
+   */
   setSpeed(v: number) {
     this.speed = this.activity === 'walk' ? v : 0;
     const w = this.actions.get(this.walkClip);
-    if (w) w.timeScale = Math.max(0.5, v / (0.98 * this.model().scale.x * (BODY[this.gender].height / 1.83)));
+    if (w) w.timeScale = Math.max(0.5, v / (CLIP_SPEED[this.gender] * this.model().scale.x * (BODY[this.gender].height / 1.83)));
   }
   private model() {
     return this.root.children[0];
