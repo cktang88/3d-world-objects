@@ -33,6 +33,7 @@ const scene: LabScene = {
       o.add(near);
       if (brake) {
         brake.visible = params.has('brake');
+        o.userData.braking = params.has('brake');
         o.add(brake);
       }
       for (const w of wheels) w.rotation.x = Number(params.get('spin') ?? 0);
@@ -44,6 +45,7 @@ const scene: LabScene = {
     fleetInstances.update(camera.position);
     (window as any).__fleetTris = tris;
     (window as any).__fleet = ready;
+    (window as any).__fleetInstances = fleetInstances;
   },
   update() {
     if (cam) fleetInstances.update(cam.position);

@@ -344,7 +344,9 @@ export class Traffic {
       const pg = (along - c.t) * c.dir - c.len / 2;
       if (Math.abs(across - c.line) < c.wid && pg > -1 && pg < 12) target = 0;
       const brake = c.obj.userData.brake as THREE.Object3D | undefined;
-      if (brake) brake.visible = target < c.v - 0.3 || c.v < 0.5;
+      const braking = target < c.v - 0.3 || c.v < 0.5;
+      c.obj.userData.braking = braking; // brake-light glow cards (FleetInstances)
+      if (brake) brake.visible = braking;
       c.v += (target - c.v) * Math.min(1, dt * (target < c.v ? 4 : 1.2));
       c.t += c.dir * c.v * dt;
       const x = c.axis === 'x' ? c.t : c.line, z = c.axis === 'x' ? c.line : c.t;

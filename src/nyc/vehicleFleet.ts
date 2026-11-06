@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { FLAGS } from '../flags';
 import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
+import { getNight } from '../lighting';
 
 /**
  * The traffic fleet: detailed CC-BY car models (scripts/build_vehicles.mjs -> public/assets/vehicles/), each with a
@@ -130,6 +131,8 @@ export interface Prepared {
   wheels: Wheel[];
   /** the rear red lamp lenses, slightly proud of the body: lit while braking */
   brake: THREE.BufferGeometry | null;
+  /** head/tail lamp glow cards (front white, rear red) and the front/rear z of the body */
+  lamps?: { headGeo: THREE.BufferGeometry; tailGeo: THREE.BufferGeometry; front: number; rear: number };
 }
 
 const prepared = new Map<string, Promise<Prepared | null>>();
@@ -140,7 +143,8 @@ export function loadFleet(id: string): Promise<Prepared | null> {
     p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`), gltf()!.loadAsync(`${base}_lod2.glb`)])
       .then(([a, b, c]) => {
         const lod0 = prepare(a.scene, id);
-        return { id, lod0, lod1: prepare(b.scene, id), lod2: prepare(c.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0), brake: brakeLenses(lod0) };
+        const lod1 = prepare(b.scene, id);
+        return { id, lod0, lod1, lod2: prepare(c.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0), brake: brakeLenses(lod0), lamps: lampCards(lod1) };
       })
       .catch((e) => {
         console.warn('vehicle', id, e);
@@ -488,6 +492,77 @@ function merged(p: Prepared, level: 1 | 2, paint: boolean): THREE.BufferGeometry
   return mergedCache.get(key)!;
 }
 
+// ---------------------------------------------------------------- lamps (night head/tail lights, brake lights)
+
+/** a soft round glow, for lamp cards and the headlight pool */
+let glowTex: THREE.Texture | null = null;
+function glow() {
+  if (glowTex) return glowTex;
+  if (typeof document === 'undefined') return (glowTex = new THREE.Texture());
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.25, 'rgba(255,255,255,0.85)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.18)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  glowTex = new THREE.CanvasTexture(c);
+  return glowTex;
+}
+const lampMat = (color: string) =>
+  new THREE.MeshBasicMaterial({ color, map: glow(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+/** headlights: one shared material, brightness follows the night */
+export const HEAD_MAT = lampMat('#fff2dc');
+/** tail/brake lights: per-instance colour = brightness (dim tail at night, bright when braking) */
+export const TAIL_MAT = lampMat('#ffffff');
+const POOL_MAT = new THREE.MeshBasicMaterial({ color: '#ffe9c4', map: null, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+let poolG: THREE.BufferGeometry | null = null;
+function poolGeo() {
+  if (!poolG) {
+    poolG = new THREE.PlaneGeometry(3.6, 9.5, 1, 1);
+    poolG.rotateX(-Math.PI / 2);
+    POOL_MAT.map = glow();
+  }
+  return poolG;
+}
+
+/**
+ * Glow cards where the lamps are: headlights just under the bonnet line at the front corners, tail lights at
+ * boot-lid / tailgate height at the rear corners (found from the mid LOD's shape).
+ */
+function lampCards(parts: Part[]) {
+  const box = new THREE.Box3();
+  for (const p of parts) box.union(p.geo.boundingBox!);
+  const zf = box.min.z, zr = box.max.z, hw = (box.max.x - box.min.x) / 2, H = box.max.y;
+  let topF = 0, topR = 0;
+  const v = new THREE.Vector3();
+  for (const p of parts) {
+    const pos = p.geo.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      if (Math.abs(v.x) > hw * 0.8) continue;
+      if (v.z < zf + 0.3) topF = Math.max(topF, v.y);
+      if (v.z > zr - 0.3) topR = Math.max(topR, v.y);
+    }
+  }
+  const yF = Math.min(topF - 0.12, 1.15), yR = Math.min(topR - 0.15, 0.62 * H, 1.15);
+  const card = (w: number, h: number, x: number, y: number, z: number, faceZ: number) => {
+    const g = new THREE.PlaneGeometry(w, h);
+    if (faceZ < 0) g.rotateY(Math.PI);
+    g.translate(x, y, z);
+    return g;
+  };
+  const xF = hw - 0.33, xR = hw - 0.22;
+  const headGeo = mergeGeometries([card(0.42, 0.26, -xF, yF, zf - 0.02, -1), card(0.42, 0.26, xF, yF, zf - 0.02, -1)])!;
+  const tailGeo = mergeGeometries([card(0.42, 0.26, -xR, yR, zr + 0.02, 1), card(0.42, 0.26, xR, yR, zr + 0.02, 1)])!;
+  headGeo.computeBoundingSphere();
+  tailGeo.computeBoundingSphere();
+  return { headGeo, tailGeo, front: zf, rear: zr };
+}
+
 // ---------------------------------------------------------------- one car's near LOD
 
 /**
@@ -498,15 +573,23 @@ export function nearObject(p: Prepared, paint: THREE.Material) {
   const near = new THREE.Group();
   for (const part of p.lod0) {
     const m = new THREE.Mesh(part.geo, part.mat === 'paint' ? sided(paint, part.double) : part.mat);
-    m.castShadow = true;
+    // shadows come from the instanced mid-LOD proxy (FleetInstances), not these 25-60k triangles per cascade
+    m.castShadow = false;
     m.userData.owned = false;
     near.add(m);
   }
+  // night: headlight pool on the road ahead (additive, near cars only; no real light)
+  const pool = new THREE.Mesh(poolGeo(), POOL_MAT);
+  pool.position.set(0, 0.03, (p.lamps?.front ?? -2.4) - 4.6);
+  pool.renderOrder = 2;
+  pool.userData.owned = false;
+  pool.userData.pool = true;
+  near.add(pool);
   const wheels: THREE.Object3D[] = [];
   for (const w of p.wheels) {
     const m = new THREE.Mesh(w.geo, WHEEL_MAT);
     m.position.copy(w.center);
-    m.castShadow = true;
+    m.castShadow = false;
     m.userData.owned = false;
     near.add(m);
     wheels.push(m);
@@ -529,6 +612,9 @@ const MID_PAINT = new THREE.MeshPhysicalMaterial({ color: '#fff', metalness: 0.4
 const MID_REST = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, side: THREE.DoubleSide, name: 'car-mid' });
 const FAR_PAINT = new THREE.MeshStandardMaterial({ color: '#fff', metalness: 0.4, roughness: 0.35, side: THREE.DoubleSide, name: 'car-far-paint' });
 const FAR_REST = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.25, side: THREE.DoubleSide, name: 'car-far' });
+
+const SHADOW_ONLY = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, name: 'car-shadow-proxy' });
+const TAIL_C = new THREE.Color();
 
 interface Entry {
   obj: THREE.Object3D;
@@ -591,7 +677,7 @@ class Batch {
 export class FleetInstances {
   root = new THREE.Group();
   private cars = new Set<Entry>();
-  private batches = new Map<string, { midP: Batch | null; midR: Batch | null; farP: Batch | null; farR: Batch | null }>();
+  private batches = new Map<string, Record<'midP' | 'midR' | 'farP' | 'farR' | 'shP' | 'shR' | 'head' | 'tail', Batch | null>>();
   constructor() {
     this.root.name = 'fleet-instances';
   }
@@ -606,7 +692,17 @@ export class FleetInstances {
         const g = merged(p, level, paint);
         return g ? new Batch(this.root, g, level === 1 ? (paint ? MID_PAINT : MID_REST) : paint ? FAR_PAINT : FAR_REST, level === 1, paint) : null;
       };
-      b = { midP: mk(1, true), midR: mk(1, false), farP: mk(2, true), farR: mk(2, false) };
+      // shadow proxies: near cars cast their shadow from the mid LOD (drawn depth-only, invisible in the main pass)
+      const sh = (paint: boolean) => {
+        const g = merged(p, 1, paint);
+        return g ? new Batch(this.root, g, SHADOW_ONLY, true, false) : null;
+      };
+      const lamp = (g: THREE.BufferGeometry | undefined, m: THREE.Material, colored: boolean) => (g ? new Batch(this.root, g, m, false, colored) : null);
+      b = {
+        midP: mk(1, true), midR: mk(1, false), farP: mk(2, true), farR: mk(2, false),
+        shP: sh(true), shR: sh(false),
+        head: lamp(p.lamps?.headGeo, HEAD_MAT, false), tail: lamp(p.lamps?.tailGeo, TAIL_MAT, true),
+      };
       this.batches.set(id, b);
     }
     return b;
@@ -617,6 +713,11 @@ export class FleetInstances {
     for (const b of this.batches.values()) for (const x of Object.values(b)) x?.begin();
     const c = { near: 0, mid: 0, far: 0 };
     const pos = new THREE.Vector3();
+    const night = getNight();
+    const lit = night > 0.05;
+    HEAD_MAT.color.setRGB(1, 0.95, 0.86).multiplyScalar(2.2 * night);
+    POOL_MAT.opacity = 0.32 * night;
+    POOL_MAT.visible = lit;
     for (const e of this.cars) {
       let top: THREE.Object3D = e.obj;
       while (top.parent) top = top.parent;
@@ -629,11 +730,17 @@ export class FleetInstances {
       const d = pos.distanceTo(eye);
       const isNear = d < FLEET_LOD.NEAR;
       e.near.visible = isNear;
+      const b = this.set(e.id);
+      // lamps for every car, near or not: headlights + tail lights at night, brake lights when braking
+      if (lit) b.head?.push(e.obj.matrixWorld, e.color);
+      const tail = (lit ? 1.6 * night : 0) + (e.obj.userData.braking ? 2.4 : 0);
+      if (tail > 0.02) b.tail?.push(e.obj.matrixWorld, TAIL_C.setRGB(tail, tail * 0.06, tail * 0.03));
       if (isNear) {
+        b.shP?.push(e.obj.matrixWorld, e.color);
+        b.shR?.push(e.obj.matrixWorld, e.color);
         c.near++;
         continue;
       }
-      const b = this.set(e.id);
       if (d < FLEET_LOD.MID) {
         b.midP?.push(e.obj.matrixWorld, e.color);
         b.midR?.push(e.obj.matrixWorld, e.color);
