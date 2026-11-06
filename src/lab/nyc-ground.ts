@@ -14,6 +14,7 @@ import { Rng } from '../rng';
  *   &props=0     no street furniture
  *   &before=1    the previous look for comparison (paver texture sidewalk, plain asphalt, box curbs, no paint)
  *   &open=1      block (0,1) is an open space (park): groundStrip() sidewalks along its open edges
+ *   &weather=snow|rain (weather.ts; a sidewalk shed at x≈30 on the +z street stays dry)
  *   &wet=0..1 &puddles=0..1 &snow=0..1   weather hook (groundWeather)
  * Views: corner  cam=57,1.6,21&look=49,0,28   avenue sidewalk  cam=50.5,1.6,2&look=50,0,14
  *        crosswalk cam=60,1.6,18&look=56,0,26  from above        cam=60,30,40&look=52,0,24
@@ -67,6 +68,7 @@ const scene: LabScene = {
           P.hydrant(stat, BX - 0.7, 12);
           P.subway(stat, g, BX - 2.2, BZ - 9, 3, r);
           P.litterBasket(stat, BX - 0.55, BZ - 5.2);
+          P.sidewalkShed(stat, 30, LZ + 0.02, 0, 9.6); // shelter check for snow / rain (weather.ts wxExposure)
         }
         // building masses along the lot lines, for context
         B(stat, mat('#8a6d5a', { rough: 0.9 }), LX * 2, 14, 0.6, 0, CURB, LZ - 0.3);

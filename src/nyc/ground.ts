@@ -122,6 +122,8 @@ uniform float gReady;
 uniform float gWet;
 uniform float gPuddle;
 uniform float gSnow;
+// open-sky exposure from weather.ts (0 under sheds, awnings, roofs), set in main() before gEval
+float gExpo = 1.0;
 float gH(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec2 gH2(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
 float gN(vec2 p) {
@@ -136,12 +138,13 @@ float gLine(float d, float w) { float fw = fwidth(d) + 1e-5; return (1. - smooth
 void gWeather(inout vec3 alb, inout float rough, inout vec3 nW, float low, float clear) {
   if (gWet + gPuddle + gSnow < .001) return;
   vec2 w = vGW.xz;
-  float pud = gPuddle * smoothstep(.62, .72, gFbm(w * .3 + 19.) * .55 + low * .6) * step(.97, vGN.y);
-  alb *= 1. - .38 * gWet - .2 * pud;
-  rough = mix(rough, .22, gWet * .75);
+  float pud = gPuddle * gExpo * smoothstep(.62, .72, gFbm(w * .3 + 19.) * .55 + low * .6) * step(.97, vGN.y);
+  float wet = gWet * gExpo;
+  alb *= 1. - .38 * wet - .2 * pud;
+  rough = mix(rough, .22, wet * .75);
   rough = mix(rough, .02, pud);
-  nW = normalize(mix(nW, vGN, max(pud, gWet * .5)));
-  float sn = gSnow * smoothstep(.25, .6, gFbm(w * .9 + 5.) * .5 + gSnow * .7 - clear * .55) * smoothstep(.3, .9, vGN.y);
+  nW = normalize(mix(nW, vGN, max(pud, wet * .5)));
+  float sn = gSnow * gExpo * smoothstep(.25, .6, gFbm(w * .9 + 5.) * .5 + gSnow * .7 - clear * .55) * smoothstep(.3, .9, vGN.y);
   alb = mix(alb, vec3(.78, .8, .83), sn);
   rough = mix(rough, .75, sn);
   nW = normalize(mix(nW, vGN, sn));
@@ -389,6 +392,10 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
 }
 `;
 
+/** weather.ts patches wxExposure() into the standard shader chunks; use it when present */
+const hasExpo = () => THREE.ShaderChunk.lights_physical_pars_fragment.includes('wxExposure');
+const EXPO = () => (hasExpo() ? '#ifndef WX_OFF\ngExpo = wxExposure(vGW + vGN * vec3(0.45, 0.08, 0.45));\n#endif\n' : '');
+
 function hook(m: THREE.MeshStandardMaterial, kind: string, body: string, defines: Record<string, string> = {}) {
   m.userData.pbr = true; // bake() keeps it in its own bucket
   m.onBeforeCompile = (sh) => {
@@ -403,11 +410,11 @@ vGUv = uv;`,
     );
     // our code goes *before* the includes, so wetSurface()'s additions (after them) still apply on top
     sh.fragmentShader = GLSL_CONST + GLSL_COMMON + body + sh.fragmentShader
-      .replace('#include <color_fragment>', 'vec3 gAlb; float gRough; vec3 gNW;\ngEval(gAlb, gRough, gNW);\ndiffuseColor.rgb = gAlb;\n#include <color_fragment>')
+      .replace('#include <color_fragment>', EXPO() + 'vec3 gAlb; float gRough; vec3 gNW;\ngEval(gAlb, gRough, gNW);\ndiffuseColor.rgb = gAlb;\n#include <color_fragment>')
       .replace('#include <roughnessmap_fragment>', '#define roughness gRough\n#include <roughnessmap_fragment>\n#undef roughness')
       .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(gNW, 0.0)).xyz);\n#include <normal_fragment_maps>');
   };
-  m.customProgramCacheKey = () => `nycground|${kind}|${Object.keys(defines).join(',')}`;
+  m.customProgramCacheKey = () => `nycground|${kind}|${Object.keys(defines).join(',')}|${hasExpo()}`;
   return m;
 }
 
@@ -1041,12 +1048,13 @@ vGN = vec3(0., 1., 0.);
 vGUv = uv;`,
     );
     sh.fragmentShader = GLSL_CONST + GLSL_COMMON + GLSL_WEAR + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+${EXPO()}
 if (vGUv.x > .25 && vGUv.y < .5) {
-  diffuseColor.a *= gWear() * (1. - gSnow * .85);
+  diffuseColor.a *= gWear() * (1. - gSnow * gExpo * .85);
   diffuseColor.rgb *= .82 + .18 * gN(vGW.xz * 2.3);
 }`);
   };
-  m.customProgramCacheKey = () => 'nycground|fx';
+  m.customProgramCacheKey = () => `nycground|fx|${hasExpo()}`;
   return wetSurface(m, 0.6);
 }
 
