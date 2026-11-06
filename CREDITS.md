@@ -632,3 +632,11 @@ Streamed from Poly Haven by `src/rooms/lib.ts` (via `src/libraries.ts`) into gen
 - table — https://polyhaven.com/a/table
 - kitchen — https://polyhaven.com/a/kitchen
 - shelf — https://polyhaven.com/a/shelf
+
+## NYC ground textures (public/assets/ground/, CC0)
+
+Poly Haven texture sets (CC0 1.0), repacked at 1K into one RGBA webp each (albedo luminance, roughness, normal xy) by src/nyc/ground.ts' pipeline:
+- concrete.webp ← asphalt_04, https://polyhaven.com/a/asphalt_04
+- asphalt.webp ← asphalt_01, https://polyhaven.com/a/asphalt_01
+- granite.webp ← concrete_floor_01, https://polyhaven.com/a/concrete_floor_01
+- setts.webp ← cobblestone_floor_05, https://polyhaven.com/a/cobblestone_floor_05
