@@ -1,3 +1,4 @@
+import { fixZFight } from '../zfix';
 import * as THREE from 'three';
 import { Rng, hashN } from '../rng';
 import { mat } from '../build';
@@ -314,6 +315,7 @@ export function standin(color: string, len: number, wid: number, tall: boolean):
         t.rotation.z = Math.PI / 2;
         t.position.y = 0.34;
       }
+    fixZFight(g, { step: 0.004 }); // [zfix] body, cabin, pillars and roof meet flush: lifted apart once per stand-in kind
     s = bake(g);
     s.traverse((o) => (o.castShadow = false)); // a stand-in for a few seconds: not worth the shadow cascades
     standinCache.set(key, s);

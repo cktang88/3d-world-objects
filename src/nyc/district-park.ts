@@ -110,7 +110,7 @@ export function buildPark(c: OpenCtx) {
   };
   const walk = (s: 1 | -1) => {
     const z0 = s > 0 ? SZ / 2 - 3 : -SZ / 2, z1 = s > 0 ? SZ / 2 : -SZ / 2 + 3;
-    stat.add(slab(pathMat(), inner.minX, inner.maxX, z0, z1, G + 0.012, 3));
+    stat.add(slab(pathMat(), inner.minX, inner.maxX, z0, z1, G + 0.016, 3)); // [zfix] 6 mm over the Mall pavers where they cross
     busy.push({ minX: inner.minX, maxX: inner.maxX, minZ: Math.min(z0, z1) - 2, maxZ: Math.max(z0, z1) });
     const bz = s * (SZ / 2 - 3.6);
     for (let x = inner.minX + 14; x < inner.maxX - 10; x += 30) {

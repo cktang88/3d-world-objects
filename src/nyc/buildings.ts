@@ -333,7 +333,7 @@ export class Face {
           // a rusticated course: the block sits proud, the joint below it is recessed
           const j = Math.min(0.035, (s1 - s0) * 0.3);
           quad(a, b, s0, s0 + j, 0);
-          PB(this.g, m, b - a, s1 - s0 - j, 0.05, (a + b) / 2, s0 + j, 0.026, tint, false); // [zfix] back 1 mm off the wall plane (bands and sills sit there)
+          PB(this.g, m, b - a, s1 - s0 - j, 0.05, (a + b) / 2, s0 + j, 0.034, tint, false); // [zfix] back 9 mm off the wall plane (stoops, door surrounds and sills put theirs at 0, bands at 5 mm)
         } else quad(a, b, s0, s1, 0);
       }
     }
@@ -409,7 +409,7 @@ function cornice(F: Face, kind: CorniceKind, y: number, color: string, scale = 1
     if (kind === 'bracket') {
       const bw = (end ? 0.26 : 0.16) * s;
       B(F.f, cm, bw, fh * 0.62, 0.16 * s, u, y - fh * 0.9, 0.08 * s + 0.07, false);
-      B(F.f, cm, bw, fh * 0.2 + 0.004, 0.32 * s, u, y - fh * 0.48, 0.16 * s + 0.07, false); // [zfix] top 4 mm over the console's
+      B(F.f, cm, bw + 0.008, fh * 0.2 + 0.004, 0.32 * s, u, y - fh * 0.48, 0.16 * s + 0.07, false); // [zfix] 4 mm over and wider than the console
       B(F.f, cm, bw * 0.9, fh * 0.14, 0.26 * s, u, y - fh * 0.98, 0.13 * s + 0.04, false);
       if (!end && i < n) {
         // panel between brackets
@@ -671,12 +671,12 @@ function stoop(F: Face, uc: number, parlor: number, stoneM: THREE.Material, tint
   const w = 1.9;
   const run = n * tread;
   // landing at the door, then the flight down towards the street
-  PB(F.g, stoneM, w + 0.5, parlor, land, uc, 0, land / 2, tint);
+  PB(F.g, stoneM, w + 0.5, parlor, land - 0.004, uc, 0, land / 2 + 0.002, tint); // [zfix] back 4 mm off the wall (cheek walls end there)
   for (let k = 0; k < n; k++) {
     const hgt = parlor - (k + 1) * rise + rise;
     PB(F.g, stoneM, w, hgt, tread + 0.02, uc, 0, land + k * tread + tread / 2, tint);
     // nosing
-    B(F.f, mat(shade(tint, 0.8), { rough: 0.9 }), w + 0.04, 0.03, 0.04, uc, hgt - 0.03, land + k * tread + 0.01, false);
+    B(F.f, mat(shade(tint, 0.8), { rough: 0.9 }), w + 0.04, 0.034, 0.04, uc, hgt - 0.03, land + k * tread + 0.01, false); // [zfix] top 4 mm over the tread
   }
   // cheek walls with a sloped coping
   for (const s of [-1, 1]) {
@@ -1002,8 +1002,8 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       const ar = 1.6, au0 = du + 1.3, au1 = L / 2 - 0.05;
       if (au1 - au0 > 1) {
         B(F.g, M.iron(), au1 - au0, 0.04, 0.04, (au0 + au1) / 2, 1.0, ar);
-        B(F.g, M.iron(), 0.04, 0.04, ar, au1, 1.0, ar / 2);
-        B(F.g, mat('#5a5650', { rough: 0.9 }), au1 - au0, 0.15, 0.2, (au0 + au1) / 2, 0, ar);
+        B(F.g, M.iron(), 0.04, 0.04, ar - 0.004, au1, 1.0, ar / 2 + 0.002); // [zfix] off the wall plane
+        B(F.g, mat('#5a5650', { rough: 0.9 }), au1 - au0, 0.155, 0.2, (au0 + au1) / 2, 0, ar); // [zfix] 5 mm over the sidewalk plane
         for (let u = au0; u < au1; u += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, u, 0.1, ar, false);
         for (let z = 0.1; z < ar; z += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, au1, 0.1, z, false);
         colliders.push(F.rectOf(au0, au1, 0, ar + 0.1));
@@ -1078,7 +1078,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       for (const ly of levels)
         for (let k = 0; k <= n; k++) {
           const u = -L / 2 + 0.2 + ((L - 0.4) * k) / n;
-          PB(F.g, fm, 0.62, fh - 0.4, 0.1, u, ly + 0.4, 0.05, tint);
+          PB(F.g, fm, 0.62, fh - 0.4, 0.1, u, ly + 0.4 + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), 0.05, tint); // [zfix] corner piers of side faces 4 mm up
           C(F.g, colM, 0.21, fh - 1.05, u, ly + 0.62, 0.17);
           // [zfix] capitals and bases 3 mm off the wall, the base 4 mm above the pier's foot
           B(F.f, colM, 0.56, 0.24, 0.4, u, ly + fh - 0.45, 0.203, false);
@@ -1090,7 +1090,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
     } else if (type === 'prewar') {
       F.band(bandM, levels[levels.length - 1] - 0.1, 0.3, 0.1, 0.05);
       // brick quoins at the corners
-      for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), (yy / 0.6) % 2 < 1 ? 0.7 : 0.45, 0.3, F.side === 'E' || F.side === 'W' ? 0.06 : 0.05, s2 * (L / 2 - 0.3), yy + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), F.side === 'E' || F.side === 'W' ? 0.031 : 0.026, '#e3dccb', false); // [zfix] side-face quoins 4 mm up (they cross at the corner)
+      for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), ((yy / 0.6) % 2 < 1 ? 0.7 : 0.45) + (F.side === 'E' || F.side === 'W' ? 0.04 : 0), 0.3, F.side === 'E' || F.side === 'W' ? 0.06 : 0.05, s2 * (L / 2 - 0.3), yy + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), F.side === 'E' || F.side === 'W' ? 0.031 : 0.026, '#e3dccb', false); // [zfix] side-face quoins 4 mm up (they cross at the corner)
     }
     // ---- cornice
     const cKind: CorniceKind = opts.cornice ?? (type === 'midrise' ? 'parapet' : type === 'prewar' ? (rng.chance(0.65) ? 'modillion' : 'deco') : 'bracket');

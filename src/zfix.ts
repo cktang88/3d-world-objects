@@ -37,6 +37,8 @@ export interface ZOptions {
   /** fixZFight: only these meshes may be moved (pairs with one of them lift it, whichever is smaller) */
   movable?: (m: THREE.Object3D) => boolean;
   /** skip pairs whose smaller face lies flush against the back of an opposite-facing surface (never seen). Default true */
+  /** how far behind such a face its backing surface may be (m). Default 0.011 */
+  backGap?: number;
   hiddenBacks?: boolean;
   /** scanZFight: also return every pair in `list` */
   keepPairs?: boolean;
@@ -247,8 +249,9 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
     const o = t * 14;
     const nk = (nq(-F[o + 9]) * 129 + nq(-F[o + 10])) * 129 + nq(-F[o + 11]);
     const cx = (F[o] + F[o + 3] + F[o + 6]) / 3, cy = (F[o + 1] + F[o + 4] + F[o + 7]) / 3, cz = (F[o + 2] + F[o + 5] + F[o + 8]) / 3;
-    const dk0 = Math.floor(-F[o + 12] / res);
-    for (let dk = dk0 - 1; dk <= dk0 + 1; dk++) {
+    // the backing surface may stand a little behind (bands and brackets sit 5 mm off their wall): up to ~1 cm
+    const dk0 = Math.floor(-F[o + 12] / res), span = Math.ceil((opts.backGap ?? 0.011) / res);
+    for (let dk = dk0 - span; dk <= dk0 + 1; dk++) {
       const l = buckets.get(nk * 2 ** 26 + (dk + 2 ** 25));
       if (!l) continue;
       for (let i = 0; i < l.length && i < 4000; i++) {

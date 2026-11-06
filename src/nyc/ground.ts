@@ -1076,7 +1076,8 @@ export interface GroundOpts {
 }
 
 /** a straight curb from (x0,z0) to (x1,z1) whose road face points along (nx,nz): same profile and uv encoding as the block curb */
-function straightCurb(x0: number, z0: number, x1: number, z1: number, nx: number, nz: number, h = CURB + 0.003) {
+// [zfix] top 5 mm over the sidewalk strip (3 mm was within depth precision at range)
+function straightCurb(x0: number, z0: number, x1: number, z1: number, nx: number, nz: number, h = CURB + 0.005) {
   const pos: number[] = [], uv: number[] = [], idx: number[] = [];
   const L = Math.hypot(x1 - x0, z1 - z0);
   const prof: [number, number, number][][] = [
