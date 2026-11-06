@@ -39,7 +39,7 @@ await journey('shop', import.meta.url, async (h) => {
   });
   h.check('walked to the shop front', !pre.walk.stuck && pre.walk.dist < 0.6, pre.walk);
   h.check('the shop was prebuilt and shown behind the door', pre.shown, pre);
-  await h.shot('storefront');
+  await h.shot('storefront', true);
 
   h.step('walk through the threshold');
   const inn = await h.run(async (e) => {
@@ -89,7 +89,7 @@ await journey('shop', import.meta.url, async (h) => {
   });
   h.check('aimed at a container and got its E prompt', box.open !== undefined && box.tried.some((t) => t.aimed), box.tried);
   h.check('E opened it and its contents appeared', box.open && box.t >= 1 && box.meshes > 0 && box.visible, box);
-  await h.shot('container');
+  await h.shot('container', true);
 
   h.step('walk back out');
   const out = await h.run(async (e) => {

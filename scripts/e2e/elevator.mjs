@@ -74,7 +74,7 @@ await journey('elevator', import.meta.url, async (h) => {
   h.check('the ride did not force an unbuilt floor', ride.stats.forced === 0 && ride.stats.rides === 1, ride.stats);
   h.check('lift ride keeps the stack [street, lobby]', ride.info.stack.length === 2, ride.info.stack);
   h.check('still standing on the car floor (y 0)', Math.abs(ride.info.pos[1]) < 0.05, ride.info.pos);
-  await h.shot('floor3');
+  await h.shot('floor3', true);
 
   h.step('walk out of the car');
   const out = await h.run(async (e) => {

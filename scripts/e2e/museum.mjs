@@ -49,7 +49,7 @@ await journey('museum', import.meta.url, async (h) => {
   const g1 = await through(n.north[0]);
   h.check('the room behind the doorway was previewed through it', g1.shown, { previewMs: g1.previewMs, approach: g1.approach });
   h.check('walking through entered the gallery seamlessly (no fade)', g1.info.desc.kind === 'gallery' && g1.info.stack.length === 1 && g1.seamless === 1 && g1.fades === 0, g1);
-  await h.shot('gallery1');
+  await h.shot('gallery1', true);
 
   h.step('inspect an exhibit');
   const ins = await h.run(async (e) => {

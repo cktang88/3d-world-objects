@@ -87,7 +87,7 @@ await journey('building', import.meta.url, async (h) => {
   });
   h.check('the apartment has openable furniture', ward.kinds.length > 0, ward.kinds);
   h.check('E opened a wardrobe/dresser and its contents appeared', ward.open && ward.t >= 1 && ward.meshes > 0 && ward.visible, ward);
-  await h.shot('wardrobe');
+  await h.shot('wardrobe', true);
 
   h.step('Q back out, one step at a time');
   const steps = await h.run(async (e) => {

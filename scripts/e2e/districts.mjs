@@ -38,7 +38,11 @@ await journey('districts', import.meta.url, async (h) => {
       const arrived = await e.until(() => toast.classList.contains('show') && toast.textContent, 6000);
       // let the showcase objects of the block stream in (remote models: up to 25 s)
       const show = () => W.level.portals().filter((p) => p.target === 'inspect' && p.inspect && !p.box.isEmpty());
-      await e.until(() => show().length >= 3, 25000);
+      // (auto row: until a car-sized one is up, up to 40 s: showroom cars queue behind the previous block's loads)
+      const carUp = () => show().some((p) => { const z = p.box.getSize(new V()); const l = Math.max(z.x, z.z) - 0.2; return l > 3.4 && l < 6.5; });
+      const t1 = performance.now();
+      await e.until(() => (s.car ? carUp() : show().length >= 3), s.car ? 40000 : 25000);
+      const showMs = Math.round(performance.now() - t1);
       const objs = show().map((p) => {
         const sz = p.box.getSize(new V());
         const c = p.box.getCenter(new V());
@@ -49,7 +53,7 @@ await journey('districts', import.meta.url, async (h) => {
         at: [x, z], kind: district.kind, loaded: !!loaded, loadMs, toast: toast.textContent,
         walkable: D.walkable(x, z), blocked: e.blocked(W.player.pos.x, W.player.pos.z, -0.05),
         meshes: (() => { let n = 0; chunks.get(`${s.cx},${s.cz}`)?.group.traverse((o) => { if (o.isMesh) n++; }); return n; })(),
-        objs, calls: W.renderer.info.render.calls,
+        objs, showMs, calls: W.renderer.info.render.calls,
       };
     }, s);
     h.check(`${s.key}: the block streamed in`, r.loaded && r.meshes > 0, { kind: r.kind, loadMs: r.loadMs, meshes: r.meshes });
@@ -57,12 +61,12 @@ await journey('districts', import.meta.url, async (h) => {
     h.check(`${s.key}: the arrival spot is walkable and not inside a collider`, r.walkable && !r.blocked, { at: r.at, walkable: r.walkable, blocked: r.blocked });
     const bad = r.objs.filter((o) => o.len < 0.05 || o.h < 0.02 || o.len > 120 || o.h > 60);
     h.check(`${s.key}: showcase objects have plausible real sizes`, bad.length === 0, { bad, objs: r.objs });
-    if (s.car) h.check(`${s.key}: a car-sized object (3.4-6.5 m) is on show`, r.objs.some((o) => o.len >= 3.4 && o.len <= 6.5 && o.h < 2.4), r.objs);
+    if (s.car) h.check(`${s.key}: a car-sized object (3.4-6.5 m) is on show`, r.objs.some((o) => o.len >= 3.4 && o.len <= 6.5 && o.h < 2.4), { showMs: r.showMs, objs: r.objs });
     // every slot has a minimum size (src/nyc/district-*.ts): airport slots >= 2.5 m, boats >= 4 m.
     // A model squashed into a 2 m cube by flatten() (quantized rebuilds) fails here.
     if (s.plane) h.check(`${s.key}: nothing on the apron is under 2.5 m`, r.objs.every((o) => Math.max(o.len, o.h) >= 2.5), r.objs);
     if (s.key === 'pier') h.check(`${s.key}: boats are at least 4 m long`, r.objs.filter((o) => /boat|ship|yacht|tug|ferry/i.test(o.t)).every((o) => o.len >= 4), r.objs);
     if (s.plane) h.check(`${s.key}: an aircraft-sized object (>= 6 m) is on show`, r.objs.some((o) => o.len >= 6), r.objs);
-    await h.shot(s.key);
+    await h.shot(s.key, s.key === 'airport');
   }
 });

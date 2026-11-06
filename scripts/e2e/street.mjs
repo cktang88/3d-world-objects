@@ -49,7 +49,7 @@ await journey('street', import.meta.url, async (h) => {
   h.check('the crossing stayed on walkable ground', w3.nBad === 0, w3.bad);
   const s3 = await h.info();
   h.check('no errors and still in Manhattan after the crossing', s3.desc.kind === 'nyc' && s3.stack.length === 0, s3);
-  await h.shot('crossed');
+  await h.shot('crossed', true);
 
   h.step('time of day (T) and weather (Y)');
   const tod = await h.run(async (e) => {

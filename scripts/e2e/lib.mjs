@@ -11,7 +11,8 @@
  * - Hugging Face / Poly Haven requests are fetched with curl (as scripts/shot.mjs does); with
  *   notex/fast no texture is downloaded at all.
  * - pageerror and console.error are collected per step; any error or failed check exits 1.
- * - --shots saves a tiny 480x270 screenshot at the steps that call shot().
+ * - --shots saves tiny 480x270 screenshots at the journey's key steps (--shots all: every step
+ *   that calls shot(); --shots a,b: those labels). Each costs 20-60 s of software rendering.
  *
  * In the page, `window.__e2e` (installed by boot()) has the driving helpers: frames(n),
  * walk(x, z, opts) (holds W with the real Player input, yaw pointed at the target),
@@ -262,6 +263,7 @@ function pageHelpers() {
     yaw: r2(W.player.yaw),
     seam: { builds: W.seam.stats.builds, hits: W.seam.stats.hits, seamless: W.seam.stats.seamless, fades: W.seam.stats.fades, prebuilds: W.seam.stats.prebuilds },
     calls: W.renderer.info.render.calls,
+    heapMb: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1048576), geoms: W.renderer.info.memory.geometries, textures: W.renderer.info.memory.textures, programs: W.renderer.info.programs?.length,
     toast: document.getElementById('toast')?.classList.contains('show') ? document.getElementById('toast').textContent : '',
   });
   /** is (x, z) inside any of the active level's colliders (as the player would be resolved)? */
@@ -292,10 +294,11 @@ export async function harness(name, scriptUrl) {
   const results = [];
   let errors = [];
   let step = 'boot';
+  let peakMb = 0;
   const finish = (code) => {
     const failed = results.filter((r) => !r.ok);
     const errCount = results.reduce((s, r) => s + r.errors.length, 0) + errors.length;
-    log(`DONE ${results.length - failed.length}/${results.length} checks passed, ${errCount} page errors`);
+    log(`DONE ${results.length - failed.length}/${results.length} checks passed, ${errCount} page errors, browser peak ${peakMb.toFixed(0)} MB`);
     for (const f of failed) log(`  FAIL [${f.step}] ${f.what}${f.detail ? ' — ' + f.detail : ''}`);
     fs.writeFileSync(path.join(outDir, 'result.json'), JSON.stringify({ name, results, trailingErrors: errors, seconds: (Date.now() - t0) / 1000 }, null, 1));
     process.exit(code ?? (failed.length || errCount ? 1 : 0));
@@ -309,6 +312,30 @@ export async function harness(name, scriptUrl) {
 
   browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
+  // RAM watchdog: the machine is shared (16 GB); kill the browser past --maxmb (default 4000) of RSS
+  const MAXMB = Number(args.maxmb ?? 4000);
+  const rootPid = process.pid; // playwright's browser processes are children of this one
+  const rss = () => {
+    if (!rootPid) return 0;
+    const r = spawnSync('ps', ['-eo', 'pid=,ppid=,rss='], { encoding: 'utf8' });
+    const rows = (r.stdout ?? '').trim().split('\n').map((l) => l.trim().split(/\s+/).map(Number));
+    const tree = new Set([rootPid]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const [pid, ppid] of rows) if (tree.has(ppid) && !tree.has(pid)) { tree.add(pid); grew = true; }
+    }
+    return rows.reduce((s, [pid, , kb]) => s + (tree.has(pid) ? kb : 0), 0) / 1024;
+  };
+  setInterval(() => {
+    const mb = rss();
+    peakMb = Math.max(peakMb, mb);
+    if (mb > MAXMB) {
+      log(`MEMORY: browser at ${mb.toFixed(0)} MB (> ${MAXMB}) in step "${step}": killing it`);
+      results.push({ step, ok: false, what: `browser stayed under ${MAXMB} MB`, detail: `${mb.toFixed(0)} MB`, errors: [] });
+      try { browser?.process?.()?.kill('SIGKILL'); } catch {}
+      finish(1);
+    }
+  }, 2000).unref();
   await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (route) => {
     const u = route.request().url();
     if (/polyhaven|\.(hdr|exr|jpe?g|png|webp|ktx2)(\?|$)/i.test(u) && /notex=1|fast=1/.test(page.url())) return route.abort();
@@ -360,8 +387,14 @@ export async function harness(name, scriptUrl) {
       log(`${ok ? 'ok  ' : 'FAIL'} ${what}${r.detail ? ' — ' + r.detail.slice(0, 400) : ''}`);
       return !!ok;
     },
-    async shot(label) {
-      if (!args.shots) return;
+    /**
+     * A 480x270 screenshot (drawing turned on for it). Each costs 20-60 s of SwiftShader here, so
+     * --shots takes only the journey's key shots (key = true), --shots all every one, and
+     * --shots a,b the named ones.
+     */
+    async shot(label, key = false) {
+      const want = args.shots === '1' ? key : args.shots === 'all' || (args.shots ?? '').split(',').includes(label);
+      if (!want) return;
       const f = path.join(outDir, `${String(results.length).padStart(2, '0')}-${label}.png`);
       await page.evaluate(() => { window.__e2e.draw(true); return window.__e2e.frames(2); });
       await page.screenshot({ path: f, timeout: 60000 }).catch((e) => log('shot failed', e.message));
