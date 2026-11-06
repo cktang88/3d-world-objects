@@ -716,11 +716,12 @@ function doorway(F: Face, uc: number, y: number, w: number, h: number, frameColo
   const pan = mat(shade(frameColor, 0.75), { rough: 0.5 });
   for (const s of [-1, 1]) {
     const pu = uc + (s * w) / 4;
-    if (surround === 'brass') B(F.g, mat('#cfd6da', { rough: 0.05, metal: 0.6 }), w / 2 - 0.2, dh - 0.5, 0.02, pu, y + 0.3, -depth + 0.085, false);
-    else {
-      B(F.f, pan, w / 2 - 0.22, dh * 0.42, 0.03, pu, y + dh * 0.5, -depth + 0.09, false);
-      B(F.f, pan, w / 2 - 0.22, dh * 0.3, 0.03, pu, y + 0.15, -depth + 0.09, false);
-    }
+    // glazed leaves (full glass in brass lobby doors, upper half in walk-ups, upper third in brownstones):
+    // the hall behind shows through, and seamless.ts can preview the lobby
+    const g0 = surround === 'brass' ? 0.3 : surround === 'hood' ? dh * 0.6 : dh * 0.48;
+    const gw = w / 2 - 0.2, gh = dh - g0 - 0.18;
+    F.ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(pu - gw / 2, y + g0, -depth + 0.083)), gw, gh, 15, 4.5, 0.5 + s * 0.1, 1);
+    if (surround !== 'brass') B(F.f, pan, w / 2 - 0.22, Math.min(dh * 0.3, g0 - 0.3), 0.03, pu, y + 0.15, -depth + 0.09, false);
     B(F.f, mat('#c9a65a', { rough: 0.3, metal: 0.9 }), 0.03, 0.18, 0.05, uc + s * 0.07, y + 1.05, -depth + 0.1, false);
   }
   B(F.g, mat('#202020', { rough: 0.5 }), 0.02, dh, 0.09, uc, y, -depth + 0.045, false);

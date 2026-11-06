@@ -48,22 +48,38 @@ function shopAtlas() {
       drawShopWall(g, C, s.type, r);
       g.restore();
     });
-    // cell 15: an office lobby (marble, a reception desk)
+    // cell 15: a building's entrance hall seen through its door: marble wainscot, mailboxes, stairs
     g.save();
     g.translate(7 * C, 0);
     const gr = g.createLinearGradient(0, 0, 0, C);
-    gr.addColorStop(0, '#efe9dc');
-    gr.addColorStop(1, '#bdb3a0');
+    gr.addColorStop(0, '#e8e0cc');
+    gr.addColorStop(1, '#cfc4aa');
     g.fillStyle = gr;
     g.fillRect(0, 0, C, C);
-    g.fillStyle = '#5a4a3a';
-    g.fillRect(C * 0.3, C * 0.68, C * 0.4, C * 0.32);
+    g.fillStyle = '#b9ab90';
+    g.fillRect(0, C * 0.62, C, C * 0.38);
+    g.fillStyle = '#8a7a62';
+    g.fillRect(0, C * 0.6, C, 6);
+    // brass mailboxes
+    g.fillStyle = '#9a7a3a';
+    g.fillRect(C * 0.08, C * 0.35, C * 0.3, C * 0.22);
     g.fillStyle = '#c9a65a';
-    g.fillRect(C * 0.3, C * 0.68, C * 0.4, 6);
-    g.fillStyle = '#3a3a3a';
-    g.font = 'bold 40px serif';
-    g.textAlign = 'center';
-    g.fillText('LOBBY', C / 2, C * 0.3);
+    for (let r = 0; r < 4; r++) for (let c2 = 0; c2 < 5; c2++) g.fillRect(C * 0.09 + c2 * C * 0.058, C * 0.36 + r * C * 0.053, C * 0.05, C * 0.045);
+    // a flight of stairs with a banister climbing to the right
+    g.fillStyle = '#6a4a32';
+    for (let k = 0; k < 9; k++) g.fillRect(C * 0.5 + k * C * 0.05, C * 0.95 - k * C * 0.06, C * 0.5, C * 0.06);
+    g.strokeStyle = '#3a2a1e';
+    g.lineWidth = 8;
+    g.beginPath();
+    g.moveTo(C * 0.5, C * 0.75);
+    g.lineTo(C * 0.98, C * 0.2);
+    g.stroke();
+    // a ceiling lamp glow
+    const lg = g.createRadialGradient(C * 0.4, C * 0.08, 4, C * 0.4, C * 0.08, C * 0.3);
+    lg.addColorStop(0, 'rgba(255,240,200,0.9)');
+    lg.addColorStop(1, 'rgba(255,240,200,0)');
+    g.fillStyle = lg;
+    g.fillRect(0, 0, C, C * 0.4);
     g.restore();
   });
   atlasTex.wrapS = atlasTex.wrapT = THREE.ClampToEdgeWrapping;
