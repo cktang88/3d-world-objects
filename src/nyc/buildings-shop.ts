@@ -441,6 +441,17 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
     const p = B(G, mat(color, { rough: 0.6 }), signW, 0.76, 0.04, uc, sb0 + 0.1, 0.18);
     void p;
     T.add(F.m, name, uc, sb0 + 0.48, 0.205, 0.46, signW - 0.3, rng.pick(['#f7f1e3', '#ffffff', '#f2d27a']), font);
+    // gooseneck lamps washing the painted board
+    if (rng.chance(0.5)) {
+      const nl = Math.max(2, Math.round(signW / 1.8));
+      const arm = mat('#1c1c1c', { rough: 0.4, metal: 0.6 });
+      for (let k = 0; k < nl; k++) {
+        const lu = uc - signW / 2 + (signW * (k + 0.5)) / nl;
+        B(Fi, arm, 0.03, 0.03, 0.45, lu, top + 0.05, 0.38, false);
+        B(Fi, arm, 0.03, 0.18, 0.03, lu, top - 0.1, 0.6, false);
+        B(G, mat('#2a2a2a', { emissive: '#fff0c8', ei: 0.4, rough: 0.4, metal: 0.5 }), 0.2, 0.08, 0.16, lu, top - 0.16, 0.6, false);
+      }
+    }
   }
   // street number on the transom
   // ---- below the sign: gate housing or a transom
