@@ -437,6 +437,27 @@ export function leafMat() {
   m.customProgramCacheKey = () => 'nyc-leaf';
   return (leafShared = m);
 }
+/**
+ * Shadow-pass materials with the same wind sway as the visible trees (the leaves keep their
+ * alpha-tested card shapes), so shadows move with the crowns instead of standing still.
+ */
+const depthMats: Partial<Record<'bark' | 'leaves', THREE.MeshDepthMaterial>> = {};
+function treeDepthMat(part: 'bark' | 'leaves') {
+  let m = depthMats[part];
+  if (!m) {
+    m = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    if (part === 'leaves') {
+      m.map = leafMat().map;
+      m.alphaTest = 0.42;
+      m.side = THREE.DoubleSide;
+    }
+    m.onBeforeCompile = (sh) => windShader(sh, false);
+    m.customProgramCacheKey = () => `nyc-tree-depth-${part}`;
+    depthMats[part] = m;
+  }
+  return m;
+}
+
 /** remap a card geometry's per-species 0..1 uvs into the species' block of the shared leaf atlas */
 function toLeafBlock(g: THREE.BufferGeometry, sp: Species) {
   const i = TILE[sp];
@@ -687,6 +708,8 @@ export function treeMesh(species: Species, variant: number, lod: 'hi' | 'lo' = '
   const l = new THREE.Mesh(m[lod].leaves, m.leaf);
   b.castShadow = l.castShadow = true;
   b.onBeforeRender = l.onBeforeRender = tickWind;
+  b.customDepthMaterial = treeDepthMat('bark');
+  l.customDepthMaterial = treeDepthMat('leaves');
   b.receiveShadow = l.receiveShadow = true;
   g.add(b, l);
   return g;
@@ -713,8 +736,9 @@ const geoCount = (g: THREE.BufferGeometry) => [g.getAttribute('position').count,
 function chunkTrees(group: THREE.Object3D): ChunkTrees {
   let ct = group.userData.trees as ChunkTrees | undefined;
   if (ct) return ct;
-  const mk = (m: THREE.Material, v: number, i: number) => {
+  const mk = (m: THREE.Material, v: number, i: number, part: 'bark' | 'leaves') => {
     const bm = new THREE.BatchedMesh(32, v, i, m);
+    bm.customDepthMaterial = treeDepthMat(part);
     bm.castShadow = true;
     bm.receiveShadow = true;
     bm.sortObjects = false;
@@ -730,8 +754,8 @@ function chunkTrees(group: THREE.Object3D): ChunkTrees {
     return bm;
   };
   ct = {
-    bark: mk(barkMat(), 24000, 72000),
-    leaves: mk(leafMat(), 32000, 48000),
+    bark: mk(barkMat(), 24000, 72000, 'bark'),
+    leaves: mk(leafMat(), 32000, 48000, 'leaves'),
     geo: new Map(),
     verts: { bark: 0, leaves: 0, barkI: 0, leavesI: 0 },
     trees: [],

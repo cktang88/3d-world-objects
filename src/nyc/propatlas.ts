@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from '../rng';
+import { SIG, CYCLE } from './common';
 
 /**
  * Painted texture atlases for street furniture, so every decal in a chunk bakes into one draw call:
@@ -38,6 +39,10 @@ const REGIONS = {
   bikePanel: [1536, 1024, 256, 512],
   white: [1800, 1800, 16, 16],
   soil: [1536, 1536, 512, 256],
+  pedSt: [0, 1536, 256, 256],
+  pedHand: [256, 1536, 256, 256],
+  pedWalk: [512, 1536, 256, 256],
+  pedDigits: [768, 1536, 704, 128],
 } satisfies Record<string, [number, number, number, number]>;
 export type Region = keyof typeof REGIONS;
 
@@ -88,6 +93,7 @@ function drawWalker(g: CanvasRenderingContext2D, cx: number, cy: number, s: numb
   g.translate(cx, cy);
   g.scale(s, s);
   g.lineCap = 'round';
+  g.strokeStyle = g.fillStyle;
   g.lineWidth = 0.13;
   g.beginPath();
   g.arc(0.02, -0.62, 0.12, 0, 7);
@@ -161,17 +167,34 @@ function buildAtlas() {
   });
 
   // pedestrian signal: black face, lit orange hand, unlit white walker (NYC countdown style)
-  // pedestrian countdown signal: hand / walker overlay on the left, countdown digits on the right
-  paint(g, 'ped', (w, h) => {
+  // pedestrian countdown signal (one face per crossing direction): unlit hand / walker and dim
+  // "88" ghosts; the lit hand, walker and digits are separate tiles the shader swaps in
+  const pedFace = (key: Region, lit: 'none' | 'hand' | 'walk') =>
+    paint(g, key, (w, h) => {
+      g.fillStyle = '#0c0c0c';
+      g.fillRect(0, 0, w, h);
+      g.fillStyle = lit === 'walk' ? '#f4f4ee' : 'rgba(200,200,200,0.13)';
+      drawWalker(g, w * 0.27, h * 0.54, 80);
+      g.fillStyle = lit === 'hand' ? '#ff8a1a' : lit === 'walk' ? 'rgba(0,0,0,0)' : 'rgba(255,138,26,0.12)';
+      drawHand(g, w * 0.27, h * 0.56, 78);
+      sevenSeg(g, '88', w * 0.56, h * 0.26, w * 0.17, h * 0.48, 'rgba(255,138,26,0.07)');
+      g.fillStyle = 'rgba(0,0,0,0.35)';
+      for (let y = 0; y < h; y += 5) for (let x = 0; x < w; x += 5) g.fillRect(x, y, 1.5, 5), g.fillRect(x, y, 5, 1.5);
+    });
+  pedFace('ped', 'none');
+  pedFace('pedSt', 'none');
+  pedFace('pedHand', 'hand');
+  pedFace('pedWalk', 'walk');
+  // digit strip: 0-9 then blank, each cell 64 × 128 (same proportions as one digit slot on the face)
+  paint(g, 'pedDigits', (w, h) => {
     g.fillStyle = '#0c0c0c';
     g.fillRect(0, 0, w, h);
-    g.fillStyle = 'rgba(200,200,200,0.16)';
-    drawWalker(g, w * 0.27, h * 0.54, 80);
-    g.fillStyle = '#ff8a1a';
-    drawHand(g, w * 0.27, h * 0.56, 78);
-    // dim "88" ghost segments, then the lit count
-    sevenSeg(g, '88', w * 0.56, h * 0.26, w * 0.17, h * 0.48, 'rgba(255,138,26,0.07)');
-    sevenSeg(g, '12', w * 0.56, h * 0.26, w * 0.17, h * 0.48, '#ff8a1a');
+    for (let d = 0; d < 10; d++) {
+      g.fillStyle = 'rgba(255,138,26,0.07)';
+      sevenSeg(g, '8', d * 64 + 10, 8, 44, 112, 'rgba(255,138,26,0.07)');
+      sevenSeg(g, String(d), d * 64 + 10, 8, 44, 112, '#ff8a1a');
+    }
+    sevenSeg(g, '8', 640 + 10, 8, 44, 112, 'rgba(255,138,26,0.07)');
     g.fillStyle = 'rgba(0,0,0,0.35)';
     for (let y = 0; y < h; y += 5) for (let x = 0; x < w; x += 5) g.fillRect(x, y, 1.5, 5), g.fillRect(x, y, 5, 1.5);
   });
@@ -418,8 +441,83 @@ export function propAtlasLit() {
   if (!atlasEmissive) {
     const m = propAtlas();
     atlasEmissive = new THREE.MeshStandardMaterial({ map: m.map, emissiveMap: m.map, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.9, roughness: 0.3 });
+    pedAnimation(atlasEmissive);
   }
   return atlasEmissive;
+}
+
+/**
+ * Animated pedestrian countdown faces, in sync with the traffic signals. The signal cycle's phase
+ * is recovered from the shared SIG materials (the avenue green switching on marks t = 0), so no
+ * extra time hook is needed. Per channel: 0 = steady hand, 1 = walk, 2 = flashing hand + count.
+ * (Avenue channel: crossings parallel to avenue traffic; street channel: parallel to street traffic.)
+ */
+/** debugging / labs: force the cycle time (s), or -1 to follow the signals */
+export const pedDebug = { t: typeof location !== 'undefined' && new URLSearchParams(location.search).has('pedt') ? Number(new URLSearchParams(location.search).get('pedt')) : -1 };
+let pedT0 = -1, lastAveG = false;
+export function pedState() {
+  const now = performance.now() * 0.001;
+  const aveG = SIG.aveG.emissiveIntensity > 1;
+  if (aveG && !lastAveG) pedT0 = now;
+  lastAveG = aveG;
+  if (pedT0 < 0) pedT0 = now - (aveG ? 0 : SIG.stG.emissiveIntensity > 1 ? 13 : 23);
+  const t = pedDebug.t >= 0 ? pedDebug.t : (now - pedT0) % CYCLE;
+  const ch = (walk0: number, walk1: number, end: number): [number, number] => {
+    const tt = (t - walk0 + CYCLE) % CYCLE;
+    const len = end - walk0;
+    if (tt < walk1 - walk0) return [1, 0];
+    if (tt < len) return [2, Math.ceil(len - tt)];
+    return [0, 0];
+  };
+  const [am, ac] = ch(0, 6, 12.5);
+  const [sm, sc] = ch(12.5, 17, 24);
+  return [am, ac, sm, sc, now];
+}
+function pedAnimation(m: THREE.MeshStandardMaterial) {
+  const R = (r: Region) => new THREE.Vector4(...region(r));
+  const uPed = { get value() { const s = pedState(); return new THREE.Vector4(s[0], s[1], s[2], s[3]); } };
+  const uPedT = { get value() { return performance.now() * 0.001; } };
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, {
+      uPed, uPedT, uRA: { value: R('ped') }, uRS: { value: R('pedSt') }, uRH: { value: R('pedHand') }, uRW: { value: R('pedWalk') }, uRD: { value: R('pedDigits') },
+    });
+    sh.fragmentShader = `uniform vec4 uPed; uniform float uPedT; uniform vec4 uRA, uRS, uRH, uRW, uRD;
+      bool inR(vec2 uv, vec4 r) { return uv.x >= r.x && uv.x <= r.z && uv.y >= r.y && uv.y <= r.w; }
+      vec2 loc(vec2 uv, vec4 r) { return (uv - r.xy) / (r.zw - r.xy); }
+      vec2 at(vec2 l, vec4 r) { return r.xy + l * (r.zw - r.xy); }
+      vec2 pedUv(vec2 uv) {
+        vec4 r; float mode, count;
+        if (inR(uv, uRA)) { r = uRA; mode = uPed.x; count = uPed.y; }
+        else if (inR(uv, uRS)) { r = uRS; mode = uPed.z; count = uPed.w; }
+        else return uv;
+        vec2 l = loc(uv, r);
+        bool flashOn = fract(uPedT) < 0.6;
+        // l.y is measured from the bottom (flipped canvas): digits span canvas y 0.26..0.74
+        if (l.x >= 0.52 && l.y > 0.2257 && l.y < 0.7743) {
+          if (mode < 1.5) return uv;
+          float slot = l.x < 0.745 ? 0.0 : 1.0;
+          float x0 = slot < 0.5 ? 0.5214 : 0.7339;
+          vec2 dl = vec2((l.x - x0) / 0.247, (l.y - 0.2257) / 0.5486);
+          if (dl.x < 0.0 || dl.x > 1.0) return uv;
+          float d = slot < 0.5 ? floor(count / 10.0) : mod(count, 10.0);
+          if (slot < 0.5 && d < 0.5) d = 10.0; // no leading zero
+          return at(vec2((d + dl.x) / 11.0, dl.y), uRD);
+        }
+        if (l.x < 0.52) {
+          if (mode > 0.5 && mode < 1.5) return at(l, uRW);
+          if (mode < 0.5 || flashOn) return at(l, uRH);
+        }
+        return uv;
+      }
+      ` + sh.fragmentShader
+      .replace('#include <map_fragment>', `
+        vec2 pedMapUv = pedUv(vMapUv);
+        vec4 sampledDiffuseColor = texture2D( map, pedMapUv );
+        diffuseColor *= sampledDiffuseColor;`)
+      .replace('#include <emissivemap_fragment>', `
+        totalEmissiveRadiance *= texture2D( emissiveMap, pedMapUv ).rgb;`);
+  };
+  m.customProgramCacheKey = () => 'nyc-atlas-lit-ped';
 }
 
 // ---------------------------------------------------------------- alpha-tested wire mesh

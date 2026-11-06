@@ -347,11 +347,11 @@ function signalHead(axis: 'x' | 'z') {
 }
 
 /** pedestrian signal: yellow box with LED hand / walker face and a hood; front = +z */
-function pedSignal() {
-  return kit('ped', (k) => {
+function pedSignal(channel: 'ave' | 'st') {
+  return kit(`ped|${channel}`, (k) => {
     const Y = PM.signalYellow();
     k.add(new RoundedBoxGeometry(0.4, 0.38, 0.2, 2, 0.02), Y, 0, 0, 0);
-    k.add(plane(0.34, 0.32, region('ped')), propAtlasLit(), 0, 0.19, 0.101, 0, 0, 0, 1, false);
+    k.add(plane(0.34, 0.32, region(channel === 'ave' ? 'ped' : 'pedSt')), propAtlasLit(), 0, 0.19, 0.101, 0, 0, 0, 1, false);
     // hood
     k.add(new THREE.BoxGeometry(0.4, 0.015, 0.12), Y, 0, 0.375, 0.16, -0.12);
     for (const s of [-1, 1]) k.add(new THREE.BoxGeometry(0.015, 0.36, 0.1), Y, s * 0.195, 0.19, 0.15);
@@ -423,8 +423,9 @@ export function signalPole(parent: THREE.Object3D, x: number, z: number, sx: num
     place(parent, kit('sidebracket', (k) => k.add(new THREE.BoxGeometry(0.06, 0.06, 0.3), PM.galvDark(), 0, 0, -0.15)), x + ox * 0.5, CURB + 3.8, z + oz * 0.5, ry);
   }
   // pedestrian signals face across both crosswalks; push buttons below
-  place(parent, pedSignal(), x - sx * 0.0, CURB + 2.7, z + sz * 0.3, sz > 0 ? 0 : Math.PI);
-  place(parent, pedSignal(), x + sx * 0.3, CURB + 2.7, z, sx > 0 ? Math.PI / 2 : -Math.PI / 2);
+  // the face looking along z serves the crossing of the street (walk with avenue traffic)
+  place(parent, pedSignal('ave'), x - sx * 0.0, CURB + 2.7, z + sz * 0.3, sz > 0 ? 0 : Math.PI);
+  place(parent, pedSignal('st'), x + sx * 0.3, CURB + 2.7, z, sx > 0 ? Math.PI / 2 : -Math.PI / 2);
   place(parent, pushButton(), x - sx * 0.13, CURB + 1.05, z + sz * 0.1, sz > 0 ? 0 : Math.PI);
 }
 
