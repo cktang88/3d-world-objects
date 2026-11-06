@@ -6,7 +6,8 @@ import { museum, themeMembers, type Theme } from './museumData';
 import { loadRemote, animate, disposeModel, clearQueue, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { Rng, hashN } from './rng';
 import { trackForDetail } from './detail';
-import { woodFloorTex, tileFloorTex } from './textures';
+import { surface } from './pbr';
+import { realScale } from './realscale';
 
 export const PAGE = 25; // 8 cases x 3 + 1 hero
 
@@ -153,7 +154,13 @@ abstract class MuseumBase implements Level {
           disposeModel(m.object);
           return;
         }
-        const s = Math.min(fit.x / Math.max(1e-4, Math.hypot(m.size.x, m.size.z)), fit.y / Math.max(1e-4, m.size.y), 1e4);
+        // realistic scale: show the object at its true size when it fits, otherwise scaled down
+        const k = realScale(entry.title, entry.entry, entry.family, Math.max(m.size.x, m.size.y, m.size.z), entry.ds);
+        const fitS = Math.min(fit.x / Math.max(1e-4, Math.hypot(m.size.x, m.size.z)), fit.y / Math.max(1e-4, m.size.y), 1e4);
+        const s = Math.min(k, fitS);
+        const real = m.size.clone().multiplyScalar(k);
+        const shown = s / k;
+        const dims = `${fmtLen(real.x)} × ${fmtLen(real.y)} × ${fmtLen(real.z)}`;
         holder.remove(placeholder);
         holder.add(m.object);
         // the original, textured model takes over when it arrives
@@ -162,7 +169,7 @@ abstract class MuseumBase implements Level {
         holder.userData.fade = 0;
         holder.scale.setScalar(s * 0.6);
         slot.model = m;
-        slot.entry.attribution = `${m.size.x.toFixed(2)} × ${m.size.y.toFixed(2)} × ${m.size.z.toFixed(2)} m · ${m.tris.toLocaleString()} triangles`;
+        slot.entry.attribution = `${dims}${shown > 0.98 ? ' · shown at actual size' : ` · shown at 1:${Math.round(1 / shown)}`}${Math.abs(k - 1) > 0.01 ? ' · rescaled from the source to a realistic size' : ''} · ${m.tris.toLocaleString()} triangles`;
       })
       .catch(() => {
         if (!this.alive) return;
@@ -196,9 +203,8 @@ abstract class MuseumBase implements Level {
     const T = 0.3;
     const wallM = mat(wallColor, { rough: 0.95 });
     const trim = mat('#efe7d6', { rough: 0.6 });
-    const fm = floor === 'wood'
-      ? mat('#ffffff', { map: woodFloorTex('#8a5a3a'), rough: 0.45 })
-      : mat('#ffffff', { map: tileFloorTex('#d9d2c3', '#bfb6a3'), rough: 0.3 });
+    // photo-scanned floors, tiled at their real size (floor UVs below are in units of 2.5 m)
+    const fm = floor === 'wood' ? surface('floor_parquet', [2.5, 2.5], { roughness: 0.8, normalScale: 0.8 }) : surface('floor_marble', [2.5, 2.5], { roughness: 0.6, normalScale: 0.5 });
     const fl = plane(fm, W, D);
     const uv = fl.geometry.getAttribute('uv');
     // separate geometry so floor UVs can be scaled in metres
@@ -318,6 +324,10 @@ abstract class MuseumBase implements Level {
     else { s.position.set(W / 2 - off, d.h + 0.55, d.at); s.rotation.y = -Math.PI / 2; }
     this.group.add(s);
   }
+}
+
+function fmtLen(m: number) {
+  return m >= 1 ? `${m.toFixed(2)} m` : m >= 0.01 ? `${(m * 100).toFixed(1)} cm` : `${(m * 1000).toFixed(1)} mm`;
 }
 
 function shade(hex: string, f: number) {

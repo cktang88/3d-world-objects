@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { rect } from './level';
 import { box, mat, plane, glow } from './build';
-import { tileFloorTex, woodFloorTex, signTex } from './textures';
+import { signTex } from './textures';
+import { surface } from './pbr';
+import { realScale } from './realscale';
 import { Rng, hashN } from './rng';
 import { loadPools } from './museumData';
 import { loadRemote, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
@@ -43,7 +45,7 @@ export class ShopLevel implements Level {
     const g = this.group;
 
     // shell
-    const floorMat = show ? mat('#ffffff', { map: woodFloorTex(r.pick(['#a8754a', '#c8955f', '#6e4a32'])), rough: 0.5 }) : mat('#ffffff', { map: tileFloorTex(r.pick(['#e9e6df', '#efe3c9', '#dfe6ea']), r.pick(['#b9b2a2', '#2f3a44', '#9a3a2a', '#c9c3b8'])), rough: 0.3 });
+    const floorMat = show ? surface(r.pick(['floor_parquet', 'floor_laminate']), [2, 2], { roughness: 0.8 }) : surface(r.pick(['floor_tiles', 'floor_marble', 'floor_concrete']), [2, 2], { roughness: 0.7 });
     const fl = plane(floorMat, W, D);
     fl.geometry = new THREE.PlaneGeometry(W, D);
     fl.scale.set(1, 1, 1);
@@ -202,7 +204,8 @@ export class ShopLevel implements Level {
   private showpiece(e: RemoteEntry, at: THREE.Vector3, size: number, prio: number) {
     loadRemote(e, { prio }).then((m) => {
       if (!this.alive) return disposeModel(m.object);
-      const s = Math.min(size / Math.max(1e-3, Math.hypot(m.size.x, m.size.z)), 1.9 / Math.max(1e-3, m.size.y));
+      const k = realScale(e.title, e.entry, e.family, Math.max(m.size.x, m.size.y, m.size.z), e.ds);
+      const s = Math.min(k, size / Math.max(1e-3, Math.hypot(m.size.x, m.size.z)), 1.9 / Math.max(1e-3, m.size.y));
       const holder = new THREE.Group();
       holder.position.copy(at);
       holder.scale.setScalar(s);
@@ -221,7 +224,9 @@ export class ShopLevel implements Level {
       if (!this.alive) return disposeModel(m.object);
       this.models.push(m);
       const cell = facings[0].cell;
-      const s = Math.min(cell.x / Math.max(1e-4, m.size.x), (cell.y - 0.04) / Math.max(1e-4, m.size.y), cell.z / Math.max(1e-4, m.size.z));
+      // real size on the shelf; only things too big for a shelf are shrunk to fit
+      const k = realScale(e.title, e.entry, e.family, Math.max(m.size.x, m.size.y, m.size.z), e.ds);
+      const s = Math.min(k, cell.x / Math.max(1e-4, m.size.x), (cell.y - 0.04) / Math.max(1e-4, m.size.y), cell.z / Math.max(1e-4, m.size.z));
       const slots: { p: THREE.Vector3; rot: number }[] = [];
       for (const f of facings) for (const p of f.slots) slots.push({ p, rot: f.rotY });
       const sand = this.instance(m.object, slots, s);

@@ -3,6 +3,7 @@ import { Rng, hashN, paintingName } from './rng';
 import { pickModel, spawn, normScale, scaleTo, type ModelEntry } from './assets';
 import { box, cyl, plane, mat, glow, footprint, rectBox3, blob } from './build';
 import { woodFloorTex, tileFloorTex, carpetTex, wallpaperTex, rugTex, paintingTex, signTex } from './textures';
+import { surface } from './pbr';
 import { BIOMES, ROLE_BIOMES } from './biomes';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, overlaps, rect } from './level';
@@ -395,9 +396,11 @@ export class InteriorLevel implements Level {
 
     // floor
     let fm: THREE.Material;
-    if (spec.floor === 'wood') fm = mat('#ffffff', { map: woodFloorTex(r.pick(['#a8754a', '#8a5a3a', '#c8955f', '#6e4a32'])), rough: 0.55 });
-    else if (spec.floor === 'tile') fm = mat('#ffffff', { map: tileFloorTex(r.pick(['#e9e6df', '#d7dde2', '#efe3c9']), r.pick(['#c9c3b8', '#5c6670', '#b9a07a', '#2f3a44'])), rough: 0.35 });
-    else fm = mat('#ffffff', { map: carpetTex(r.pick(['#6b7a8f', '#8f6b6b', '#6b8f78', '#9a8a6a', '#5a5a6e'])), rough: 1 });
+    // floor UVs are in units of 2 m (see below): photo-scanned floors at their real tile size
+    if (spec.floor === 'wood') fm = surface(r.pick(['floor_parquet', 'floor_laminate']), [2, 2], { roughness: 0.8 });
+    else if (spec.floor === 'tile') fm = surface(r.pick(['floor_tiles', 'floor_marble']), [2, 2], { roughness: 0.6 });
+    else fm = surface('floor_carpet', [2, 2], { roughness: 1, color: r.pick(['#c8d0e0', '#e0c8c8', '#c8e0d0', '#e0d8c0']) });
+    void woodFloorTex; void tileFloorTex; void carpetTex;
     const floor = plane(fm, room.x1 - room.x0, room.z1 - room.z0, (room.x0 + room.x1) / 2, 0, (room.z0 + room.z1) / 2);
     // world-scaled floor uvs
     floor.geometry = new THREE.PlaneGeometry(room.x1 - room.x0, room.z1 - room.z0);

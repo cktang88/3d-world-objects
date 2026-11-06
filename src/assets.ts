@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Rng } from './rng';
 import { enhanceTree } from './materials';
 import { trackForDetail } from './detail';
+import { realScale, typicalSize } from './realscale';
 
 export interface ModelEntry {
   id: string;
@@ -101,6 +102,8 @@ function measure(size: readonly number[], m: Norm['m']): number {
 
 /** Scale that brings a model into its role's plausible range. */
 export function normScale(e: ModelEntry, role = e.role): number {
+  // what the object is (from its title) decides its real size; roles are only a fallback
+  if (typicalSize(e.title, e.entry)) return realScale(e.title, e.entry, e.family, Math.max(...e.size));
   const n = NORMS[role] ?? NORMS[e.role];
   if (!n) return 1;
   const v = measure(e.size, n.m);

@@ -3,7 +3,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Rng, hashN } from './rng';
 import { pickModel, spawn, normScale, type ModelEntry } from './assets';
 import { mat, glow } from './build';
-import { facade, concreteTex, concreteNormal, signTex, type FacadeStyle } from './textures';
+import { facade, signTex, type FacadeStyle } from './textures';
+import { surface, pbr } from './pbr';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, rect } from './level';
 import { BIOMES } from './biomes';
@@ -78,11 +79,13 @@ function bake(src: THREE.Object3D): THREE.Group {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh || Array.isArray(mesh.material)) return;
     const sm = mesh.material as THREE.MeshStandardMaterial;
-    const plain = sm.isMeshStandardMaterial && !sm.map && !sm.transparent && (sm.emissiveIntensity === 0 || sm.emissive.getHex() === 0);
+    // photo-textured surfaces stream their maps in later: never collapse them into flat colours
+    const plain = sm.isMeshStandardMaterial && !sm.map && !sm.userData.pbr && !sm.transparent && (sm.emissiveIntensity === 0 || sm.emissive.getHex() === 0);
+    const keepColor = !!(sm.vertexColors && mesh.geometry.getAttribute('color'));
     let g = mesh.geometry.clone();
     g.applyMatrix4(mesh.matrixWorld);
     if (g.index) g = g.toNonIndexed();
-    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k) && !(keepColor && k === 'color')) g.deleteAttribute(k);
     const n = g.getAttribute('position').count;
     if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
     if (!g.getAttribute('normal')) g.computeVertexNormals();
@@ -98,10 +101,12 @@ function bake(src: THREE.Object3D): THREE.Group {
     } else if (plain) {
       const rough = Math.round(sm.roughness * 3) / 3, metal = Math.round(sm.metalness * 2) / 2;
       material = vcMat(rough, metal);
-      col.copy(sm.color);
-      const c = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) { c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
-      g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+      if (!keepColor) {
+        col.copy(sm.color);
+        const c = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+      }
       key = `vc|${rough}|${metal}|${mesh.castShadow}`;
     } else key = `${mesh.material.uuid}|${mesh.castShadow}`;
     let b = buckets.get(key);
@@ -152,7 +157,13 @@ const NORMAL: Record<Side, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0
 /** A vertical wall quad along one side of a footprint, UVs in world units for facade tiling. */
 /** neutral facade textures, tinted per building through vertex colours */
 const facadeMats = new Map<string, THREE.MeshStandardMaterial>();
+const FACADE_PBR: Partial<Record<FacadeStyle, string[]>> = {
+  brick: ['nyc_brick', 'nyc_brick2'], prewar: ['nyc_limestone', 'nyc_brick'], brownstone: ['nyc_brownstone'], castiron: ['nyc_castiron'], panel: ['nyc_panel'],
+};
+/** facades: real brick, brownstone and limestone, tinted per building (wall UVs are in 12 m x 12.8 m units) */
 function facadeMat(style: FacadeStyle, seed: number) {
+  const pk = FACADE_PBR[style];
+  if (pk) return surface(pk[seed % pk.length], [12, 12.8], { vertexColors: true, roughness: 1, normalScale: 1.4, envMapIntensity: 0.4 });
   const key = `${style}:${seed}`;
   let m = facadeMats.get(key);
   if (!m) {
@@ -380,23 +391,44 @@ function shopWindowTex(type: string, seed: number) {
   return t;
 }
 
-const sidewalkTex = (() => {
-  let t: THREE.Texture | null = null;
-  return () => {
-    if (t) return t;
-    t = concreteTex('#b9b5ad', 96).clone();
-    t.needsUpdate = true;
-    return t;
-  };
-})();
+
 
 // ---------------------------------------------------------------- materials
 
 let sidewalkMat: THREE.MeshStandardMaterial | null = null;
+let roadMaterial: THREE.MeshStandardMaterial | null = null;
+/** road markings from the canvas; surface relief and roughness from photo-scanned asphalt */
+function roadMat() {
+  if (roadMaterial) return roadMaterial;
+  const m = new THREE.MeshStandardMaterial({ map: nycRoadTex(), roughness: 1 });
+  roadMaterial = m;
+  const p = pbr('nyc_asphalt');
+  p?.ready.then(() => {
+    const rep = (t: THREE.Texture | null) => {
+      if (!t) return null;
+      const c = t.clone();
+      c.repeat.set(AX / p.tile[0], SZ / p.tile[1]);
+      c.needsUpdate = true;
+      return c;
+    };
+    m.normalMap = rep(p.nor);
+    m.normalScale.setScalar(1.3);
+    m.roughnessMap = rep(p.arm);
+    m.needsUpdate = true;
+  });
+  return m;
+}
+/** a soft version of the wall colour, to tint photo textures without drowning them */
+function softTint(hex: string) {
+  const c = new THREE.Color(hex);
+  const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  c.multiplyScalar(0.55 / Math.max(l, 0.05));
+  return `#${new THREE.Color(1, 1, 1).lerp(c, 0.35).getHexString()}`;
+}
 const M = {
-  sidewalk: () => (sidewalkMat ??= new THREE.MeshStandardMaterial({ map: sidewalkTex(), normalMap: concreteNormal('#b9b5ad', 96), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.9 })),
+  sidewalk: () => (sidewalkMat ??= surface('nyc_sidewalk', [3, 3], { roughness: 1, normalScale: 1.2 })),
   curb: () => mat('#8f8b84', { rough: 0.8 }),
-  tar: () => mat('#3a3836', { rough: 0.95 }),
+  tar: () => surface('nyc_roof', [1, 1], { roughness: 1 }),
   iron: () => mat('#1c1d1f', { metal: 0.6, rough: 0.5 }),
   pole: () => mat('#3f4a42', { metal: 0.5, rough: 0.5 }),
   green: () => mat('#0f6b3a', { rough: 0.6 }),
@@ -553,7 +585,7 @@ export class NycLevel implements Level {
     const village = tower < 0.35;
 
     // road + sidewalk
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), mat('#ffffff', { map: nycRoadTex(), rough: 0.92 }));
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), roadMat());
     road.rotation.x = -Math.PI / 2;
     road.receiveShadow = true;
     road.userData.owned = true;
@@ -671,7 +703,7 @@ export class NycLevel implements Level {
       for (let t = 0; t < tiers; t++) {
         const th = t === tiers - 1 ? h - y : (h - y) * rng.range(0.45, 0.65);
         for (const s of sides) {
-          wallQuad(stat, fm, rr, s, y, y + th, 12, 14.4, wall);
+          wallQuad(stat, fm, rr, s, y, y + th, 12, 14.4, FACADE_PBR[style] ? softTint(wall) : wall);
           if (style !== 'glass') addWindows(ctx, rr, s, style, Math.max(y, ground), Math.floor((th - (y < ground ? ground : 0)) / 3.6), 3.6, new THREE.Color('#2a2e33'));
         }
         roof(stat, rr, y + th);
@@ -686,7 +718,7 @@ export class NycLevel implements Level {
       for (const s of sides) {
         const isFront = s === front;
         if (isFront || exposed(s)) {
-          wallQuad(stat, fm, r, s, isFront ? ground : 0, h, 12, 12.8, wall);
+          wallQuad(stat, fm, r, s, isFront ? ground : 0, h, 12, 12.8, FACADE_PBR[style] ? softTint(wall) : wall);
           addWindows(ctx, r, s, style, isFront || store ? ground : 0.6, floors - (isFront || store ? 1 : 0), fh, frameCol);
         }
         else wallQuad(stat, plain, r, s, 0, h);
@@ -1085,6 +1117,9 @@ function placeLocal(o: THREE.Object3D, at: THREE.Vector3, rot: number) {
 
 function roof(parent: THREE.Object3D, r: Rect, y: number) {
   const g = new THREE.PlaneGeometry(r.maxX - r.minX, r.maxZ - r.minZ);
+  // UVs in metres so one shared roofing material tiles correctly everywhere
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (r.maxX - r.minX), uv.getY(i) * (r.maxZ - r.minZ));
   const o = new THREE.Mesh(g, M.tar());
   o.rotation.x = -Math.PI / 2;
   o.position.set((r.minX + r.maxX) / 2, y, (r.minZ + r.maxZ) / 2);
@@ -1199,21 +1234,79 @@ function lampPost(parent: THREE.Object3D, group: THREE.Group, x: number, z: numb
   void group;
 }
 
-function tree(parent: THREE.Object3D, x: number, z: number, rng: Rng) {
-  B(parent, mat('#3b3027', { rough: 1 }), 1.2, 0.02, 1.2, x, CURB, z, false);
-  B(parent, M.iron(), 1.25, 0.25, 0.04, x, CURB, z - 0.6, false);
-  B(parent, M.iron(), 1.25, 0.25, 0.04, x, CURB, z + 0.6, false);
-  const h = rng.range(3.5, 5.5);
-  C(parent, M.bark(), 0.13, h, x, CURB, z);
-  const n = rng.int(4, 6);
-  for (let i = 0; i < n; i++) {
-    const s = new THREE.Mesh(unitSphere, i % 2 ? M.leaf() : M.leaf2());
-    const r = rng.range(1.3, 2.1);
-    s.scale.set(r * 1.2, r, r * 1.2);
-    s.position.set(x + rng.range(-1, 1), CURB + h + rng.range(-0.3, 1.4), z + rng.range(-1, 1));
-    s.castShadow = true;
-    parent.add(s);
+/** a lumpy, displaced leaf cluster (shared geometry, a few variants) */
+const leafGeos: THREE.BufferGeometry[] = [];
+function leafCluster(i: number) {
+  if (!leafGeos.length) {
+    for (let v = 0; v < 4; v++) {
+      const g = new THREE.IcosahedronGeometry(0.5, 2);
+      const pos = g.getAttribute('position') as THREE.BufferAttribute;
+      const tmpv = new THREE.Vector3();
+      for (let k = 0; k < pos.count; k++) {
+        tmpv.fromBufferAttribute(pos, k);
+        const n = Math.sin(tmpv.x * 13 + v) * Math.sin(tmpv.y * 11 + v * 2) * Math.sin(tmpv.z * 9 + v * 3);
+        tmpv.multiplyScalar(1 + 0.22 * n + 0.08 * Math.sin(tmpv.x * 41 + tmpv.z * 37));
+        pos.setXYZ(k, tmpv.x, tmpv.y, tmpv.z);
+      }
+      g.computeVertexNormals();
+      leafGeos.push(g);
+    }
   }
+  return leafGeos[i % leafGeos.length];
+}
+const LEAF_GREENS = ['#3f6b2a', '#4c7a30', '#5a8a36', '#36602a', '#6a9440', '#47722e'];
+
+function tree(parent: THREE.Object3D, x: number, z: number, rng: Rng) {
+  // tree pit with a low iron guard
+  B(parent, mat('#3b3027', { rough: 1 }), 1.2, 0.02, 1.2, x, CURB, z, false);
+  for (const s of [-1, 1]) {
+    B(parent, M.iron(), 1.25, 0.04, 0.04, x, CURB + 0.38, z + s * 0.6, false);
+    B(parent, M.iron(), 0.04, 0.04, 1.25, x + s * 0.6, CURB + 0.38, z, false);
+    for (const t of [-0.6, 0, 0.6]) {
+      B(parent, M.iron(), 0.03, 0.4, 0.03, x + t, CURB, z + s * 0.6, false);
+      B(parent, M.iron(), 0.03, 0.4, 0.03, x + s * 0.6, CURB, z + t, false);
+    }
+  }
+  const bark = surface('tree_bark', [1, 1], { roughness: 1, normalScale: 1.5 });
+  const h = rng.range(4.5, 7.5);
+  const trunkH = h * rng.range(0.38, 0.5);
+  // tapered trunk
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.17, trunkH, 10), bark);
+  trunk.position.set(x, CURB + trunkH / 2, z);
+  trunk.castShadow = true;
+  parent.add(trunk);
+  // limbs fanning out, each carrying a few leaf clusters
+  const limbs = rng.int(4, 6);
+  const crownR = h * rng.range(0.28, 0.36);
+  for (let i = 0; i < limbs; i++) {
+    const ang = (i / limbs) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    const tilt = rng.range(0.45, 0.85);
+    const len = h * rng.range(0.32, 0.45);
+    const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.075, len, 7), bark);
+    const dir = new THREE.Vector3(Math.cos(ang) * Math.sin(tilt), Math.cos(tilt), Math.sin(ang) * Math.sin(tilt));
+    limb.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    const base = new THREE.Vector3(x, CURB + trunkH * rng.range(0.85, 1), z);
+    limb.position.copy(base).addScaledVector(dir, len / 2);
+    limb.castShadow = true;
+    parent.add(limb);
+    const tip = base.clone().addScaledVector(dir, len);
+    const clusters = rng.int(2, 3);
+    for (let c = 0; c < clusters; c++) {
+      const leaf = new THREE.Mesh(leafCluster(rng.int(0, 3)), mat(rng.pick(LEAF_GREENS), { rough: 0.85 }));
+      const rr = crownR * rng.range(0.45, 0.75);
+      leaf.scale.set(rr * 2, rr * rng.range(1.5, 1.9), rr * 2);
+      leaf.position.copy(tip).add(new THREE.Vector3(rng.range(-0.6, 0.6), rng.range(-0.3, 0.8), rng.range(-0.6, 0.6)));
+      leaf.rotation.y = rng.range(0, 6.28);
+      leaf.castShadow = true;
+      parent.add(leaf);
+    }
+  }
+  // crown top
+  const top = new THREE.Mesh(leafCluster(rng.int(0, 3)), mat(rng.pick(LEAF_GREENS), { rough: 0.85 }));
+  top.scale.set(crownR * 1.6, crownR * 1.3, crownR * 1.6);
+  top.position.set(x, CURB + h - crownR * 0.4, z);
+  top.castShadow = true;
+  parent.add(top);
 }
 
 function hydrant(parent: THREE.Object3D, x: number, z: number) {
@@ -1421,11 +1514,22 @@ class Traffic {
 const SKIN = ['#f1c9a5', '#d9a77e', '#a8714a', '#7a4a2a', '#5a3620', '#e8b996'];
 const CLOTH = ['#1c1c1e', '#2a3f66', '#7a1d1d', '#e8e8e8', '#4a5a3a', '#b8946a', '#5a2a5a', '#c46a2a', '#3a3a44', '#d6c8a8'];
 const pedGeo = {
-  torso: new THREE.CylinderGeometry(0.2, 0.17, 0.62, 8),
-  head: new THREE.IcosahedronGeometry(0.12, 1),
-  limb: new THREE.BoxGeometry(0.12, 0.8, 0.13),
-  arm: new THREE.BoxGeometry(0.09, 0.62, 0.09),
+  torso: new THREE.CapsuleGeometry(0.16, 0.36, 6, 14),
+  hips: new THREE.CapsuleGeometry(0.15, 0.08, 6, 14),
+  neck: new THREE.CylinderGeometry(0.05, 0.06, 0.1, 10),
+  head: new THREE.SphereGeometry(0.105, 18, 14),
+  hair: new THREE.SphereGeometry(0.112, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+  thigh: new THREE.CapsuleGeometry(0.07, 0.34, 4, 10),
+  shin: new THREE.CapsuleGeometry(0.055, 0.34, 4, 10),
+  shoe: new THREE.BoxGeometry(0.1, 0.07, 0.26),
+  upperArm: new THREE.CapsuleGeometry(0.048, 0.24, 4, 10),
+  forearm: new THREE.CapsuleGeometry(0.04, 0.22, 4, 10),
+  hand: new THREE.SphereGeometry(0.045, 10, 8),
+  bag: new THREE.BoxGeometry(0.08, 0.3, 0.36),
 };
+pedGeo.torso.scale(1.15, 1, 0.72); // shoulders wider than deep
+pedGeo.hips.scale(1.1, 1, 0.75);
+pedGeo.head.scale(0.92, 1.05, 1);
 interface Ped {
   g: THREE.Group;
   legs: THREE.Object3D[];
@@ -1446,40 +1550,57 @@ class Pedestrians {
   private make(): Ped {
     const r = this.rng;
     const g = new THREE.Group();
-    const skin = mat(r.pick(SKIN), { rough: 0.7 });
-    const top = mat(r.pick(CLOTH), { rough: 0.85 });
-    const bottom = mat(r.pick(CLOTH), { rough: 0.85 });
+    const skin = mat(r.pick(SKIN), { rough: 0.6 });
+    const top = mat(r.pick(CLOTH), { rough: 0.9 });
+    const bottom = mat(r.pick(['#1c1c22', '#2a3550', '#3a3a40', '#4a3f35', '#20263a', '#6b6255']), { rough: 0.9 });
+    const hairM = mat(r.pick(['#1a120c', '#3a2414', '#6b4a2a', '#c8a060', '#2a2a2a', '#8a8a8a']), { rough: 0.7 });
+    const shoeM = mat(r.pick(['#111111', '#3a2618', '#e8e8e8', '#5a1d1d']), { rough: 0.5 });
     const h = r.range(0.92, 1.08);
-    const torso = new THREE.Mesh(pedGeo.torso, top);
-    torso.position.y = 1.15;
-    const head = new THREE.Mesh(pedGeo.head, skin);
-    head.position.y = 1.6;
-    g.add(torso, head);
-    if (r.chance(0.3)) {
-      const hat = new THREE.Mesh(pedGeo.head, mat(r.pick(CLOTH)));
-      hat.scale.set(1.05, 0.5, 1.05);
-      hat.position.y = 1.67;
-      g.add(hat);
+    const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = g) => {
+      const o = new THREE.Mesh(geo, m);
+      o.position.set(x, y, z);
+      parent.add(o);
+      return o;
+    };
+    const torso = add(pedGeo.torso, top, 0, 1.3, 0);
+    torso.castShadow = true;
+    add(pedGeo.hips, bottom, 0, 0.98, 0);
+    add(pedGeo.neck, skin, 0, 1.58, 0);
+    add(pedGeo.head, skin, 0, 1.7, 0.01);
+    add(pedGeo.hair, hairM, 0, 1.715, -0.005);
+    if (r.chance(0.2)) {
+      const cap = add(pedGeo.hair, mat(r.pick(CLOTH)), 0, 1.74, 0);
+      cap.scale.set(1.05, 0.8, 1.05);
     }
     const legs: THREE.Object3D[] = [], arms: THREE.Object3D[] = [];
     for (const s of [-1, 1]) {
+      // leg: hip joint -> thigh -> knee joint -> shin -> shoe
       const hip = new THREE.Group();
-      hip.position.set(s * 0.09, 0.84, 0);
-      const leg = new THREE.Mesh(pedGeo.limb, bottom);
-      leg.position.y = -0.4;
-      hip.add(leg);
+      hip.position.set(s * 0.09, 0.95, 0);
+      add(pedGeo.thigh, bottom, 0, -0.22, 0, hip);
+      const knee = new THREE.Group();
+      knee.position.y = -0.46;
+      hip.add(knee);
+      add(pedGeo.shin, bottom, 0, -0.2, 0, knee);
+      add(pedGeo.shoe, shoeM, 0, -0.44, 0.05, knee);
+      hip.userData.knee = knee;
       g.add(hip);
       legs.push(hip);
+      // arm: shoulder -> upper arm -> elbow -> forearm -> hand
       const sh = new THREE.Group();
-      sh.position.set(s * 0.25, 1.42, 0);
-      const arm = new THREE.Mesh(pedGeo.arm, top);
-      arm.position.y = -0.3;
-      sh.add(arm);
+      sh.position.set(s * 0.215, 1.47, 0);
+      add(pedGeo.upperArm, top, 0, -0.15, 0, sh);
+      const elbow = new THREE.Group();
+      elbow.position.y = -0.3;
+      sh.add(elbow);
+      add(pedGeo.forearm, r.chance(0.5) ? skin : top, 0, -0.14, 0, elbow);
+      add(pedGeo.hand, skin, 0, -0.3, 0, elbow);
+      sh.userData.elbow = elbow;
       g.add(sh);
       arms.push(sh);
     }
+    if (r.chance(0.3)) add(pedGeo.bag, mat(r.pick(['#3a2618', '#111', '#7a1d1d', '#2a3550'])), 0.26, 1.0, 0);
     g.scale.setScalar(h);
-    torso.castShadow = true;
     this.group.add(g);
     return { g, legs, arms, axis: 'x', dir: 1, line: 0, t: 0, v: 1.4, ph: r.range(0, 6) };
   }
@@ -1517,8 +1638,12 @@ class Pedestrians {
       const s = Math.sin(pd.ph) * (v > 0 ? 0.5 : 0);
       pd.legs[0].rotation.x = s;
       pd.legs[1].rotation.x = -s;
-      pd.arms[0].rotation.x = -s * 0.8;
-      pd.arms[1].rotation.x = s * 0.8;
+      (pd.legs[0].userData.knee as THREE.Object3D).rotation.x = Math.max(0, -Math.cos(pd.ph)) * (v > 0 ? 0.9 : 0);
+      (pd.legs[1].userData.knee as THREE.Object3D).rotation.x = Math.max(0, Math.cos(pd.ph)) * (v > 0 ? 0.9 : 0);
+      pd.arms[0].rotation.x = -s * 0.7;
+      pd.arms[1].rotation.x = s * 0.7;
+      (pd.arms[0].userData.elbow as THREE.Object3D).rotation.x = -0.25 - Math.max(0, s) * 0.4;
+      (pd.arms[1].userData.elbow as THREE.Object3D).rotation.x = -0.25 - Math.max(0, -s) * 0.4;
       pd.g.position.set(pd.axis === 'x' ? pd.t : pd.line, CURB + Math.abs(Math.cos(pd.ph)) * 0.03, pd.axis === 'x' ? pd.line : pd.t);
     }
   }

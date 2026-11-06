@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pbr, type PbrMaps } from './pbr';
 
 /**
  * sand3d writes each material as a flat UsdPreviewSurface, but names it after its kind:
@@ -158,18 +159,28 @@ function tex(kind: KindSpec['tex']) {
 
 // ---- shader injection ---------------------------------------------------------
 
-const VERT_DECL = 'varying vec3 vTriPos;\nvarying vec3 vTriNrm;\n';
+const VERT_DECL = 'varying vec3 vTriPos;\nvarying vec3 vTriNrm;\n#ifdef TRI_UV\nvarying vec2 vTriUv;\n#endif\n';
 const FRAG_DECL = `
 varying vec3 vTriPos;
 varying vec3 vTriNrm;
-uniform sampler2D uTriMap;
-uniform float uTriScale, uTriStrength, uTriBump, uTriRough, uTriDark;
-float triSample(vec3 p, vec3 n) {
+#ifdef TRI_UV
+varying vec2 vTriUv;
+#endif
+uniform sampler2D uTriMap;   // height: Poly Haven displacement, or procedural
+uniform sampler2D uTriDiff;  // photo albedo (white until loaded)
+uniform sampler2D uTriArm;   // AO / roughness / metal
+uniform vec3 uTriMean;
+uniform float uTriScale, uTriStrength, uTriBump, uTriRough, uTriDark, uDiffMix, uArmMix, uProcScale;
+vec4 triTex(sampler2D s, float scale) {
+#ifdef TRI_UV
+  return texture2D(s, vTriUv * scale);
+#else
+  vec3 n = vTriNrm;
   vec3 w = pow(abs(n), vec3(4.0));
   w /= max(w.x + w.y + w.z, 1e-4);
-  p *= uTriScale;
-  // the grain runs along the longest axis of each projection
-  return texture2D(uTriMap, p.zy).r * w.x + texture2D(uTriMap, p.xz).r * w.y + texture2D(uTriMap, p.xy).r * w.z;
+  vec3 p = vTriPos * scale;
+  return texture2D(s, p.zy) * w.x + texture2D(s, p.xz) * w.y + texture2D(s, p.xy) * w.z;
+#endif
 }
 vec3 triPerturb(vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir) {
   vec3 vSigmaX = dFdx(surf_pos.xyz);
@@ -182,14 +193,72 @@ vec3 triPerturb(vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir) {
 }
 `;
 
+/** "oak__6e4a32" (USD) or "oak #6e4a32 roughness=0.4" (GLB from sand3d 1.6) -> "oak" */
 export function kindOf(name: string | undefined): string | null {
   if (!name) return null;
-  const k = name.split('__')[0].toLowerCase();
+  const k = name.split(/__| |#/)[0].toLowerCase();
   return KINDS[k] || k === 'glass' || k === 'light' ? k : null;
 }
 
-/** Add procedural surface detail to a standard material in place. */
-export function enhance(m: THREE.MeshStandardMaterial, kind: string) {
+interface KindUniforms {
+  uTriMap: { value: THREE.Texture };
+  uTriDiff: { value: THREE.Texture };
+  uTriArm: { value: THREE.Texture };
+  uTriMean: { value: THREE.Color };
+  uTriScale: { value: number };
+  uProcScale: { value: number };
+  uTriStrength: { value: number };
+  uTriBump: { value: number };
+  uTriRough: { value: number };
+  uTriDark: { value: number };
+  uDiffMix: { value: number };
+  uArmMix: { value: number };
+}
+const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+white.needsUpdate = true;
+const armNeutral = new THREE.DataTexture(new Uint8Array([255, 128, 0, 255]), 1, 1);
+armNeutral.needsUpdate = true;
+
+/** one shared uniform block per kind: when the photo textures arrive, every material updates */
+const kindUniforms = new Map<string, KindUniforms>();
+const PBR_MIX: Record<string, { diff: number; arm: number; bump: number }> = {
+  oak: { diff: 0.95, arm: 0.6, bump: 1.2 }, walnut: { diff: 0.95, arm: 0.6, bump: 1.2 }, pine: { diff: 0.95, arm: 0.6, bump: 1.2 }, birch: { diff: 0.9, arm: 0.6, bump: 1.0 },
+  steel: { diff: 0.35, arm: 0.6, bump: 0.6 }, brushed_steel: { diff: 0.35, arm: 0.6, bump: 0.6 }, aluminium: { diff: 0.3, arm: 0.6, bump: 0.5 },
+  chrome: { diff: 0.1, arm: 0.25, bump: 0.15 }, brass: { diff: 0.35, arm: 0.5, bump: 0.4 }, copper: { diff: 0.4, arm: 0.5, bump: 0.4 },
+  painted_metal: { diff: 0.25, arm: 0.4, bump: 0.5 }, fabric: { diff: 0.9, arm: 0.8, bump: 1.4 }, velvet: { diff: 0.9, arm: 0.8, bump: 1.0 },
+  leather: { diff: 0.85, arm: 0.8, bump: 1.4 }, marble: { diff: 0.95, arm: 0.6, bump: 0.3 }, concrete: { diff: 0.9, arm: 0.8, bump: 1.5 },
+};
+function uniformsFor(kind: string, spec: KindSpec): KindUniforms {
+  let u = kindUniforms.get(kind);
+  if (u) return u;
+  u = {
+    uTriMap: { value: tex(spec.tex) }, uTriDiff: { value: white }, uTriArm: { value: armNeutral }, uTriMean: { value: new THREE.Color(1, 1, 1) },
+    uTriScale: { value: 1 / spec.tile }, uProcScale: { value: 1 / spec.tile }, uTriStrength: { value: spec.strength }, uTriBump: { value: spec.bump },
+    uTriRough: { value: spec.rough }, uTriDark: { value: spec.dark }, uDiffMix: { value: 0 }, uArmMix: { value: 0 },
+  };
+  kindUniforms.set(kind, u);
+  // real photo-scanned textures, tiled at their physical size
+  const set: PbrMaps | null = pbr(kind, '1k');
+  const mix = PBR_MIX[kind];
+  if (set && mix) {
+    set.ready.then(() => {
+      if (!set.diff) return;
+      u!.uTriDiff.value = set.diff;
+      if (set.disp) u!.uTriMap.value = set.disp;
+      if (set.arm) u!.uTriArm.value = set.arm;
+      u!.uTriMean.value = set.mean;
+      u!.uTriScale.value = 1 / set.tile[0];
+      u!.uDiffMix.value = mix.diff;
+      u!.uArmMix.value = mix.arm;
+      u!.uTriBump.value = mix.bump;
+      u!.uTriStrength.value = 0;
+    });
+  }
+  return u;
+}
+
+/** Add surface detail to a standard material in place. hasUv: geometry carries metric UVs. */
+export function enhance(m: THREE.MeshStandardMaterial, kind: string, hasUv = false) {
   if (m.userData.enhanced) return m;
   m.userData.enhanced = true;
   if (kind === 'light') {
@@ -199,21 +268,27 @@ export function enhance(m: THREE.MeshStandardMaterial, kind: string) {
   }
   const spec = KINDS[kind];
   if (!spec) return m;
-  const map = tex(spec.tex);
+  const u = uniformsFor(kind, spec);
+  if (hasUv) m.defines = { ...(m.defines ?? {}), TRI_UV: '' };
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uTriMap = { value: map };
-    sh.uniforms.uTriScale = { value: 1 / spec.tile };
-    sh.uniforms.uTriStrength = { value: spec.strength };
-    sh.uniforms.uTriBump = { value: spec.bump };
-    sh.uniforms.uTriRough = { value: spec.rough };
-    sh.uniforms.uTriDark = { value: spec.dark };
-    sh.vertexShader = VERT_DECL + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvTriPos = position;\nvTriNrm = normal;');
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = VERT_DECL + sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvTriPos = position;\nvTriNrm = normal;\n#ifdef TRI_UV\nvTriUv = uv;\n#endif',
+    );
     sh.fragmentShader = FRAG_DECL + sh.fragmentShader
-      .replace('#include <color_fragment>', '#include <color_fragment>\nfloat triH = triSample(vTriPos, vTriNrm);\ndiffuseColor.rgb *= mix(1.0, mix(uTriDark, 1.0, triH), uTriStrength);')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + (triH - 0.5) * uTriRough, 0.03, 1.0);')
-      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = triPerturb(-vViewPosition, normal, vec2(dFdx(triH), dFdy(triH)) * uTriBump, faceDirection);');
+      .replace('#include <color_fragment>', `#include <color_fragment>
+float triH = triTex(uTriMap, uTriScale).r;
+vec3 photo = triTex(uTriDiff, uTriScale).rgb / max(uTriMean, vec3(0.02));
+vec4 arm = triTex(uTriArm, uTriScale);
+float proc = mix(1.0, mix(uTriDark, 1.0, triH), uTriStrength);
+diffuseColor.rgb *= mix(vec3(proc), clamp(photo, 0.0, 3.0), uDiffMix) * mix(1.0, arm.r, uArmMix * 0.7);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = clamp(mix(roughnessFactor + (triH - 0.5) * uTriRough, roughnessFactor * (0.5 + arm.g), uArmMix), 0.03, 1.0);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+normal = triPerturb(-vViewPosition, normal, vec2(dFdx(triH), dFdy(triH)) * uTriBump, faceDirection);`);
   };
-  m.customProgramCacheKey = () => `tri-${spec.tex}`;
+  m.customProgramCacheKey = () => `tri2-${hasUv ? 'uv' : 'tp'}`;
   m.needsUpdate = true;
   return m;
 }
@@ -238,6 +313,7 @@ export function enhanceTree(root: THREE.Object3D) {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
+    const hasUv = !!mesh.geometry.getAttribute('uv');
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const out = mats.map((mt) => {
       const sm = mt as THREE.MeshStandardMaterial;
@@ -245,7 +321,7 @@ export function enhanceTree(root: THREE.Object3D) {
       const k = kindOf(sm.name);
       if (!k) return mt;
       if (k === 'glass') return (sm.userData.glass ??= glassFrom(sm));
-      return enhance(sm, k);
+      return enhance(sm, k, hasUv);
     });
     mesh.material = Array.isArray(mesh.material) ? out : out[0];
   });

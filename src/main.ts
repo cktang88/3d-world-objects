@@ -19,6 +19,7 @@ import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
 
 // ---------------------------------------------------------------- renderer
@@ -98,6 +99,7 @@ composer.addPass(bloom);
 composer.addPass(new OutputPass());
 function applyQuality() {
   gtao.enabled = quality === 'ultra';
+  setPbrResolution(quality === 'low' ? '1k' : '2k');
   bloom.enabled = quality !== 'low';
   renderer.setPixelRatio(quality === 'low' ? 1 : Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -618,7 +620,7 @@ function frame() {
 // ---------------------------------------------------------------- start
 
 const params = new URLSearchParams(location.search);
-const ready = Promise.all([loadManifest(), loadMuseum()]);
+const ready = Promise.all([loadManifest(), loadMuseum(), loadPbr(renderer)]);
 
 async function startMode(m: Mode) {
   mode = m;
