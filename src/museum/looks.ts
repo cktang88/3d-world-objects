@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { enhance, glassFrom, materialKinds } from '../materials';
+import { isOpen } from './open';
+export { isOpen };
 
 /**
  * A fixed set of shader programs for the museum. Each distinct material "shape" (type, defines, maps,
@@ -9,12 +11,13 @@ import { enhance, glassFrom, materialKinds } from '../materials';
  * materials) are built once as parked, never-drawn meshes in the atrium (prewarm), which main.ts
  * compiles on entering museum mode with everything else.
  *
- * Exhibits: double-sided; no clearcoat, sheen or transmission (each an extra variant, and
+ * Exhibits: front faces only (back faces culled, not shaded) unless authored double-sided and really
+ * open (a leaf, a shell: isOpen) - one of the two fixed variants either way; no clearcoat, sheen or transmission (each an extra variant, and
  * transmission an extra render pass; glass becomes plain see-through); the UV scale folded into the
  * UVs (TRI_UVK always 1e+0). Tangents stay (big shared originals are not copied): the normal-mapped
  * sets are prewarmed with and without them.
  */
-const looks = new WeakMap<THREE.Material, THREE.Material>();
+const looks = [new WeakMap<THREE.Material, THREE.Material>(), new WeakMap<THREE.Material, THREE.Material>()];
 
 /** the glTF map slots every textured exhibit material is given (missing ones get a neutral 1x1) */
 const FULL = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const;
@@ -47,24 +50,32 @@ function cloneLook(s: THREE.MeshStandardMaterial) {
   return c;
 }
 
-/** the museum version of an exhibit material (cached per material; the input is not changed) */
-export function museumLook(m: THREE.Material): THREE.Material {
-  const done = looks.get(m);
+/**
+ * The museum version of an exhibit material, front-sided or double-sided (cached per material and
+ * side; the input is not changed).
+ */
+export function museumLook(m0: THREE.Material, double = false): THREE.Material {
+  // a museum look given again (a cached exhibit, a re-added model): start from its source
+  const m = (m0.userData.lookSrc as THREE.Material | undefined) ?? m0;
+  const cache = looks[double ? 1 : 0];
+  const done = cache.get(m);
   if (done) return done;
   const s = m as THREE.MeshPhysicalMaterial;
   if (!s.isMeshStandardMaterial) {
-    looks.set(m, m);
+    cache.set(m, m);
     return m;
   }
   const phys = !!s.isMeshPhysicalMaterial;
   const uvk = s.defines?.TRI_UVK;
-  const needs = s.side !== THREE.DoubleSide || (phys && (s.clearcoat > 0 || s.sheen > 0 || s.transmission > 0)) || (uvk !== undefined && uvk !== '1e+0') || partial(s);
+  const side = double ? THREE.DoubleSide : THREE.FrontSide;
+  const needs = s.side !== side || (double && s.transparent && !s.forceSinglePass) || (phys && (s.clearcoat > 0 || s.sheen > 0 || s.transmission > 0)) || (uvk !== undefined && uvk !== '1e+0') || partial(s);
   if (!needs) {
-    looks.set(m, m);
+    cache.set(m, m);
     return m;
   }
   const c = cloneLook(s) as THREE.MeshPhysicalMaterial;
-  c.side = THREE.DoubleSide;
+  c.userData.lookSrc = m;
+  c.side = side;
   if (phys) {
     c.clearcoat = 0;
     c.sheen = 0;
@@ -76,21 +87,36 @@ export function museumLook(m: THREE.Material): THREE.Material {
     }
   }
   if (partial(c)) for (const k of FULL) if (!slots(c)[k]) slots(c)[k] = neutralTex(k);
+  // see-through and double-sided: one pass (three would draw the back faces first, in a variant of their own)
+  if (double && c.transparent) c.forceSinglePass = true;
   if (uvk !== undefined && uvk !== '1e+0') {
     c.userData.uvk = Number(uvk);
     c.defines!.TRI_UVK = '1e+0';
   }
-  looks.set(m, c);
-  looks.set(c, c);
+  cache.set(m, c);
   return c;
 }
+
+/** exhibit meshes shown front-sided / double-sided, and ms spent on the openness check (window.__looks) */
+export const sideStats = { front: 0, double: 0, ms: 0, max: 0 };
+if (typeof window !== 'undefined') (window as unknown as { __looks: unknown }).__looks = sideStats;
 
 /** museumLook on every mesh under root, with the UV scale it needs */
 export function normalizeExhibit(root: THREE.Object3D) {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh || Array.isArray(mesh.material)) return;
-    const mat = museumLook(mesh.material);
+    const src = (mesh.material.userData.lookSrc as THREE.Material | undefined) ?? mesh.material;
+    const t0 = performance.now();
+    // authored double-sided: kept only if open. Small meshes are checked here; bigger ones stay as
+    // authored until the zfix worker has checked them (zoff.ts swaps in the front-sided look)
+    const g0 = mesh.geometry, n = g0.index ? g0.index.count : (g0.getAttribute('position')?.count ?? 0);
+    const double = src.side === THREE.DoubleSide && (g0.userData.open !== undefined || n <= 9000 ? isOpen(g0) : true);
+    const dt = performance.now() - t0;
+    sideStats.ms += dt;
+    sideStats.max = Math.max(sideStats.max, dt);
+    sideStats[double ? 'double' : 'front']++;
+    const mat = museumLook(src, double);
     mesh.material = mat;
     const k = mat.userData.uvk as number | undefined;
     const g = mesh.geometry;
@@ -152,13 +178,14 @@ export function prewarm(): THREE.Group {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1], 2));
   geo.setAttribute('color', new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1], 3));
   const mats: THREE.Material[] = [];
+  const both = (m: THREE.Material) => mats.push(museumLook(m, false), museumLook(m, true));
   for (const kind of materialKinds())
     for (const uv of [false, true])
       for (const bake of [false, true]) {
         const base = new THREE.MeshStandardMaterial({ color: '#888888', side: THREE.DoubleSide });
-        mats.push(museumLook(enhance(base, kind, uv, { bake })));
+        both(enhance(base, kind, uv, { bake }));
       }
-  mats.push(museumLook(glassFrom(new THREE.MeshStandardMaterial({ color: '#ffffff' }))));
+  both(glassFrom(new THREE.MeshStandardMaterial({ color: '#ffffff' })));
   // glTF materials: the map sets seen on the rebuilt and Smithsonian models
   // glTF materials: plain or fully textured (museumLook fills the missing slots), standard or
   // physical, with or without vertex colours
@@ -167,7 +194,7 @@ export function prewarm(): THREE.Group {
       for (const vc of [false, true]) {
         const m = new Ctor({ side: THREE.DoubleSide, vertexColors: vc });
         if (tex) slots(m).map = neutralTex('map');
-        mats.push(museumLook(m));
+        both(m);
       }
   // the shell's see-through materials (case glass, label and glow planes) first met in later rooms
   mats.push(new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.1, depthWrite: false }));

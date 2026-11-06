@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { fixZFight } from './zfight';
+import { isOpen } from './open';
 import type { ZJob, ZReply, ZGeo } from './zoff';
 
 /**
@@ -36,6 +37,8 @@ scope.onmessage = (e: MessageEvent<ZJob>) => {
     geos.push(g);
     objs.push(o);
   }
+  // which surfaces are closed (their backs never seen): before the fix moves anything
+  const open = objs.map((o) => isOpen(o.geometry));
   let moved = 0;
   try {
     moved = fixZFight(root, undefined, lift, 'worker');
@@ -51,6 +54,6 @@ scope.onmessage = (e: MessageEvent<ZJob>) => {
     for (const a of Object.values(geo.attrs)) transfer.push(a.array.buffer);
     if (geo.index) transfer.push(geo.index.buffer);
   });
-  const reply: ZReply = { id, moved, ms: performance.now() - t0, changed };
+  const reply: ZReply = { id, moved, ms: performance.now() - t0, changed, open };
   scope.postMessage(reply, transfer);
 };

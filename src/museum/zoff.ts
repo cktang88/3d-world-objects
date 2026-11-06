@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { zfixStats } from './zfight';
+import { museumLook } from './looks';
 
 /**
  * The exhibit flicker fix (zfight.ts) on a Web Worker (zworker.ts): the main thread only copies the
@@ -22,6 +23,8 @@ export interface ZReply {
   moved: number;
   ms: number;
   changed: { i: number; geo: ZGeo }[];
+  /** per mesh: an open surface (see open.ts) */
+  open: boolean[];
 }
 
 /** exhibits bigger than this are not fixed */
@@ -67,8 +70,17 @@ function apply(r: ZReply) {
     g.boundingBox = m.geometry.boundingBox?.clone() ?? null;
     if (!g.boundingSphere) g.computeBoundingSphere();
     g.userData.zfixOwned = true;
+    g.userData.open = m.geometry.userData.open;
     m.geometry = g;
   }
+  // closed surfaces authored double-sided: the front-sided look (prewarmed; no back faces shaded)
+  r.open.forEach((open, i) => {
+    const m = j.meshes[i];
+    if (!m) return;
+    m.geometry.userData.open = open;
+    const mat = m.material as THREE.Material;
+    if (!open && !Array.isArray(m.material) && mat.side === THREE.DoubleSide) m.material = museumLook(mat, false);
+  });
   zfixStats.push({ kind: 'worker', ms: r.ms, moved: r.moved });
   zfixStats.push({ kind: 'apply', ms: performance.now() - t0, moved: r.moved });
   zfixStats.push({ kind: 'pack', ms: pending.get(r.id) ?? 0, moved: r.moved });

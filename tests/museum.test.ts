@@ -451,3 +451,10 @@ test('shader programs: after the atrium and one gallery, four more room types ad
   console.log('     ' + log.join('\n     '));
   expect(after2 <= 2, `rooms after the first two added ${after2} programs`);
 });
+
+test('exhibit sides: a closed box is front-sided, an open sheet stays double-sided', async () => {
+  const { isOpen } = await import('../src/museum/looks');
+  expect(!isOpen(new THREE.BoxGeometry(1, 1, 1, 2, 2, 2)), 'a closed box (split normals and UVs) counted as open');
+  expect(isOpen(new THREE.PlaneGeometry(1, 1, 4, 4)), 'an open sheet counted as closed');
+  expect(!isOpen(new THREE.SphereGeometry(1, 16, 12)), 'a sphere counted as open');
+});
