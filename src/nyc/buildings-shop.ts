@@ -502,12 +502,6 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
       if (rng.chance(0.6)) B(Fi, mat(rng.pick(['#1d1d1d', '#c4161c', '#1e3f8a']), { rough: 0.8 }), w * 0.8, h * 0.18, 0.006, pu, py + h * 0.65, glassZ + 0.016, false);
     }
   }
-  // steel cellar doors in the sidewalk in front of many shops
-  if (rng.chance(0.3) && W > 3) {
-    const cu = doorAt > 0 ? u0 + 1.2 : u1 - 1.2;
-    B(Fi, mat('#5a5c5e', { rough: 0.45, metal: 0.8 }), 1.6, 0.02, 1.1, cu, CURB, 0.75, false);
-    B(Fi, mat('#3a3c3e', { rough: 0.5, metal: 0.7 }), 0.03, 0.025, 1.1, cu, CURB, 0.75, false);
-  }
   // recessed entry: return walls, ceiling, mosaic floor, glass door at the back
   if (recess > 0.2) {
     const doorZ = -recess;
