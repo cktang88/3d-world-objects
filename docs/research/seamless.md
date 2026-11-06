@@ -10,6 +10,14 @@ placed behind it). Turn the game behaviour off with `?seamless=0` to compare.
    Door portals into `interior`, `gallery` or `atrium` levels within 14 m that you face
    (view direction · direction to the door > 0.5), or any within 3 m, are wanted (nearest two).
    Wanted levels not yet cached start building: `build(desc, staged = true)`.
+   Inside a building (active level a `floor` or `interior`) the policy is stricter, since a hall
+   passes a door every few metres: within 4.5 m, facing it within ~30°, for 0.4 s of game time,
+   one door at a time (`Seamless.policy`). Door prebuilds you walk past are cancelled (only those:
+   builds a level asked for through `prefetch()` are left alone), and door prebuilds you never
+   entered are evicted first. qa (`npm run qa -- seamless`): a 6-floor walk-up lobby → roof builds
+   each floor once, 6 apartments, 6 evictions (was 34 builds / 27 evictions up and down).
+   **Floors share a stack entry** (`floorStackStep`): leaving the lobby pushes it, floor-to-floor
+   moves push nothing, coming down pops it, so Q on any floor goes to the lobby, then the street.
 2. **Time slices.** A staged level leaves its construction in `Level.staging` (an iterator); each
    frame runs `next()` until a 4 ms budget is spent. A level that does not support staging is
    built at once. Half-built levels you turn away from are dropped.
