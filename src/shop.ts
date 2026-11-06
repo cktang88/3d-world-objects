@@ -202,7 +202,7 @@ export class ShopLevel implements Level {
     const filler = new Filler();
     let prio = 0;
     const rest: Seg[] = byProduct.get('filler') ?? [];
-    for (const [p, list] of byProduct) if (p !== 'filler' && !this.place(p, list, r, prio++)) rest.push(...list);
+    for (const [p, list] of byProduct) if (p !== 'filler') rest.push(...this.place(p, list, r, prio++));
     for (const s of rest) this.fill(filler, s, kinds, r);
     filler.build(this.group);
     this.stats.filler = filler.count;
@@ -359,13 +359,17 @@ export class ShopLevel implements Level {
   }
 
   /** pack one product into its segments and instance it */
-  /** returns false if the product could not be placed (budget) */
-  private place(p: Loaded, segs: Seg[], r: Rng, prio: number): boolean {
+  /** returns the segments it could not fill within the triangle budget (they get packaging) */
+  private place(p: Loaded, segs: Seg[], r: Rng, prio: number): Seg[] {
     const slots: Slot[] = [];
     const boxes: THREE.Box3[] = [];
     const cords: THREE.Vector3[][] = [];
+    const rejected: Seg[] = [];
     const sz = p.m.size;
+    const tri = Math.max(1, p.m.tris);
+    const cap = Math.min(450_000, this.triBudget);
     for (const s of segs) {
+      const cordsBefore = cords.length;
       const f = this.fit(p, s);
       const sc = p.k * Math.max(f, s.big || s.mode === 'single' ? 0.3 : 0.12) * (f < 1 ? 0.97 : 1);
       const w = sz.x * sc, h = sz.y * sc, d = sz.z * sc;
@@ -429,6 +433,13 @@ export class ShopLevel implements Level {
         put(pos, r.range(0, Math.PI * 2));
         cords.push([s.p.clone(), pos.clone().setY(pos.y + h)]);
       }
+      // whole blocks only: a block that would break the budget goes to packaging instead
+      if (tri * slots.length > cap) {
+        slots.length = before;
+        cords.length = cordsBefore;
+        rejected.push(s);
+        continue;
+      }
       if (slots.length > before) {
         const b = new THREE.Box3();
         for (let i = before; i < slots.length; i++) b.expandByPoint(slots[i].p).expandByPoint(slots[i].p.clone().setY(slots[i].p.y + h));
@@ -436,16 +447,8 @@ export class ShopLevel implements Level {
         boxes.push(b);
       }
     }
-    if (!slots.length) return false;
-    // stay inside the triangle budget: drop hidden back rows / random facings first
-    let use = slots;
-    const tri = Math.max(1, p.m.tris);
-    const cap = Math.min(450_000, this.triBudget);
-    if (tri * use.length > cap) {
-      const keep = Math.max(1, Math.floor(cap / tri));
-      use = r.shuffle(slots.slice()).slice(0, keep);
-    }
-    if (tri * use.length > this.triBudget) return false;
+    if (!slots.length) return rejected;
+    const use = slots;
     this.triBudget -= tri * use.length;
     this.stats.products++;
     this.stats.slots += use.length;
@@ -478,7 +481,7 @@ export class ShopLevel implements Level {
       for (const im of sand) this.group.remove(im);
       this.instance(orig, use);
     });
-    return true;
+    return rejected;
   }
 
   private portalFor(e: RemoteEntry, b: THREE.Box3) {
