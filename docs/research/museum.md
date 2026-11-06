@@ -66,3 +66,21 @@ front or the case's label rail; door signs over every exit naming the next room.
 **Architecture.** Rooms vary in width, length, height and proportions (each archetype has its own
 aspect range), doorway patterns (three exits on the far wall, or an enfilade axis plus side doors,
 or staggered side exits), skirting / dado / cornice / shadow gaps, and benches in larger rooms.
+
+## Smithsonian rooms
+
+Eight galleries of real museum scans (Smithsonian 3D Open Access, CC0, through `src/libraries.ts`):
+Milestones of Flight (Space Shuttle Discovery on the floor, the Wright Flyer and Bell X-1 hung, as at
+Udvar-Hazy), Sculpture Court, Arts of Asia and Africa, Fossil Hall, Shells and Corals, Natural History
+Specimens, American Stories, Cooper Hewitt Design. Same planner, same real-size rule; scans whose
+catalogued size is implausible for their category (broken units) are left out. Two doors on the
+atrium's south wall lead in; sand3d rooms of a related collection sometimes have a doorway to them.
+
+## Code map
+
+- `src/museum/sizes.ts` measures objects once (cached in memory and localStorage) so a room can be planned around real sizes.
+- `src/museum/plan.ts` picks each display from real dimensions, then sizes the room, its rows, walls, doors, ceiling height, hung lanes and benches.
+- `src/museum/displays.ts` the displays (platform + barrier, plinth, hood, cluster, riser, table case, vitrine, wall case, storage, wall mount, hang, bench).
+- `src/museum/shell.ts` walls, doorways, corridors, floors, ceilings (flat, coffer, lantern, truss, vault, glass, open air), park trees.
+- `src/museum/style.ts` the archetypes and which collection uses which.
+- `src/museum/gallery.ts`, `atrium.ts`, `smithsonian.ts` the levels. Lab: `?lab=museum-room&theme=<id>` (`&far=1`, `&atrium=1`; Smithsonian rooms are themes 100000–100007).
