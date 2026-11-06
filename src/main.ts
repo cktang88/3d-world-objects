@@ -604,7 +604,7 @@ addEventListener('keydown', (e) => {
     if (aimedBox) lazy.toggle(aimedBox);
     else if (aimed) enter(aimed);
   } else if (e.code === 'KeyQ' || e.code === 'Backspace') {
-    if (!transitioning) {
+    if (!transitioning && !vert.shut) { // vertical.ts: no backing out of a moving lift car
       transitioning = true;
       goBack().then(() => (transitioning = false));
     }

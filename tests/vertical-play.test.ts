@@ -149,11 +149,13 @@ test('elevator: call, doors open, choose a floor, ride while it builds, arrive w
   w.vert.choose();
   expect(w.vert.sel === 3, `chose floor index 3 (got ${w.vert.sel})`);
   expect(w.wait(300, () => w.vert.state === 'riding'), `doors closed and the ride started (state ${w.vert.state})`);
+  expect(w.vert.shut, 'shut in the car while riding: Q (back out) is ignored (main.ts checks vert.shut)');
   let frames = 0;
   expect(w.wait(1500, () => (frames++, (w.level as FloorLevel).floor === 3)), 'arrived on floor 4');
   console.log(`   ride took ${(frames / 60).toFixed(1)} s of game time`);
   expect(w.vert.state === 'opening' || w.vert.state === 'open', `doors opening on arrival (${w.vert.state})`);
   expect(w.wait(120, () => w.vert.state === 'open'), 'doors open on floor 4');
+  expect(!w.vert.shut, 'doors open: Q works again');
   expect(Math.abs(w.player.pos.x - cx) < 0.2 && Math.abs(w.player.pos.z - cz) < 0.2, 'still standing in the car (same frame position)');
   // walk out onto the new floor
   const [ox, oz] = toWorld(fr, 0, 1.0);

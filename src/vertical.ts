@@ -57,6 +57,10 @@ export class Vertical {
   private shown = new Map<Slot, number>();
   // the car
   state: LiftState = 'idle';
+  /** shut in the car (riding, or doors closing with you inside): Q / back-out is ignored until the doors open */
+  get shut() {
+    return this.state === 'riding' || (this.state === 'closing' && !!this.level && this.inCar(this.level));
+  }
   lift = 0;
   carFloor = 0;
   private t = 0;
