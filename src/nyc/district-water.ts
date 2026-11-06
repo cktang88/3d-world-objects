@@ -123,7 +123,7 @@ export function buildWater(c: OpenCtx) {
   } else if (kind === 1) {
     // an open park pier with aircraft and a spacecraft on show, as on the Intrepid's pier
     stat.add(slab(grassMat(), Math.min(X(PIER_SHORE + 4), X(PIER_SHORE + 30)), Math.max(X(PIER_SHORE + 4), X(PIER_SHORE + 30)), pz0 + 2, pz1 - 2, DECK + 0.02, 4));
-    slot({ kind: ['plane', 'heli'], x: X(PIER_SHORE + 50), y: DECK, z: 0, rot: 0, w: 32, d: 19, h: 12, min: 7, radius: 200, maxTris: 500_000 });
+    slot({ kind: ['deckPlane', 'plane', 'heli'], x: X(PIER_SHORE + 50), y: DECK, z: 0, rot: 0, w: 32, d: 19, h: 12, min: 7, radius: 200, maxTris: 500_000 });
     slot({ kind: 'space', x: X(PIER_SHORE + 22), y: DECK, z: 0, rot: 0, w: 14, d: 14, h: 30, min: 3, radius: 200, maxTris: 400_000 });
     for (let u = PIER_SHORE + 8; u < tipU - 4; u += 10) {
       parkBench(stat, X(u), DECK, pz1 - 1.6, Math.PI);
@@ -288,7 +288,7 @@ function carrier(c: OpenCtx, slot: (s: Omit<SlotSpec, 'seed'>, col?: boolean) =>
   // aircraft parked along the deck edges, a helicopter by the island
   for (let i = 0; i < 7; i++) {
     const z = -100 + i * 30;
-    slot({ kind: 'plane', x: x - 10 + (i % 2) * 3, y: deckY + 1.2, z, rot: Math.PI / 2 + 0.5, w: 22, d: 16, h: 7, min: 8, radius: 240, maxTris: 350_000 }, false);
+    slot({ kind: ['deckPlane', 'plane'], x: x - 10 + (i % 2) * 3, y: deckY + 1.2, z, rot: Math.PI / 2 + 0.5, w: 22, d: 16, h: 7, min: 8, radius: 240, maxTris: 350_000 }, false);
   }
   slot({ kind: 'heli', x: x + 6, y: deckY + 1.2, z: 60, rot: 0, w: 18, d: 16, h: 6, min: 7, radius: 240, maxTris: 300_000 }, false);
   slot({ kind: 'space', x: x + 8, y: deckY + 1.2, z: 100, rot: 0, w: 38, d: 26, h: 20, min: 8, radius: 260, maxTris: 400_000 }, false);

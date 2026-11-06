@@ -88,6 +88,28 @@ ENTRIES = {
 }
 
 
+# reviewed: ids removed from the curated show pools by hand (wrong thing, broken, toy-like)
+DENY = {
+    "carShow": ["43819752da2e4346a8696f4e8802a1f7", "4c598f2e082641859302cb8c3dcc574a", "ba5f5b3cacfe42c08c124dd9eaaf04ec", "cbbc3f816f1d4b69add0fefe42841e21", "cf9674e0683f4ce8967a79e427c92696", "9290aaf3fd674d83be3fd39ec45e1147"],
+    "planeStand": ["c6de9fbf908a4dbdbde01cfe8dce46f3", "2956c1941f8a46b49b2b63f9737a7f99", "61c20b71d03f4257b776adcc2a199a92", "761a094f337945e48182b3f28a3e5183", "8a0db178ad7b4abc85fdc591343b99a6"],
+    "deckPlane": ["549d866df6234132b10d0b793b582a3a", "cbdd1de6ced9461e950eafaa302cc82b", "98100f320d5643959ea31a884e1c9949", "0e90c091e56142048fc914ef1c81f93d", "1cc09357eb9a42c484d37f0e2c196ac4", "812c970a305a4a43a4e94d02b81d4db4", "2956c1941f8a46b49b2b63f9737a7f99", "25ce995ec8364b4c90a68eb15f58f283", "7ebf054f2e8e40deaf45e35132680bf6", "ce33a0986ffe4ae9a3af5f30d819a4da", "054e06c1342540d99cd6752e6d65634e", "f51a9bbecbf74c3294b88abd55a1de34", "0061ff00a6654020bcbf3b2be53affca", "d67ba5b3c80044679192e855169cf6cd", "303d3e5b8d544653bfde45189ca10c73", "38b20212d77844b6af9303e55002c66c", "7464d109c8c345c9b6da2973795bd58a", "99d97b0a2b314bd1a8b9d741e77e1e92", "b90013de71ac4dee9e275c225f5ef1a6"],
+    "statueShow": ["c884ddc890fb493991bfa1edda0cff35", "1d2963b70e0c4d88ab038fe74be9e898", "ee565d645c764dac868a49ac7425781b", "10b6c79dbafc4627a0610ca3bcf426b8", "51798d1dd7db4eb49e979e66474a053c"],
+}
+
+# titles that are not a plausible real object for an outdoor showcase: sci-fi, game/fantasy art,
+# abstract or placeholder names, parts and kits, toy/miniature versions of big things
+JUNK = re.compile(r"sci-?fi|scifi|space ?ship|starship|star ?wars|tie[ -]fighter|x-?wing|gundam|\bmech\b|alien|ufo|fantasy|cartoon|\btoon\b|stylized|stylised|voxel|minecraft|fortnite|roblox|pixel|low[ -]?poly test|\btest\b|untitled|\bwip\b|\bobject ?\d|\bmodel ?\d|\bproject\b|asset|\bpart\b|\bkit\b|\bpiece\b|\btoy\b|lego|miniature|\bmini\b|keychain|paper|origami|\bnerf\b|\bfan ?art|\bconcept\b|\bsketch|\bscan ?\d|^\W*\d+\W*$|^.{0,3}$|^[a-z]{1,4}\d+", re.I)
+# showcase pools for the most visible slots: only titles that name the real thing
+SHOW = {
+    # (base pool, title regex, allowed entry labels or None)
+    "carShow": ("car", r"\b(toyota|bmw|audi|mercedes|benz|ford|mustang|chevrolet|chevy|camaro|corvette|porsche|ferrari|lamborghini|tesla|volkswagen|vw|beetle|golf|nissan|honda|mazda|subaru|hyundai|kia|volvo|lexus|dodge|jeep|cadillac|lincoln|buick|fiat|mini cooper|land rover|range rover|jaguar|maserati|bentley|rolls|datsun|peugeot|renault|citroen|opel|skoda|alfa|aston|mclaren|bugatti|saab|sedan|coupe|hatchback|suv|pickup|convertible|roadster|taxi|police car|muscle car|sports car|car)\b", None),
+    "planeStand": ("plane", r".", "airliner jet trijet transport_aircraft transport_plane turboprop airplane"),
+    "deckPlane": ("plane", r".", "fighter interceptor stealth_jet stealth_aircraft jet bomber monoplane"),
+    "fountainShow": ("statue", r"\bfountain\b", "fountain tiered_fountain basin pedestal pedestal_bowl pedestal_dish stone_basin"),
+    "statueShow": ("statue", r"\b(statue|sculpture|bust|monument|memorial|angel|lion|equestrian|obelisk|cenotaph)\b", None),
+}
+
+
 def original_folder(oid, OG):
     if not oid.startswith("objaverse-"):
         return 0
@@ -109,19 +131,34 @@ def main():
             if ds != "objaverse" or f < 0.8 or nbytes > 8e6 or nbytes < 4000:
                 continue
             text = f"{title} {entry.replace('_', ' ')}"
+            junk = bool(JUNK.search(title.strip()))
             for k, (fams, inc, exc, n) in rx.items():
-                if fam not in fams or exc.search(title):
+                if fam not in fams or exc.search(title) or junk:
                     continue
                 if (entry in ents[k]) if k in ents else inc.search(text):
                     cand[k].append(r[:14])
     out = {}
+    ranked = {}
     rnd = random.Random(2026)
     for k, rows in cand.items():
         rnd.shuffle(rows)
         rows.sort(key=lambda r: (r[3] not in rebuilt, original_folder(r[3], OG) == 0, -round(r[12], 2)))
+        ranked[k] = rows
         keep = rows[: KINDS[k][3]]
         out[k] = [r + [original_folder(r[3], OG)] for r in keep]
         print(f"{k:14s} {len(rows):5d} candidates, kept {len(keep):4d}, rebuilt {sum(r[3] in rebuilt for r in keep):3d}  e.g. {[r[6][:22] for r in keep[:6]]}")
+    for k, (base, inc, ents_ok) in SHOW.items():
+        r = re.compile(inc, re.I)
+        eok = set(ents_ok.split()) if ents_ok else None
+        deny = set(DENY.get(k, []))
+        keep = [row + [original_folder(row[3], OG)] for row in ranked[base] if r.search(row[6]) and row[3][len("objaverse-"):] not in deny and (eok is None or row[5] in eok)][:80]
+        keep = [row for row in keep if row[14]]
+        out[k] = keep
+        print(f"{k:14s} {len(keep):4d} curated from {base}")
+    if os.environ.get("REVIEW"):
+        for k in os.environ["REVIEW"].split(","):
+            for row in out[k]:
+                print(f"  {k}: {row[3]}  {row[6]!r}  [{row[5]}]")
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump(out, open(OUT, "w"), separators=(",", ":"), ensure_ascii=False)
     print("wrote", OUT, os.path.getsize(OUT) // 1024, "KB")

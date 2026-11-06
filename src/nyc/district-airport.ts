@@ -56,7 +56,7 @@ export function buildAirport(c: OpenCtx) {
       const x = sx * 28;
       stat.add(slab(yellow, x - 0.1, x + 0.1, -SZ / 2 + 12, SZ / 2 - 8, Y + 0.012, 1));
       stat.add(slab(flat('#c22a2a', 0.6), x - 3, x + 3, SZ / 2 - 9, SZ / 2 - 8.6, Y + 0.012, 1));
-      slot({ kind: 'plane', x, y: Y, z: az, rot: Math.PI / 2, w: 58, d: 56, h: 18, min: 12, radius: 260, maxTris: 600_000 });
+      slot({ kind: ['planeStand', 'plane'], x, y: Y, z: az, rot: Math.PI / 2, w: 58, d: 56, h: 18, min: 12, radius: 260, maxTris: 600_000 });
       jetBridge(stat, x + 4, SZ / 2 - 4, sx);
       // a tug and a baggage-cart train beside each stand
       slot({ kind: 'truck', x: x + sx * 22, y: Y, z: az + 12, rot: 0, w: 8, d: 3, h: 3.5, min: 2.5, radius: 120, maxTris: 150_000 });

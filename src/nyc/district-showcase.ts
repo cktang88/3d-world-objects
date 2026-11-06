@@ -109,7 +109,10 @@ function candidates(s: Slot): RemoteEntry[] {
 }
 
 function pickNext(s: Slot): RemoteEntry | null {
-  const list = candidates(s);
+  // the first kind is the curated pool: try it first, then any of the kinds
+  const kinds = Array.isArray(s.spec.kind) ? s.spec.kind : [s.spec.kind];
+  const first = pools?.[kinds[0]] ?? [];
+  const list = s.tries < 3 && first.length ? first : candidates(s);
   if (!list.length) return null;
   const r = new Rng(hashN(s.spec.seed, s.tries, 71));
   // a few draws: prefer a rebuilt (UV-mapped) object nobody nearby is showing

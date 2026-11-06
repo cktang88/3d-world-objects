@@ -41,10 +41,13 @@ test('showcase slots: inside the block, pools exist, not inside buildings', () =
     // buildings: the big colliders (not the slots' own, which are smaller than 30 m)
     const big = c.colliders.filter((r) => r.maxX - r.minX > 9 && r.maxZ - r.minZ > 9 && r.maxX - r.minX < 60);
     for (const s of specs) {
-      for (const k of Array.isArray(s.kind) ? s.kind : [s.kind]) {
+      const ks = Array.isArray(s.kind) ? s.kind : [s.kind];
+      for (const k of ks) {
         kinds.add(k);
-        if (!((pools[k]?.length ?? 0) >= 10)) bad.push(`${name}: pool '${k}' has ${pools[k]?.length ?? 0}`);
+        if (!((pools[k]?.length ?? 0) >= 5)) bad.push(`${name}: pool '${k}' has ${pools[k]?.length ?? 0}`);
       }
+      // a curated first pool may be small, but the slot needs plenty to fall back on
+      if (!(ks.reduce((n, k) => n + (pools[k]?.length ?? 0), 0) >= 10)) bad.push(`${name}: pools ${ks} hold < 10`);
       const carrierDeck = name === 'carrier';
       if (!carrierDeck && (Math.abs(s.x) > AX / 2 + 0.5 || Math.abs(s.z) > SZ / 2 + 0.5)) bad.push(`${name}: slot at ${fmt(s.x)},${fmt(s.z)} outside the block`);
       const fp: Rect = { minX: s.x - 0.3, maxX: s.x + 0.3, minZ: s.z - 0.3, maxZ: s.z + 0.3 };
