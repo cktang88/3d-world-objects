@@ -7,6 +7,7 @@ import { NycLevel } from '../nyc';
  * global lighting. Add &tod=day|golden|dusk|night; press T to cycle.
  */
 let level: NycLevel | null = null;
+let live = false;
 const focus = new THREE.Vector3(50.5, 0, 22);
 const scene: LabScene = {
   name: 'light-street',
@@ -18,11 +19,11 @@ const scene: LabScene = {
   build({ group, params }) {
     level = new NycLevel({ kind: 'nyc', seed: Number(params.get('seed') ?? 20261105), name: 'lab' });
     group.add(level.group);
-    // build the outer ring of blocks before the shot
-    for (let i = 0; i < 20; i++) level.update(0.016, focus, i * 0.016);
+    // only the initial 3x3 blocks (no streaming ring) to keep memory down; &live=1 animates and streams
+    live = params.has('live');
   },
   update(dt, time) {
-    level?.update(dt, focus, time);
+    if (live) level?.update(dt, focus, time);
   },
 };
 export default scene;
