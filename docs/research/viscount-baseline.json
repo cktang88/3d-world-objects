@@ -1,0 +1,46 @@
+{
+ "avenue": {
+  "calls": 412,
+  "tris": 1642018,
+  "shadowCasters": 204,
+  "shadowTris": 580878,
+  "chunksDrawn": 0,
+  "chunksLoaded": 0,
+  "instancedTris": 1284578,
+  "sprites": 31,
+  "buildMs": 414
+ },
+ "cross-street": {
+  "calls": 614,
+  "tris": 2355984,
+  "shadowCasters": 284,
+  "shadowTris": 829876,
+  "chunksDrawn": 0,
+  "chunksLoaded": 0,
+  "instancedTris": 1805670,
+  "sprites": 31,
+  "buildMs": 2
+ },
+ "corner-down-avenue": {
+  "calls": 587,
+  "tris": 2690246,
+  "shadowCasters": 265,
+  "shadowTris": 942538,
+  "chunksDrawn": 0,
+  "chunksLoaded": 0,
+  "instancedTris": 2123072,
+  "sprites": 31,
+  "buildMs": 8
+ },
+ "elevated": {
+  "calls": 760,
+  "tris": 2962668,
+  "shadowCasters": 330,
+  "shadowTris": 1017630,
+  "chunksDrawn": 0,
+  "chunksLoaded": 0,
+  "instancedTris": 2329446,
+  "sprites": 31,
+  "buildMs": 7
+ }
+}
