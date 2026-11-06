@@ -77,6 +77,13 @@ export function busStop(parent: THREE.Object3D, colliders: Rect[]) {
   sign.castShadow = true;
   g.add(sign);
   g.traverse((o) => (o.userData.owned = false));
+  // the painted letters and the sign face are this block's own: freed when the block unloads
+  for (const m of [word, sign]) {
+    m.userData.owned = true;
+    const mt = m.material as THREE.MeshStandardMaterial;
+    mt.userData.owned = true;
+    if (mt.map) mt.map.userData.owned = true;
+  }
   parent.add(g);
   colliders.push({ minX: px - 0.1, maxX: px + 0.1, minZ: pz - 0.1, maxZ: pz + 0.1 });
 }

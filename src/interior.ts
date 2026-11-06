@@ -921,6 +921,7 @@ export class InteriorLevel implements Level {
     const signText = this.desc.floor > 0 ? 'DOWNSTAIRS' : 'EXIT';
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.15), new THREE.MeshBasicMaterial({ map: signTex(signText, '#1a0a0a', '#ff3b30') }));
     sign.userData.owned = true;
+    (sign.material as THREE.Material).userData.owned = true; // releases its sign texture (textures.ts cachedUse)
     sign.position.set(exitX, DOOR_H + 0.28, z - T / 2 - 0.06);
     sign.rotation.y = Math.PI;
     this.cur.group.add(sign);
@@ -2127,6 +2128,7 @@ export class InteriorLevel implements Level {
       const name = this.desc.name.replace(/^\d+\s*/, '').toUpperCase().slice(0, 18) || 'RECEPTION';
       const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.45), new THREE.MeshStandardMaterial({ map: signTex(name, '#2b2c2e', '#e8e2d4'), roughness: 0.4 }));
       sign.userData.owned = true;
+      (sign.material as THREE.Material).userData.owned = true;
       const [sx, sz] = this.at(back, t, 0.02);
       sign.position.set(sx, 1.85, sz);
       this.cur.group.add(sign);
@@ -2480,6 +2482,7 @@ export class InteriorLevel implements Level {
     const inset = r.chance(0.5) ? 0.12 : 0;
     const pic = new THREE.Mesh(new THREE.PlaneGeometry(pw - inset, ph - inset), art);
     pic.userData.owned = true;
+    art.userData.owned = true; // its own material; the painting texture is refcounted (textures.ts cachedUse)
     pic.position.z = 0.05;
     grp.add(pic);
     const [x, z] = this.at(sd, t, 0.005);

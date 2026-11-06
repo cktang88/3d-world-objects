@@ -470,6 +470,7 @@ export class CityLevel implements Level {
       const word = rng.pick(SHOP_WORDS);
       const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8), new THREE.MeshStandardMaterial({ map: signTex(word, '#1a1a1a', b.neon ? rng.pick(b.neon) : '#f1e3c0'), emissive: '#ffffff', emissiveMap: signTex(word, '#1a1a1a', b.neon ? rng.pick(b.neon) : '#f1e3c0'), emissiveIntensity: night ? 1.4 : 0.15 }));
       sign.userData.owned = true;
+      (sign.material as THREE.Material).userData.owned = true;
       sign.position.set(0, 3.9, 0.06);
       door.add(sign);
     }

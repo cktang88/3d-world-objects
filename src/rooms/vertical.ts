@@ -1234,6 +1234,7 @@ export class FloorLevel implements Level, VCore {
     // the number plate on the door, or a suite sign beside it
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(office ? 0.42 : 0.16, office ? 0.11 : 0.05), new THREE.MeshStandardMaterial({ map: signTex(label, office ? '#2a2c30' : '#b8925a', office ? '#f2f2f0' : '#2a1d10'), roughness: 0.4, metalness: office ? 0 : 0.6 }));
     plate.userData.owned = true;
+    (plate.material as THREE.Material).userData.owned = true; // its own material (the label texture is memoised)
     const [px, pz] = toWorld(fr, office ? DW / 2 + 0.38 : 0, office ? 0.012 : -0.012);
     plate.position.set(px, office ? 1.55 : 1.64, pz);
     plate.rotation.y = fr.r;
@@ -1504,6 +1505,7 @@ export class FloorLevel implements Level, VCore {
       }
       const dir = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.5), new THREE.MeshStandardMaterial({ map: signTex(this.desc.name.toUpperCase(), '#1a1c20', '#e8e4da'), roughness: 0.4 }));
       dir.userData.owned = true;
+      (dir.material as THREE.Material).userData.owned = true; // releases its sign texture (textures.ts cachedUse)
       dir.position.set(lw / 2 - 0.02, 2.2, z1 - 3);
       dir.rotation.y = -Math.PI / 2;
       this.group.add(dir);

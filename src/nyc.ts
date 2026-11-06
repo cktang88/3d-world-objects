@@ -116,6 +116,7 @@ export class NycLevel implements Level {
         this.group.remove(ch.group);
         disposeTree(ch.group);
         this.chunks.delete(k);
+        this.steam = this.steam.filter((st) => !st.userData.disposed); // do not keep unloaded chunks' sprites alive
         break; // [vis] one unload per frame
       }
     }
@@ -379,6 +380,7 @@ export class NycLevel implements Level {
           const s = glow('#ffffff', 1.5, ax, 3.8, az, 0.4);
           (s.material as THREE.SpriteMaterial).blending = THREE.NormalBlending;
           s.material = (s.material as THREE.SpriteMaterial).clone();
+          s.material.userData.owned = true; // freed with the chunk (the glow texture stays shared)
           s.userData.ph = k / 3;
           s.userData.y = 3.8;
           group.add(s);

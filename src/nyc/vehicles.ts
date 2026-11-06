@@ -358,6 +358,8 @@ export function carMesh(kind: VehicleKind, rng: Rng): THREE.Group {
   if (ready.has(id)) dress(obj, id, paint, kind === 'cab');
   else {
     obj.add(standin(f.paint ? color : id === 'taxi_cv' ? TAXI_YELLOW : '#e8e8e8', f.len, f.wid, /tahoe|suburban|explorer|escalade|sprinter/.test(id)));
+    // forget cars of unloaded blocks still waiting for their model (a failed load never empties the list)
+    for (let i = waiting.length - 1; i >= 0; i--) if (waiting[i].obj.userData.disposed) waiting.splice(i, 1);
     waiting.push({ obj, id, paint, cab: kind === 'cab' });
   }
   return obj;

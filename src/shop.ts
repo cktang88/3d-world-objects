@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
-import { finishBuilding } from './level';
+import { disposeTree, finishBuilding } from './level';
 import { registerContainer, type LazyContainer } from './lazy';
 import { mat } from './build';
 import { realScale } from './realscale';
@@ -99,6 +99,8 @@ export class ShopLevel implements Level {
   private cols: Rect[] = [];
   private ports: Portal[] = [];
   private alive = true;
+  /** dispose(): stop waiting for stock models */
+  private stopWaiting: (() => void) | null = null;
   private models: RemoteModel[] = [];
   /** triangles we are willing to spend on products (sand3d instances and swapped-in originals) */
   private triBudget = SHOP_BUDGET.tris;
@@ -469,10 +471,16 @@ export class ShopLevel implements Level {
     const nWant = Math.max(10, Math.min(44, Math.round(chunks.length / 2.2)));
     const picks = stock.slice(0, Math.min(stock.length, nWant));
     // load them all (each finishes in its own time), then lay the shop out at once
-    const timeout = new Promise<null>((res) => setTimeout(() => res(null), 20000));
-    const loaded = (
-      await Promise.all(picks.map((e, i) => Promise.race([loadRemote(e, { prio: i, shadows: false }).catch(() => null), timeout])))
-    ).flatMap((m, i): Loaded[] => {
+    // give up after 20 s, or at once when the shop is disposed (a pending timer would keep it alive)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((res) => {
+      timer = setTimeout(() => res(null), 20000);
+      this.stopWaiting = () => { clearTimeout(timer); res(null); };
+    });
+    const all2 = await Promise.all(picks.map((e, i) => Promise.race([loadRemote(e, { prio: i, shadows: false }).catch(() => null), timeout])));
+    clearTimeout(timer);
+    this.stopWaiting = null;
+    const loaded = all2.flatMap((m, i): Loaded[] => {
       if (!m) return [];
       if (!this.alive) {
         disposeModel(m.object);
@@ -935,11 +943,10 @@ export class ShopLevel implements Level {
     // lazy.ts forgets containers whose anchor is disposed
     for (const c of this.cases) c.obj.userData.disposed = true;
     clearQueue();
-    this.group.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.userData.owned) m.geometry.dispose();
-    });
+    this.stopWaiting?.();
+    disposeTree(this.group); // owned geometry, instance buffers, owned materials; marks the tree disposed
     for (const m of this.models) disposeModel(m.object);
+    this.models.length = 0;
   }
 }
 

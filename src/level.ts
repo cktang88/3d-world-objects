@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { disposeObject } from './dispose';
 import type { Biome } from './biomes';
 import type { ModelEntry } from './assets';
 import type { RemoteEntry } from './remote';
@@ -112,12 +113,11 @@ export function overlaps(a: Rect, b: Rect, pad = 0): boolean {
   return a.minX < b.maxX + pad && a.maxX > b.minX - pad && a.minZ < b.maxZ + pad && a.maxZ > b.minZ - pad;
 }
 
-export function disposeTree(o: THREE.Object3D) {
-  o.traverse((c) => {
-    c.userData.disposed = true;
-    const m = c as THREE.Mesh;
-    // Only dispose geometry we own (procedural); model geometries are shared from the loader cache.
-    if (m.isMesh && m.userData.owned) m.geometry.dispose();
-    if ((c as THREE.InstancedMesh).isInstancedMesh) (c as THREE.InstancedMesh).dispose();
-  });
+/**
+ * Free a level / chunk subtree: owned geometry (`userData.owned`), instance and batch buffers, and
+ * materials/textures tagged `userData.owned` (per-object signs, labels); shared caches are left
+ * alone. See src/dispose.ts.
+ */
+export function disposeTree(o: THREE.Object3D, keep?: Set<unknown>) {
+  disposeObject(o, { keep });
 }

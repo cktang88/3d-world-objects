@@ -398,6 +398,7 @@ function gatePlane(parent: THREE.Object3D, w: number, h: number, x: number, y: n
   const uv = g.getAttribute('uv') as THREE.BufferAttribute;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / 1.6, (uv.getY(i) * h) / 1.6);
   const o = new THREE.Mesh(g, gateMat(variant));
+  o.userData.owned = true; // the plane is this gate's own (the material is cached)
   o.position.set(x, y + h / 2, z);
   o.castShadow = true;
   parent.add(o);

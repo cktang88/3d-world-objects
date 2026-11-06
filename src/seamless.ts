@@ -404,6 +404,7 @@ export class Seamless {
   private drop(s: Slot) {
     if (s.shown) this.hidePreview(s);
     this.slots.delete(s.key);
+    this.queue = this.queue.filter((q) => q !== s); // a half-built level must not stay queued (and alive)
     this.stats.evicted++;
     // a dropped level must not cancel the active level's queued model loads (remote.ts)
     queueHold.n++;

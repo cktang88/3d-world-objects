@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from './rng';
 import { FLAGS } from './flags';
+import { share, refCount } from './dispose';
 
 function canvas(w: number, h = w): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -50,6 +51,27 @@ const memo = new Map<string, unknown>();
 function cached<T>(key: string, make: () => T): T {
   if (!memo.has(key)) memo.set(key, make());
   return memo.get(key) as T;
+}
+
+/**
+ * cached() for per-object textures with an open-ended key (a painting per random seed, a sign per
+ * text): each call is one use (dispose.ts share). Whoever disposes the material using it (owned
+ * material, disposeTree) releases it; the last release frees it and drops it from the cache, so
+ * walking through many apartments does not keep every painting forever.
+ */
+function cachedUse(key: string, make: () => THREE.Texture): THREE.CanvasTexture {
+  let t = memo.get(key) as THREE.CanvasTexture | undefined;
+  if (!t) {
+    const made = (t = make() as THREE.CanvasTexture);
+    memo.set(key, made);
+    const gone = () => {
+      if (refCount(made) > 0) return; // someone disposed it by hand while in use: it re-uploads on next use
+      made.removeEventListener('dispose', gone);
+      if (memo.get(key) === made) memo.delete(key);
+    };
+    made.addEventListener('dispose', gone);
+  }
+  return share(t);
 }
 
 export type FacadeStyle = 'brick' | 'plaster' | 'glass' | 'panel' | 'adobe' | 'timber' | 'brownstone' | 'prewar' | 'castiron';
@@ -434,7 +456,7 @@ export function rugTex(seed: number) {
 }
 
 export function paintingTex(seed: number) {
-  return cached(`paint:${seed}`, () => {
+  return cachedUse(`paint:${seed}`, () => {
     const W = 256, H = 192;
     const rng = new Rng(seed);
     const [c, g] = canvas(W, H);
@@ -548,7 +570,7 @@ export function skyTex(top: string, bottom: string, stars: boolean, seed: number
 }
 
 export function signTex(text: string, bg: string, fg: string) {
-  return cached(`sign:${text}:${bg}:${fg}`, () => {
+  return cachedUse(`sign:${text}:${bg}:${fg}`, () => {
     const [c, g] = canvas(512, 128);
     g.fillStyle = bg;
     g.fillRect(0, 0, 512, 128);

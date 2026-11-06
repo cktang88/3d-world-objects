@@ -969,6 +969,7 @@ function chunkTrees(group: THREE.Object3D): ChunkTrees {
   driver.frustumCulled = false;
   driver.renderOrder = -1e6;
   driver.userData.owned = true;
+  (driver.material as THREE.Material).userData.owned = true;
   driver.onBeforeRender = (renderer, _scene, camera) => lodUpdate(renderer, camera);
   group.add(driver);
   group.userData.trees = c;

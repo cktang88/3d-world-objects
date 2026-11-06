@@ -261,6 +261,7 @@ export class GalleryLevel extends MuseumBase {
         if (m.isMesh) {
           m.geometry.dispose();
           (m.material as THREE.MeshBasicMaterial).map?.dispose();
+          if ((m.material as THREE.Material).userData?.owned) (m.material as THREE.Material).dispose();
         }
       });
       this.ante = null;

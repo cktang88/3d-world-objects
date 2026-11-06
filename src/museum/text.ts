@@ -46,6 +46,7 @@ export function textPlane(lines: Line[], w: number, h: number, bg: string | null
   t.anisotropy = 8;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, transparent: !bg, toneMapped: false, depthWrite: !!bg }));
   m.userData.owned = true;
+  (m.material as THREE.Material).userData.owned = t.userData.owned = true; // per label: freed with it
   m.userData.tex = t;
   m.userData.redraw = (nl: Line[]) => {
     draw(c, nl, k, bg, align, valign);

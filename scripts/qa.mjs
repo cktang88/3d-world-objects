@@ -43,7 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
-  zfight: ['zfight'], flicker: ['zfight'],
+  zfight: ['zfight'], flicker: ['zfight'], memory: ['memory'], mem: ['memory'], leaks: ['memory'],
   meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],
   museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
@@ -51,6 +51,7 @@ const AREAS = {
 const SRC_MAP = [
   [/^tests\/(qa|shim|env|world)\.ts$|^scripts\/qa\.mjs$|^src\/(level|build|rng|detail)\.ts$/, ['*']],
   [/^tests\/(.+)\.test\.ts$/, (m) => [m[1]]],
+  [/^tests\/heap\.ts$|^src\/dispose\.ts$/, ['memory']],
   [/^src\/nyc\/people/, ['people']],
   [/^src\/nyc\/ground/, ['ground']],
   [/^src\/rooms\/vertical/, ['vertical']],
@@ -126,7 +127,7 @@ async function worker() {
     const out = join(OUT, name.replace(/\.ts$/, '').replace(/[\\/]/g, '__') + '.mjs');
     const s = performance.now();
     const { code, text } = await new Promise((res) => {
-      const p = spawn(process.execPath, ['--enable-source-maps', '--import', join(OUT, 'shim.mjs'), out], {
+      const p = spawn(process.execPath, ['--enable-source-maps', '--expose-gc', '--import', join(OUT, 'shim.mjs'), out], {
         cwd: ROOT, env: { ...process.env, QA_ROOT: ROOT, QA_TEST: testFilter }, stdio: ['ignore', 'pipe', 'pipe'],
       });
       let text = '';

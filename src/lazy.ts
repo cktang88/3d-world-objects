@@ -170,7 +170,11 @@ export function jointOpener(a: Animator): (t: number) => void {
 const registry = new Set<LazyContainer>();
 
 /** register an openable thing; its contents are generated only when needed */
+let registered = 0;
 export function registerContainer(obj: THREE.Object3D, spec: ContainerSpec) {
+  // Lazy.update forgets containers of disposed levels every frame; this also does when nothing updates
+  // (levels prebuilt and evicted in the background keep registering)
+  if (++registered % 256 === 0) for (const o of registry) if (o.obj.userData.disposed) { o.drop(); registry.delete(o); }
   const c = new LazyContainer(obj, spec);
   registry.add(c);
   return c;
