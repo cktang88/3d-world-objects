@@ -164,15 +164,16 @@ vec2 gLanes(vec2 w) {
 
 const GLSL_SIDEWALK = /* glsl */ `
 uniform sampler2D gCon;
-void gEval(out vec3 alb, out float rough, out vec3 nW) {
+void gEvalSw(out vec3 alb, out float rough, out vec3 nW) {
   vec2 cid = gChunk(vGW.xz);
   vec2 lp = vGW.xz - cid * vec2(G_AX, G_SZ);
   vec2 d = vec2(G_BX, G_BZ) - abs(lp);
   bool ramp = vGN.y < .9995;
+  bool strip = vGUv.x < -2.; // groundStrip(): a plain run of sidewalk, no corners or ramps
   // distance in from the kerb line, following the rounded corner
   vec2 cc = G_CR - d;
   float e = (d.x < G_CR && d.y < G_CR) ? G_CR - length(cc) : min(d.x, d.y);
-  if (!ramp) {
+  if (!ramp && !strip) {
     if (e < G_CW) discard; // under the curb top, and outside the corner radius
     float k1 = clamp((d.x - G_CW) / (G_RL - G_CW), 0., 1.);
     float k2 = clamp((d.y - G_CW) / (G_RL - G_CW), 0., 1.);
@@ -348,9 +349,9 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
 
 const GLSL_CURB = /* glsl */ `
 uniform sampler2D gGra;
-void gEval(out vec3 alb, out float rough, out vec3 nW) {
+void gEvalCb(out vec3 alb, out float rough, out vec3 nW) {
   vec2 cid = gChunk(vGW.xz);
-  float u = vGUv.x, v = vGUv.y;
+  float u = vGUv.x, v = -10. - vGUv.y; // curb uv.y is stored as -10 - v (see curbGeometry)
   float SL = 2.13;
   float stone = floor(u / SL);
   float hs = gH(vec2(stone, 3.) + cid * 3.1);
@@ -376,6 +377,11 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   vec2 tn = (t.ba * 2. - 1.) * .5;
   nW = normalize(vGN + vec3(tn.x, tn.y, 0.) * (1. - abs(vGN.y)) + vec3(tn.x, 0., tn.y) * abs(vGN.y));
   gWeather(alb, rough, nW, 0., 0.);
+}
+// sidewalk, ramps and curb share one material (one draw call): curb vertices carry uv.y < -5
+void gEval(out vec3 alb, out float rough, out vec3 nW) {
+  if (vGUv.y < -5.) gEvalCb(alb, rough, nW);
+  else gEvalSw(alb, rough, nW);
 }
 `;
 
@@ -403,76 +409,57 @@ vGUv = uv;`,
 
 const mats: Record<string, THREE.MeshStandardMaterial> = {};
 export const GM = {
-  sidewalk: () => (mats.sw ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.35 }), 'sw', GLSL_SIDEWALK), 0.55)),
+  /** sidewalk flags, ramps and the curb */
+  sidewalk: () => (mats.sw ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.35 }), 'sw', GLSL_SIDEWALK + GLSL_CURB), 0.55)),
   road: () => (mats.rd ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'rd', GLSL_ROAD))),
   cobbleRoad: () => (mats.rc ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'rc', GLSL_ROAD, { G_COBBLE: '1' }))),
-  curb: () => (mats.cb ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'cb', GLSL_CURB), 0.5)),
-  markings: () => (mats.mk ??= markingsMaterial()),
   fixtures: () => (mats.fx ??= fixturesMaterial()),
 };
 
 // ---------------------------------------------------------------- road markings
 
-/** one canvas: a solid block for the lines and bars, and the elongated lane legends */
-const MK_W = 1024, MK_H = 512;
+/** paint regions of the hardware atlas (bottom right, pixels of the FX_N² canvas): a solid block for
+ *  lines and bars, and the elongated lane legends. Everything in u > .25, v < .5 is paint (worn in the shader). */
 const MK = {
-  solid: [0, 0, 16, 16],
-  BUS: [32, 0, 300, 512],
-  ONLY: [352, 0, 400, 512],
-  arrow: [784, 0, 220, 512],
+  solid: [264, 520, 16, 16],
+  BUS: [296, 520, 230, 496],
+  ONLY: [536, 520, 300, 496],
+  arrow: [846, 520, 170, 496],
 } as const;
-let markTex: THREE.CanvasTexture | null = null;
-function markingsTexture() {
-  if (markTex) return markTex;
-  const c = document.createElement('canvas');
-  c.width = MK_W;
-  c.height = MK_H;
-  const g = c.getContext('2d')!;
+function drawMarkings(A: CanvasRenderingContext2D, Hh: CanvasRenderingContext2D, R: CanvasRenderingContext2D) {
+  A.clearRect(256, 512, 768, 512);
+  Hh.fillStyle = '#808080';
+  Hh.fillRect(256, 512, 768, 512);
+  R.fillStyle = 'rgb(0,140,0)';
+  R.fillRect(256, 512, 768, 512);
+  const g = A;
   g.fillStyle = '#fff';
-  g.fillRect(0, 0, 16, 16);
-  const word = (s: string, r: readonly number[]) => {
+  g.fillRect(MK.solid[0] - 4, MK.solid[1] - 4, MK.solid[2] + 8, MK.solid[3] + 8);
+  const word = (str: string, r: readonly number[]) => {
     g.save();
     g.font = 'bold 120px "Arial Narrow", "Liberation Sans Narrow", Arial, sans-serif';
-    const m = g.measureText(s);
-    const sx = (r[2] - 12) / m.width;
+    const m = g.measureText(str);
     g.translate(r[0] + 6, r[1] + r[3] - 8);
-    // the legend is stretched along the lane so drivers read it foreshortened
-    g.scale(sx, (r[3] - 16) / 88);
-    g.fillText(s, 0, 0);
+    // stretched along the lane so drivers read it foreshortened
+    g.scale((r[2] - 12) / m.width, (r[3] - 16) / 88);
+    g.fillText(str, 0, 0);
     g.restore();
   };
   word('BUS', MK.BUS);
   word('ONLY', MK.ONLY);
-  // straight-ahead arrow
   const [ax, ay, aw, ah] = MK.arrow;
   g.beginPath();
   g.moveTo(ax + aw / 2, ay + 6);
-  g.lineTo(ax + aw - 10, ay + ah * 0.32);
-  g.lineTo(ax + aw * 0.62, ay + ah * 0.32);
-  g.lineTo(ax + aw * 0.62, ay + ah - 6);
-  g.lineTo(ax + aw * 0.38, ay + ah - 6);
-  g.lineTo(ax + aw * 0.38, ay + ah * 0.32);
-  g.lineTo(ax + 10, ay + ah * 0.32);
+  g.lineTo(ax + aw - 6, ay + ah * 0.32);
+  g.lineTo(ax + aw * 0.64, ay + ah * 0.32);
+  g.lineTo(ax + aw * 0.64, ay + ah - 6);
+  g.lineTo(ax + aw * 0.36, ay + ah - 6);
+  g.lineTo(ax + aw * 0.36, ay + ah * 0.32);
+  g.lineTo(ax + 6, ay + ah * 0.32);
   g.closePath();
   g.fill();
-  markTex = new THREE.CanvasTexture(c);
-  markTex.colorSpace = THREE.SRGBColorSpace;
-  markTex.anisotropy = 8;
-  return markTex;
 }
-
-function markingsMaterial() {
-  const m = new THREE.MeshStandardMaterial({ map: markingsTexture(), vertexColors: true, transparent: true, depthWrite: false, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 });
-  m.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, U);
-    sh.vertexShader = 'varying vec3 vGW;\nvarying vec3 vGN;\nvarying vec2 vGUv;\n' + sh.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `#include <worldpos_vertex>
-vGW = (modelMatrix * vec4(transformed, 1.0)).xyz;
-vGN = vec3(0., 1., 0.);
-vGUv = uv;`,
-    );
-    sh.fragmentShader = GLSL_CONST + GLSL_COMMON + /* glsl */ `
+const GLSL_WEAR = /* glsl */ `
 float gWear() {
   vec2 w = vGW.xz;
   // thermoplastic crazes into plates
@@ -489,13 +476,7 @@ float gWear() {
   float chip = max(smoothstep(.7, .75, gFbm(w * 5.3 + 5.)), smoothstep(.62, .7, gFbm(w * 2.7 + 9.)) * tr * .8);
   return (1. - craze * .8) * (1. - chip) * (.72 + .28 * gN(w * .6));
 }
-` + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-diffuseColor.a *= gWear() * (1. - gSnow * .85);
-diffuseColor.rgb *= .82 + .18 * gN(vGW.xz * 2.3);`);
-  };
-  m.customProgramCacheKey = () => 'nycground|mk';
-  return wetSurface(m, 0.7);
-}
+`;
 
 class QuadBuf {
   pos: number[] = [];
@@ -522,7 +503,8 @@ class QuadBuf {
       this.pos.push(x, yFn ? yFn(x, z) : y, z);
       this.nor.push(0, 1, 0);
       this.uv.push(u0 + (u1 - u0) * s, vBot + (vTop - vBot) * t);
-      if (c) this.col.push(c.r, c.g, c.b);
+      const cc = c ?? ONE;
+      this.col.push(cc.r, cc.g, cc.b);
     }
     this.idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
   }
@@ -531,7 +513,7 @@ class QuadBuf {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    if (this.col.length) g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
     g.setIndex(this.idx);
     // flip any quad that faces down
     g.computeVertexNormals();
@@ -545,6 +527,7 @@ class QuadBuf {
   }
 }
 
+const ONE = new THREE.Color(1, 1, 1);
 const WHITE = new THREE.Color('#e9e7df');
 const BUSRED = new THREE.Color('#a24a3a');
 
@@ -553,10 +536,9 @@ const aveDir = (k: number) => (k % 2 === 0 ? -1 : 1);
 const strDir = (k: number) => (k % 2 === 0 ? 1 : -1);
 const busAve = (k: number) => hashN(k, 7311) % 3 === 0;
 
-function markings(cx: number, cz: number) {
-  const q = new QuadBuf();
+function markings(q: QuadBuf, cx: number, cz: number) {
   const Y = 0.004;
-  const S = MK.solid, W = MK_W, H = MK_H;
+  const S = MK.solid, W = FX_N, H = FX_N;
   const xs = AX / 2, zs = SZ / 2;
   // crosswalks: high-visibility bars (0.6 m wide, 0.6 m gaps) centred on the roadway centre line
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -624,11 +606,6 @@ function markings(cx: number, cz: number) {
       q.quad(Math.min(xb, xb - sx * STOP_W), Math.min(sz * (BZ + 0.3), stz), Math.max(xb, xb - sx * STOP_W), Math.max(sz * (BZ + 0.3), stz), Y, S, W, H, '-z', WHITE);
     }
   }
-  const mesh = new THREE.Mesh(q.geometry(), GM.markings());
-  mesh.receiveShadow = true;
-  mesh.userData.owned = true;
-  mesh.renderOrder = 1;
-  return mesh;
 }
 
 // ---------------------------------------------------------------- curb and ramps
@@ -701,7 +678,7 @@ function curbGeometry() {
       const su = i === n ? total : sArr[i];
       for (const [o, y, v] of prof(p)) {
         pos.push(p.x + p.nx * o, y, p.z + p.nz * o);
-        uv.push(su, v);
+        uv.push(su, -10 - v);
       }
     }
     for (let i = 0; i < n; i++) for (let k = 0; k < per - 1; k++) {
@@ -994,6 +971,7 @@ function fixturesTextures() {
   });
   blotch(FX.plate, 18, '#5e3a20', 0.85, 0.2, 35, 0.5);
 
+  drawMarkings(A, Hh, R);
   // height → normal map
   const hd = Hh.getImageData(0, 0, FX_N, FX_N).data;
   const nc = mk();
@@ -1023,9 +1001,26 @@ function fixturesTextures() {
 
 function fixturesMaterial() {
   const t = fixturesTextures();
-  const m = new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normal, roughnessMap: t.rm, metalnessMap: t.rm, roughness: 1, metalness: 1, alphaTest: 0.5, envMapIntensity: 0.7, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  // flush hardware and road paint share one atlas and one draw call; transparent so paint can wear through
+  const m = new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normal, roughnessMap: t.rm, metalnessMap: t.rm, roughness: 1, metalness: 1, vertexColors: true, transparent: true, depthWrite: false, alphaTest: 0.02, envMapIntensity: 0.7, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 });
   m.normalScale.set(1.2, 1.2);
   m.userData.pbr = true;
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = 'varying vec3 vGW;\nvarying vec3 vGN;\nvarying vec2 vGUv;\n' + sh.vertexShader.replace(
+      '#include <worldpos_vertex>',
+      `#include <worldpos_vertex>
+vGW = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vGN = vec3(0., 1., 0.);
+vGUv = uv;`,
+    );
+    sh.fragmentShader = GLSL_CONST + GLSL_COMMON + GLSL_WEAR + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+if (vGUv.x > .25 && vGUv.y < .5) {
+  diffuseColor.a *= gWear() * (1. - gSnow * .85);
+  diffuseColor.rgb *= .82 + .18 * gN(vGW.xz * 2.3);
+}`);
+  };
+  m.customProgramCacheKey = () => 'nycground|fx';
   return wetSurface(m, 0.6);
 }
 
@@ -1041,6 +1036,68 @@ export interface GroundOpts {
   village?: boolean;
   /** Belgian-block streets */
   cobble?: boolean;
+}
+
+/** a straight curb from (x0,z0) to (x1,z1) whose road face points along (nx,nz): same profile and uv encoding as the block curb */
+function straightCurb(x0: number, z0: number, x1: number, z1: number, nx: number, nz: number, h = CURB + 0.003) {
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  const L = Math.hypot(x1 - x0, z1 - z0);
+  const prof: [number, number, number][][] = [
+    [[-CW, h, 0], [-0.012, h, CW - 0.012]],
+    [[-0.012, h, CW - 0.012], [0, h - 0.012, CW + 0.005]],
+    [[0, h - 0.012, CW + 0.005], [0, -0.01, CW + 0.017 + h]],
+  ];
+  for (const st of prof) {
+    const b = pos.length / 3;
+    for (const [px, pz, su] of [[x0, z0, 0], [x1, z1, L]]) for (const [o, y, v] of st) {
+      pos.push(px + nx * o, y, pz + nz * o);
+      uv.push(su + Math.abs(x0 + z0) % 7, -10 - v);
+    }
+    idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  if (g.getAttribute('normal').getY(0) < 0) {
+    for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+    g.setIndex(idx);
+    g.computeVertexNormals();
+  }
+  return g;
+}
+
+export type StripEdge = '+x' | '-x' | '+z' | '-z';
+/**
+ * A plain run of NYC sidewalk for open spaces (parks, piers, plazas), chunk-local rect x0..x1 × z0..z1 at
+ * curb height: the same flags, wear and weather as the block sidewalks, but no corner radius or ramps.
+ * `curbs` lists the edges that meet a roadway; each gets a straight granite / steel-faced curb.
+ * One material with the block sidewalks, so it merges into the same baked draw call.
+ */
+export function groundStrip(stat: THREE.Object3D, x0: number, x1: number, z0: number, z1: number, curbs: StripEdge[] = []) {
+  void groundReady();
+  const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
+  g.rotateX(-Math.PI / 2);
+  g.translate((x0 + x1) / 2, CURB, (z0 + z1) / 2);
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, -3, 0); // strip mode in the shader
+  const m = new THREE.Mesh(g, GM.sidewalk());
+  m.receiveShadow = true;
+  stat.add(m);
+  for (const e of curbs) {
+    if (e === '+x') groundCurb(stat, e, x1, z0, z1);
+    else if (e === '-x') groundCurb(stat, e, x0, z0, z1);
+    else if (e === '+z') groundCurb(stat, e, z1, x0, x1);
+    else groundCurb(stat, e, z0, x0, x1);
+  }
+}
+/** a straight curb on the line x = c (edge ±x, from a0 to a1 along z) or z = c (edge ±z, along x), road on the `edge` side */
+export function groundCurb(stat: THREE.Object3D, edge: StripEdge, c: number, a0: number, a1: number) {
+  const g = edge === '+x' ? straightCurb(c, a0, c, a1, 1, 0) : edge === '-x' ? straightCurb(c, a0, c, a1, -1, 0) : edge === '+z' ? straightCurb(a0, c, a1, c, 0, 1) : straightCurb(a0, c, a1, c, 0, -1);
+  const m = new THREE.Mesh(g, GM.sidewalk());
+  m.receiveShadow = true;
+  stat.add(m);
 }
 
 let curbGeo: THREE.BufferGeometry | null = null;
@@ -1066,11 +1123,11 @@ export function groundBase(o: GroundOpts) {
   rm.receiveShadow = true;
   o.stat.add(rm);
   curbGeo ??= curbGeometry();
-  const cb = new THREE.Mesh(curbGeo, GM.curb());
+  const cb = new THREE.Mesh(curbGeo, GM.sidewalk());
   cb.receiveShadow = true;
   cb.castShadow = false;
   o.stat.add(cb);
-  o.group.add(markings(o.cx, o.cz));
+  markings(fix, o.cx, o.cz);
   // catch basins in the gutter, upstream of each crosswalk
   const rng = new Rng(hashN(o.cx, o.cz, 31337));
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {

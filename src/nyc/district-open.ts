@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { groundStrip, groundCurb } from './ground';
 import type { Portal, Rect } from '../level';
 import { rect } from '../level';
 import { Rng, hashN } from '../rng';
-import { AX, SZ, AVE, ST, BX, BZ, LX, LZ, CURB, B, M, bake, avenueName, streetName } from './common';
+import { AX, SZ, AVE, ST, BX, BZ, LX, LZ, CURB, bake, avenueName, streetName } from './common';
 import { signalPole, nameSign, lampPost, hydrant } from './streetprops';
 import { roadOpen, type District, type Edge } from './districts';
 import { buildPark } from './district-park';
@@ -47,13 +48,7 @@ function roadStrip(m: THREE.Material, x0: number, x1: number, z0: number, z1: nu
   return mesh;
 }
 function sidewalk(stat: THREE.Object3D, x0: number, x1: number, z0: number, z1: number) {
-  const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
-  g.rotateX(-Math.PI / 2);
-  g.translate((x0 + x1) / 2, CURB, (z0 + z1) / 2);
-  const p = g.getAttribute('position') as THREE.BufferAttribute;
-  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
-  for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / 3, -p.getZ(i) / 3);
-  stat.add(new THREE.Mesh(g, M.sidewalk()));
+  groundStrip(stat, x0, x1, z0, z1); // NYC flags without block corners (nyc/ground.ts)
 }
 
 export function openChunk(d: District, cx: number, cz: number, seed: number, roadMaterial: THREE.Material) {
@@ -73,7 +68,6 @@ export function openChunk(d: District, cx: number, cz: number, seed: number, roa
 
   // roads: each open edge keeps its half of the roadway (and the corner squares with it)
   const ha = AVE / 2, hs = ST / 2;
-  const curb = M.curb();
   if (open['+x']) group.add(roadStrip(roadMaterial, AX / 2 - ha, AX / 2, -SZ / 2, SZ / 2));
   if (open['-x']) group.add(roadStrip(roadMaterial, -AX / 2, -AX / 2 + ha, -SZ / 2, SZ / 2));
   const zx0 = open['-x'] ? -AX / 2 + ha : -AX / 2, zx1 = open['+x'] ? AX / 2 - ha : AX / 2;
@@ -82,11 +76,11 @@ export function openChunk(d: District, cx: number, cz: number, seed: number, roa
   // sidewalks along the open edges, kerbs on their road side
   const kx0 = open['-x'] ? -BX : -AX / 2, kx1 = open['+x'] ? BX : AX / 2;
   const kz0 = open['-z'] ? -BZ : -SZ / 2, kz1 = open['+z'] ? BZ : SZ / 2;
-  if (open['+x']) { sidewalk(stat, LX, BX, kz0, kz1); B(stat, curb, 0.25, CURB, kz1 - kz0, BX - 0.125, 0, (kz0 + kz1) / 2, false); }
-  if (open['-x']) { sidewalk(stat, -BX, -LX, kz0, kz1); B(stat, curb, 0.25, CURB, kz1 - kz0, -BX + 0.125, 0, (kz0 + kz1) / 2, false); }
+  if (open['+x']) { sidewalk(stat, LX, BX, kz0, kz1); groundCurb(stat, '+x', BX, kz0, kz1); }
+  if (open['-x']) { sidewalk(stat, -BX, -LX, kz0, kz1); groundCurb(stat, '-x', -BX, kz0, kz1); }
   const sx0 = open['-x'] ? -LX : kx0, sx1 = open['+x'] ? LX : kx1;
-  if (open['+z']) { sidewalk(stat, sx0, sx1, LZ, BZ); B(stat, curb, kx1 - kx0, CURB, 0.25, (kx0 + kx1) / 2, 0, BZ - 0.125, false); }
-  if (open['-z']) { sidewalk(stat, sx0, sx1, -BZ, -LZ); B(stat, curb, kx1 - kx0, CURB, 0.25, (kx0 + kx1) / 2, 0, -BZ + 0.125, false); }
+  if (open['+z']) { sidewalk(stat, sx0, sx1, LZ, BZ); groundCurb(stat, '+z', BZ, kx0, kx1); }
+  if (open['-z']) { sidewalk(stat, sx0, sx1, -BZ, -LZ); groundCurb(stat, '-z', -BZ, kx0, kx1); }
 
   // corners where two roads meet: signals and street names
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
