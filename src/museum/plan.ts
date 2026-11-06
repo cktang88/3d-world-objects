@@ -77,7 +77,8 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   const main: Measured[] = [];
   for (const m of [...buckets.tiny, ...buckets.small]) {
     const flat = m.real.y <= 0.25;
-    if (st.small.includes('table') && flat && (Math.max(m.real.x, m.real.z) < 0.14 || r.chance(0.4))) table.push(m);
+    // table cases for some flat things; the rest fill the room's shelves (dense, like visible storage)
+    if (st.small.includes('table') && flat && r.chance(st.small[0] === 'table' ? 0.7 : 0.35)) table.push(m);
     else main.push(m);
   }
   let rest = table;
@@ -254,7 +255,7 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   const aspect = colossal ? r.range(0.7, 1.1) : r.range(st.aspect[0], st.aspect[1]);
   const maxW = Math.max(0, ...floorU.map((u) => u.w));
   const hangS = Math.max(0, ...hangU.map((u) => u.w));
-  let Wf = Math.max(maxW, Math.sqrt(area / aspect), hangS + 2 - 2 * inset, 5);
+  let Wf = Math.max(maxW, Math.sqrt(area / aspect), hangS + 2 - 2 * inset, 6.5);
   // narrow galleries for wall-case rooms
   if (!floorU.length) Wf = Math.max(4.5, Wf);
   const sorted = [...others].sort((a, b) => b.d - a.d);
