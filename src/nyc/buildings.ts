@@ -634,9 +634,18 @@ function stoop(F: Face, uc: number, parlor: number, stoneM: THREE.Material, tint
 }
 
 /** recessed double door with a transom and a surround */
-function doorway(F: Face, uc: number, y: number, w: number, h: number, frameColor: string, surround: 'hood' | 'stone' | 'plain' | 'brass', tint?: string) {
+function doorway(F: Face, uc: number, y: number, w: number, h: number, frameColor: string, surround: 'hood' | 'stone' | 'plain' | 'brass', tint?: string, number?: string) {
   F.cut(uc - w / 2, uc + w / 2, y, y + h);
   const depth = 0.55;
+  // house number in gilt on the transom, an intercom panel and a lamp beside the door
+  if (number) F.ctx.text.add(F.m, number, uc, y + h - Math.min(0.55, h * 0.18) / 2, -depth + 0.035, Math.min(0.3, h * 0.1), w - 0.2, '#d9b25a', 1, 'paint');
+  const side = uc + w / 2 + (surround === 'hood' ? 0.42 : 0.3);
+  B(F.f, mat('#9a9c9e', { rough: 0.3, metal: 0.8 }), 0.16, 0.3, 0.03, side, y + 1.2, 0.015, false);
+  for (let k = 0; k < 4; k++) B(F.f, mat('#2a2a2a', { rough: 0.5 }), 0.03, 0.03, 0.01, side, y + 1.27 + k * 0.05, 0.033, false);
+  if (surround !== 'hood') {
+    B(F.f, mat('#1c1c1c', { rough: 0.5, metal: 0.5 }), 0.04, 0.04, 0.25, uc - w / 2 - 0.35, y + h - 0.2, 0.12, false);
+    B(F.g, mat('#fff1d0', { emissive: '#ffd9a0', ei: 0.8, rough: 0.3 }), 0.16, 0.26, 0.16, uc - w / 2 - 0.35, y + h - 0.45, 0.25, false);
+  }
   const rev = mat(shade(frameColor, 0.6), { rough: 0.9 });
   // reveal of the doorway
   B(F.g, rev, 0.04, h, depth, uc - w / 2 - 0.02, y, -depth / 2, false);
@@ -872,7 +881,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       // basement door under the stoop
       F.cut(du - 0.45, du + 0.45, 0, Math.min(1.9, parlor + 0.1) - 0.15);
       B(F.g, mat('#1e1a16', { rough: 0.6 }), 0.9, Math.min(1.9, parlor) - 0.15, 0.05, du, 0, -0.3, false);
-      doorway(F, du, parlor, 1.35, 2.7, rng.pick(['#3b2414', '#2a1a10', '#1d1d1d', '#4a2c1a']), 'hood', tint);
+      doorway(F, du, parlor, 1.35, 2.7, rng.pick(['#3b2414', '#2a1a10', '#1d1d1d', '#4a2c1a']), 'hood', tint, addr.split(' ')[0]);
       stoop(F, du, parlor, brownMat(), tint, M.iron());
       colliders.push(F.rectOf(du - 1.2, du + 1.2, 0, 1.1 + Math.round(parlor / 0.19) * 0.3 + 0.3));
       // areaway railing in front of the basement
@@ -906,7 +915,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       const stepM = mat(rng.pick(['#8f8b84', '#a29c90', '#6f6b66']), { rough: 0.9 });
       B(F.g, stepM, 2.0, 0.32, 0.36, du, 0, 0.18);
       B(F.g, stepM, 2.2, 0.17, 0.7, du, 0, 0.35);
-      doorway(F, du, 0.32, 1.3, Math.min(2.7, ground - 0.7), rng.pick(['#2a2a2a', '#3b2414', '#1d2a22', '#5a3a2a']), surround);
+      doorway(F, du, 0.32, 1.3, Math.min(2.7, ground - 0.7), rng.pick(['#2a2a2a', '#3b2414', '#1d2a22', '#5a3a2a']), surround, undefined, addr.split(' ')[0]);
       if (type === 'prewar' && rng.chance(0.75)) canopy(F, du, rng.pick(['#1d3b2e', '#5a1d1d', '#1d2a4a', '#2a2a2a']), 4.2, addr);
       portalDoor(ctx, F, du, 0.8, alongX, addr, floors, type, rng.pick(['apartment', 'apartment', 'office']));
     } else {
