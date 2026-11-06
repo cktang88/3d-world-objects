@@ -403,3 +403,67 @@ test('library openings: the front grid is read in one fast pass, fronts are cut 
     expect(side, 'a ray in at an angle got out of the compartment');
   }
 });
+
+test('openings are cut through big front panels (triangles split at the opening edge), and only when wanted', () => {
+  // a front that is one big quad (2 triangles) over a carcass: the opening must still be cut, the rest kept
+  const W = 1.0, H = 0.9, D = 0.45;
+  const model = new THREE.Group();
+  const carcass = new THREE.Mesh(new THREE.BoxGeometry(W, H, D - 0.02), new THREE.MeshStandardMaterial());
+  carcass.position.set(0, H / 2, -0.01);
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshStandardMaterial());
+  panel.position.set(0, H / 2, D / 2);
+  model.add(carcass, panel);
+  const holder = new THREE.Group();
+  holder.add(model);
+  const front = readFront(model, holder, [W, H, D]);
+  const band = { x: 0.1, y: 0.3, w: 0.4, h: 0.25, z: D / 2 };
+  const cut = cutOpenings(front, [band]);
+  expect(cut > 0, 'the big panel was not cut');
+  const after = readFront(model, holder, [W, H, D]);
+  const z = (x: number, y: number) => after.z[Math.floor((y - after.y0) / after.cell) * after.nx + Math.floor((x - after.x0) / after.cell)];
+  for (const [x, y] of [[0.1, 0.42], [-0.08, 0.32], [0.28, 0.53]]) expect(z(x, y) < D / 2 - 0.01, `front still there inside the opening at ${x},${y}: ${fmt(z(x, y))}`);
+  for (const [x, y] of [[-0.3, 0.42], [0.1, 0.7], [0.1, 0.15], [0.4, 0.42]]) expect(Math.abs(z(x, y) - D / 2) < 0.002, `front lost outside the opening at ${x},${y}: ${fmt(z(x, y))}`);
+
+  // prepare(): nothing while the player is far or looking away; on approach + facing, or on E
+  const root = new THREE.Group();
+  const lv = { group: root } as unknown as Level;
+  let prepared = 0;
+  const obj = new THREE.Group();
+  obj.position.set(0, 0, -3);
+  root.add(obj);
+  root.updateMatrixWorld(true);
+  const replacement = registerContainer(Object.assign(new THREE.Group(), {}), { size: new THREE.Vector3(0.4, 0.2, 0.4), generate: () => new THREE.Group() });
+  root.add(replacement.obj);
+  replacement.obj.position.copy(obj.position);
+  root.updateMatrixWorld(true);
+  const c = registerContainer(obj, { size: new THREE.Vector3(0.4, 0.2, 0.4), generate: () => new THREE.Group(), prepare: () => (prepared++, [replacement]) });
+  const lazy = new Lazy();
+  const cam = new THREE.PerspectiveCamera();
+  cam.position.set(0, 1.2, 4);
+  cam.lookAt(0, 0.5, -3);
+  cam.updateMatrixWorld(true);
+  for (let i = 0; i < 30; i++) lazy.update(1 / 30, cam, lv);
+  expect(prepared === 0, 'prepared while 7 m away');
+  cam.position.set(0, 1.2, -1.2);
+  cam.lookAt(0, 0.5, 3); // close, but looking away
+  cam.updateMatrixWorld(true);
+  for (let i = 0; i < 30; i++) lazy.update(1 / 30, cam, lv);
+  expect(prepared === 0, 'prepared while looking away');
+  cam.lookAt(0, 0.3, -3);
+  cam.updateMatrixWorld(true);
+  for (let i = 0; i < 30; i++) lazy.update(1 / 30, cam, lv);
+  expect(prepared === 1, `approach and look: prepared ${prepared} times`);
+  // E on one not yet prepared runs it and opens the replacement
+  let p2 = 0;
+  const o2 = new THREE.Group();
+  root.add(o2);
+  const r2 = registerContainer(new THREE.Group(), { size: new THREE.Vector3(0.4, 0.2, 0.4), generate: () => new THREE.Group() });
+  root.add(r2.obj);
+  root.updateMatrixWorld(true);
+  const c2 = registerContainer(o2, { size: new THREE.Vector3(0.4, 0.2, 0.4), generate: () => new THREE.Group(), prepare: () => (p2++, [r2]) });
+  lazy.toggle(c2);
+  expect(p2 === 1 && r2.open && !c2.open, 'E did not prepare and open the replacement');
+  for (const o of [obj, replacement.obj, o2, r2.obj]) o.userData.disposed = true;
+  lazy.update(0.1, cam, lv);
+  void c;
+});

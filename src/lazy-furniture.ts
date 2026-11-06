@@ -72,8 +72,10 @@ export function readFront(model: THREE.Object3D, holder: THREE.Object3D, size: r
     m4.multiplyMatrices(inv, m.matrixWorld);
     const e = m4.elements;
     const out = new Float32Array(pos.count * 3);
+    // plain float positions are read straight from the array; others (quantised, interleaved) once through getX
+    const raw = !(pos as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute && !pos.normalized && pos.itemSize === 3 && pos.array instanceof Float32Array ? (pos.array as Float32Array) : null;
     for (let i = 0; i < pos.count; i++) {
-      const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+      const px = raw ? raw[i * 3] : pos.getX(i), py = raw ? raw[i * 3 + 1] : pos.getY(i), pz = raw ? raw[i * 3 + 2] : pos.getZ(i);
       out[i * 3] = e[0] * px + e[4] * py + e[8] * pz + e[12];
       out[i * 3 + 1] = e[1] * px + e[5] * py + e[9] * pz + e[13];
       out[i * 3 + 2] = e[2] * px + e[6] * py + e[10] * pz + e[14];
@@ -81,12 +83,19 @@ export function readFront(model: THREE.Object3D, holder: THREE.Object3D, size: r
     meshes.push(m);
     local.push(out);
   });
+  // only triangles reaching the front band can be frontmost there: the most forward point, less 12 cm
+  let zmax = -Infinity;
+  for (const p of local) for (let i = 2; i < p.length; i += 3) if (p[i] > zmax) zmax = p[i];
+  const zmin = zmax - 0.12;
   meshes.forEach((m, mi) => {
     const p = local[mi];
     const idx = m.geometry.index;
+    const ix = idx ? idx.array : null;
     const n = idx ? idx.count / 3 : p.length / 9;
     for (let t = 0; t < n; t++) {
-      const a = idx ? idx.getX(t * 3) : t * 3, b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      const a0 = ix ? ix[t * 3] : t * 3, b0 = ix ? ix[t * 3 + 1] : t * 3 + 1, c0 = ix ? ix[t * 3 + 2] : t * 3 + 2;
+      if (p[a0 * 3 + 2] < zmin && p[b0 * 3 + 2] < zmin && p[c0 * 3 + 2] < zmin) continue;
+      const a = a0, b = b0, c = c0;
       const ax = p[a * 3], ay = p[a * 3 + 1], az = p[a * 3 + 2];
       const bx = p[b * 3], by = p[b * 3 + 1], bz = p[b * 3 + 2];
       const cx = p[c * 3], cy = p[c * 3 + 1], cz = p[c * 3 + 2];
@@ -203,42 +212,114 @@ export function detectDrawers(model: THREE.Object3D, holder: THREE.Object3D, siz
 }
 
 /**
- * Cut the openings into the model: on cloned geometry, drop the triangles that make up the front
- * (within 3 cm of the front plane, or standing proud of it, like knobs) inside each band's rectangle,
- * so a drawer slides out of a real hole and a door opens onto a real cavity. Returns the number dropped.
+ * Cut the openings into the model: on a new copy of each touched geometry, the parts of the front
+ * (within 3 cm of the front plane, or standing proud of it, like knobs) inside each opening are
+ * dropped; triangles crossing an opening's edge are split along it first (big front panels too), so
+ * a drawer slides out of a real hole and a door opens onto a real cavity. Returns the pieces dropped.
  */
 export function cutOpenings(f: Front, bands: Band[]): number {
   let dropped = 0;
+  const zcut = Math.min(...bands.map((q) => q.z ?? f.zf)) - 0.03;
+  // the openings, with a 1 mm margin
+  const rects = bands.map((b) => [b.x - b.w / 2 - 0.001, b.x + b.w / 2 + 0.001, b.y - 0.001, b.y + b.h + 0.001] as const);
   f.meshes.forEach((m, mi) => {
     const p = f.local[mi];
     const g = m.geometry;
     const idx = g.index;
     const n = idx ? idx.count / 3 : p.length / 9;
-    const keep: number[] = [];
-    let cut = 0;
+    const vi = (t: number, k: number) => (idx ? idx.getX(t * 3 + k) : t * 3 + k);
+    // which triangles are touched (in the front band and overlapping an opening)
+    const touched: number[] = [];
     for (let t = 0; t < n; t++) {
-      const a = idx ? idx.getX(t * 3) : t * 3, b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
-      const xs = [p[a * 3], p[b * 3], p[c * 3]], ys = [p[a * 3 + 1], p[b * 3 + 1], p[c * 3 + 1]], zs = [p[a * 3 + 2], p[b * 3 + 2], p[c * 3 + 2]];
-      const zmin = Math.min(...zs);
-      let inside = false;
-      if (zmin > Math.min(...bands.map((q) => q.z ?? f.zf)) - 0.03) {
-        const xmin = Math.min(...xs), xmax = Math.max(...xs), ymin = Math.min(...ys), ymax = Math.max(...ys);
-        for (const bd of bands) {
-          if (xmin >= bd.x - bd.w / 2 - 0.012 && xmax <= bd.x + bd.w / 2 + 0.012 && ymin >= bd.y - 0.012 && ymax <= bd.y + bd.h + 0.012) {
-            inside = true;
-            break;
+      const a = vi(t, 0), b = vi(t, 1), c = vi(t, 2);
+      if (Math.min(p[a * 3 + 2], p[b * 3 + 2], p[c * 3 + 2]) <= zcut) continue;
+      const xmin = Math.min(p[a * 3], p[b * 3], p[c * 3]), xmax = Math.max(p[a * 3], p[b * 3], p[c * 3]);
+      const ymin = Math.min(p[a * 3 + 1], p[b * 3 + 1], p[c * 3 + 1]), ymax = Math.max(p[a * 3 + 1], p[b * 3 + 1], p[c * 3 + 1]);
+      if (rects.some(([x0, x1, y0, y1]) => xmax > x0 && xmin < x1 && ymax > y0 && ymin < y1)) touched.push(t);
+    }
+    if (!touched.length) return;
+    // rebuild the geometry non-indexed: untouched triangles as they are, touched ones clipped
+    // against each opening (split along its four edges, the pieces inside dropped)
+    const names = Object.keys(g.attributes);
+    const src = names.map((k) => g.getAttribute(k));
+    const out: number[][] = names.map(() => []);
+    /** a vertex: index weights over source vertices (for interpolating every attribute) and its local x, y */
+    type V = { w: [number, number][]; x: number; y: number };
+    const emit = (vs: V[]) => {
+      for (let i = 1; i + 1 < vs.length; i++) for (const v of [vs[0], vs[i], vs[i + 1]]) {
+        src.forEach((a, k) => {
+          for (let c = 0; c < a.itemSize; c++) {
+            let s = 0;
+            for (const [j, wt] of v.w) s += wt * a.getComponent(j, c);
+            out[k].push(s);
           }
+        });
+      }
+    };
+    const lerp = (a: V, b: V, t: number): V => {
+      const w = new Map<number, number>();
+      for (const [j, x] of a.w) w.set(j, (w.get(j) ?? 0) + x * (1 - t));
+      for (const [j, x] of b.w) w.set(j, (w.get(j) ?? 0) + x * t);
+      return { w: [...w.entries()], x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    };
+    /** split a convex polygon by the line value(v) = 0 into the parts with value <= 0 and >= 0 */
+    const split = (poly: V[], val: (v: V) => number): [V[], V[]] => {
+      const neg: V[] = [], pos: V[] = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length], va = val(a), vb = val(b);
+        if (va <= 0) neg.push(a);
+        if (va >= 0) pos.push(a);
+        if ((va < 0 && vb > 0) || (va > 0 && vb < 0)) {
+          const x = lerp(a, b, va / (va - vb));
+          neg.push(x);
+          pos.push(x);
         }
       }
-      if (inside) cut++;
-      else keep.push(a, b, c);
+      return [neg, pos];
+    };
+    const isTouched = new Uint8Array(n);
+    for (const t of touched) isTouched[t] = 1;
+    const groups = g.groups.length ? g.groups : [{ start: 0, count: n * 3, materialIndex: 0 }];
+    const newGroups: { start: number; count: number; materialIndex?: number }[] = [];
+    let cut = 0;
+    for (const gr of groups) {
+      const start = out[0].length / src[0].itemSize;
+      for (let t = gr.start / 3; t < (gr.start + gr.count) / 3 && t < n; t++) {
+        const tri: V[] = [0, 1, 2].map((k) => { const j = vi(t, k); return { w: [[j, 1]], x: p[j * 3], y: p[j * 3 + 1] }; });
+        if (!isTouched[t]) {
+          emit(tri);
+          continue;
+        }
+        // clip away every opening in turn
+        let pieces: V[][] = [tri];
+        for (const [x0, x1, y0, y1] of rects) {
+          const next: V[][] = [];
+          for (const poly of pieces) {
+            // outside parts are kept as they come off; what is left at the end is inside the opening
+            let rest = poly;
+            for (const val of [(v: V) => x0 - v.x, (v: V) => v.x - x1, (v: V) => y0 - v.y, (v: V) => v.y - y1]) {
+              if (rest.length < 3) break;
+              const [inner, outer] = split(rest, val);
+              if (outer.length >= 3) next.push(outer);
+              rest = inner;
+            }
+            if (rest.length >= 3) cut++;
+          }
+          pieces = next;
+        }
+        for (const poly of pieces) emit(poly);
+      }
+      const end = out[0].length / src[0].itemSize;
+      newGroups.push({ start, count: end - start, materialIndex: gr.materialIndex });
     }
     if (!cut) return;
     dropped += cut;
-    // the loader shares geometry between copies of a model: cut a clone
-    const ng = g.clone();
-    ng.setIndex(keep);
-    ng.userData = { ...g.userData };
+    // the loader shares geometry between copies of a model: this is a new one
+    const ng = new THREE.BufferGeometry();
+    names.forEach((k, i) => ng.setAttribute(k, new THREE.Float32BufferAttribute(out[i], src[i].itemSize)));
+    if (g.groups.length) for (const q of newGroups) ng.addGroup(q.start, q.count, q.materialIndex);
+    ng.computeBoundingSphere();
+    ng.computeBoundingBox();
     m.geometry = ng;
     m.userData.owned = true;
   });

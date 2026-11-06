@@ -14,7 +14,7 @@ import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
 import { readFront, detectDrawers, cutOpenings, compartment, frontMaterialAt, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
-import { adoptContainer } from './lazy';
+import { adoptContainer, type LazyContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
 /**
@@ -92,6 +92,8 @@ export interface Container {
   hideClosed?: boolean;
   /** the dark empty slot shown over the model's own front while the drawer is out */
   slot?: THREE.Object3D;
+  /** lazy.ts: cut the library model's openings when you come close or press E (see libDrawerSet) */
+  prepare?: (() => LazyContainer[] | null) & { ready?: () => boolean };
 }
 interface Frame {
   x: number;
@@ -1208,8 +1210,19 @@ export class InteriorLevel implements Level {
     this.libFill(entries, this.cur.room.type);
     const lib = this.lastLib, cur = this.cur, wood = this.pal.wood;
     if (!lib) return;
-    lib.loaded.then((model) => {
-      if (!model || lib.holder.userData.disposed || this.group.userData.disposed) return;
+    // the read and cut cost a few ms: done only for pieces you come up to (lazy.ts prepare), once the model is in
+    let model: THREE.Object3D | null = null;
+    let result: LazyContainer[] | null = null;
+    const prepare = Object.assign(() => {
+      if (result || !model) return result;
+      result = [];
+      refit(model);
+      return result;
+    }, { ready: () => !!model });
+    for (const e of entries) e.prepare = prepare;
+    lib.loaded.then((m) => (model = m));
+    const refit = (model: THREE.Object3D) => {
+      if (lib.holder.userData.disposed || this.group.userData.disposed) return;
       // the model's front as a depth grid (one pass over its triangles), the layout read off it
       const t0 = performance.now();
       const front = readFront(model, lib.holder, size);
@@ -1230,7 +1243,14 @@ export class InteriorLevel implements Level {
         if (i >= 0) this.containers.splice(i, 1);
       }
       // the paint of each front (sampled low and off-centre: not the knob), before the fronts are cut out
-      const paints = bands.map((b) => frontMaterialAt(front, b.x + b.w * 0.3, b.y + b.h * 0.25));
+      // four spots per front (off the centre line, where the knob is), the upper median by brightness:
+      // one dark texel or a shadow baked into the texture must not paint the whole door
+      const paints = bands.map((b) => {
+        const ms = [[-0.3, 0.25], [0.3, 0.25], [-0.3, 0.75], [0.3, 0.75]].map(([fx, fy]) => frontMaterialAt(front, b.x + b.w * fx, b.y + b.h * fy)).filter((m): m is THREE.MeshStandardMaterial => !!m);
+        const lum = (m: THREE.MeshStandardMaterial) => m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
+        ms.sort((x, y) => lum(x) - lum(y));
+        return ms[Math.min(ms.length - 1, Math.floor(ms.length / 2))] ?? null;
+      });
       // cut the fronts out of the model, and put real drawers / doors and compartments in the holes
       const cut = cutOpenings(front, bands);
       const prev = this.cur;
@@ -1249,7 +1269,8 @@ export class InteriorLevel implements Level {
       if (this.group.userData.containersAdopted) {
         for (const e of entries) {
           this.containers.splice(this.containers.indexOf(e), 1);
-          adoptContainer(e);
+          const lc = adoptContainer(e);
+          if (lc) result!.push(lc);
         }
       }
       // fronts and doors in the paint of the model's own front there
@@ -1259,7 +1280,7 @@ export class InteriorLevel implements Level {
       });
       note.totalMs = +(performance.now() - t0).toFixed(1);
       note.cut = cut;
-    });
+    };
   }
 
   private movingParts(f: Frame, parts: F.Part[] | undefined, hideClosed = false): Container[] {

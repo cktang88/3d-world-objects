@@ -47,6 +47,12 @@ export interface ContainerSpec {
   hideClosed?: boolean;
   /** shown only while open: e.g. the dark empty slot over the model's own closed front */
   slot?: THREE.Object3D;
+  /**
+   * expensive set-up done only when wanted (lazy-furniture.ts: cutting a library model's openings):
+   * run when you come within 2.5 m facing it, or on the first E. It may replace this container with
+   * others (returned, already registered); null while it can't run yet (model still loading).
+   */
+  prepare?: () => LazyContainer[] | null;
   /** contents can't be seen while shut (default true). False (glass coolers, display cases): generated when near and facing */
   closedOpaque?: boolean;
 }
@@ -56,6 +62,8 @@ export const DRAWER_TRAVEL = 0.8;
 
 export class LazyContainer {
   open = false;
+  /** its prepare() has run */
+  prepared = false;
   t = 0;
   contents: THREE.Object3D | null = null;
   private job: Iterator<unknown, THREE.Object3D> | null = null;
@@ -176,7 +184,7 @@ function under(o: THREE.Object3D, root: THREE.Object3D) {
 export function adoptContainer(c: ContainerLike) {
   // only containers with an anchor object (ShopLevel's glass coolers stock themselves in update())
   if (!(c.obj as THREE.Object3D | undefined)?.isObject3D) return null;
-  return registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed, slot: c.slot });
+  return registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed, slot: c.slot, prepare: c.prepare });
 }
 
 /** InteriorLevel-style containers ({ kind, obj, size, generate }) adopted automatically */
@@ -191,6 +199,7 @@ export interface ContainerLike {
   closedOpaque?: boolean;
   hideClosed?: boolean;
   slot?: THREE.Object3D;
+  prepare?: () => LazyContainer[] | null;
   label?: string;
 }
 const NAMES: Record<string, string> = { dresser: 'dresser', nightstand: 'nightstand drawer', cabinet: 'cabinet', upper: 'cupboard', fridge: 'fridge', closet: 'closet', cooler: 'cooler', freezer: 'freezer' };
@@ -369,6 +378,11 @@ export class Lazy {
         if (d < 7 && p.sub(eye).normalize().dot(fwd) > 0.6) c.ensure();
       }
       if (c.busy && performance.now() - t0 < this.budget) while (c.step() && performance.now() - t0 < this.budget);
+      // set-up that waits for you to come close and look (e.g. cutting a piece's openings)
+      if (glassCheck && c.spec.prepare && !c.prepared) {
+        const p = c.worldBox().getCenter(V());
+        if (p.distanceTo(eye) < 2.5 && p.clone().sub(eye).normalize().dot(fwd) > 0.5 && c.spec.prepare()) c.prepared = true;
+      }
     }
     this.stats.open = open;
     // forget the oldest closed contents
@@ -392,6 +406,15 @@ export class Lazy {
   }
 
   toggle(c: LazyContainer) {
+    // not set up yet: do it now and open what replaced this container, the one nearest to it
+    if (c.spec.prepare && !c.prepared) {
+      const made = c.spec.prepare();
+      c.prepared = !!made;
+      if (made?.length) {
+        const at = c.worldBox().getCenter(V());
+        c = made.reduce((a, b) => (a.worldBox().getCenter(V()).distanceTo(at) <= b.worldBox().getCenter(V()).distanceTo(at) ? a : b));
+      }
+    }
     c.open = !c.open;
     c.used = performance.now();
     if (c.open) {
