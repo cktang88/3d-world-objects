@@ -1008,6 +1008,8 @@ function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean
     label: `Enter ${addr}`,
     sub: `${floors}-storey ${type === 'brownstone' ? 'brownstone' : type === 'tower' ? 'office tower' : type === 'castiron' ? 'cast-iron loft' : type === 'prewar' ? 'pre-war apartment house' : 'walk-up'}`,
     target: { kind: 'interior', seed: hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), name: addr, style, floor: 0, floors: Math.min(floors, 40), biome: 'town' },
+    // seamless.ts: the door in the facade (solid, so not seen through): E puts you just inside it
+    door: { pos: F.at(u, 0, 0), yaw: F.yawOut() + Math.PI },
   });
   ctx.doors.push(F.at(u, 0, SW));
 }

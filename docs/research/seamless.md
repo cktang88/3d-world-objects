@@ -14,13 +14,16 @@ placed behind it). Turn the game behaviour off with `?seamless=0` to compare.
    frame runs `next()` until a 4 ms budget is spent. A level that does not support staging is
    built at once. Half-built levels you turn away from are dropped.
 3. **LRU cache.** Built levels stay in `Seamless.slots`, keyed by `descKey(desc)`. Leaving a level
-   no longer disposes it: the active level and its two parents on the stack are pinned, three more
-   are kept, older ones are disposed (`Level.dispose`, with `remote.ts` `clearQueue()` held off so
+   no longer disposes it: the active level and its two parents on the stack are pinned, at most
+   three more are kept and together they may hold 6M triangles (counted when built, instances
+   included); older ones are disposed (`Level.dispose`, with `remote.ts` `clearQueue()` held off so
    an evicted room cannot cancel the active room's model loads).
 4. **Preview.** For a portal whose `door.see` is set (storefronts), a ready level is placed in
    world space so its entry doorway lands on the street door:
    `M = T(door.pos) · Ry(door.yaw − entry.yaw) · T(−entry.pos)`. Its lights are taken out while
-   it is a preview (adding lights to the street would recompile every shader), its shaders are
+   it is a preview (adding lights to the street would recompile every shader; instead two shared
+   point lights that are always in the scene, at intensity 0 when unused, take the place and colour
+   of the preview's two lights nearest you), its shaders are
    compiled with `renderer.compileAsync` before it is shown, `doorway.hide` objects (the shop's
    own front wall) are hidden, and the storefront's fake-interior glass is cut away inside
    `door.hole` (clipped to the interior's width) by `cutHoles()`. The nearest two previews within
@@ -36,7 +39,20 @@ placed behind it). Turn the game behaviour off with `?seamless=0` to compare.
 6. **Lighting.** No black fade: `lighting.apply` runs at once and `Seamless.blendFrom` eases the
    tone-mapping exposure from the old value to the new one over 0.45 s.
 7. **Fallback.** If the level is not ready (you pressed E on a door you never faced) the old fade
-   is used and the build is finished during the black frame (`stats.fades`).
+   is used and the build is finished behind the black in ~40 ms slices (`buildNow`), with a small
+   "opening the door ···" hint if it takes longer than 300 ms (`stats.fades`).
+   Galleries count as ready only once `GalleryLevel.built` resolves (the room is built; exhibits
+   may still stream in), so a doorway never drops you into a half-built room.
+   Apartment and office doors (`portalDoor` in nyc/buildings.ts) are solid: no preview, but E on
+   a prebuilt one switches at once and puts you just inside the door, facing in; going back puts
+   you on the step outside.
+   **First-shop stall.** Profiled in the lab (performance.now per step): the first ShopLevel in a
+   page spent seconds (5 s in a quiet headless run; 46–154 s on the loaded machine) in its first
+   slice, all in `layout.style()` + `shell()`: the canvas textures of the fixtures (VCT floor
+   tiles, tin and drop ceilings; the first canvas alone ~2.7 s in software rendering) are made on
+   first use, and the layouts build every floor variant eagerly in `r.pick([...])`. main.ts now
+   prewarms them, one shop type per idle callback after load (`prewarmShops`); later shops take
+   20–40 ms in all. (Layouts could also pick lazily: `r.pick([() => vct(…), …])()`.)
 8. **Museum.** Gallery doorways are auto portals with `returnYaw`; `doorOf()` derives the doorway
    from the portal box and the next room's entry from its own 'back' portal, so galleries are
    prebuilt as you face a doorway and entered without a fade, the player carried from one corridor
@@ -138,3 +154,18 @@ How a `GalleryLevel` (src/museum/gallery.ts) is built, for prebuilding the room 
   built in slices) are opaque and generate only when opened with E. `shop.cases` lists them.
 - **Lights.** Every shop has exactly 4 PointLights (unused ones at intensity 0), no shadow-casting
   lights, so walking from one shop to another doesn't recompile shaders.
+
+## For level authors: real door and drawer motion
+
+Containers only animate what they are given. Expose the moving part instead of baking it:
+
+- **Doors** (cabinets, wardrobes, fridges, freezers): build the leaf as its own mesh (not into the
+  merged kit), parented to a group whose origin is the hinge line at the bottom (local y up), and
+  pass that group as `door` (it swings to −1.85 rad; pass `open(t)` for the other hand or for
+  double doors). Glass-door coolers: `closedOpaque: false`.
+- **Drawers**: the drawer box + front as one group at its closed position, passed as `drawer`
+  (slides along the container's +z by 0.8 × depth). Several drawers: `open(t)` moving each.
+- **sand3d objects** with joints: `open: jointOpener(model.animator)`.
+- Contents: `generate()` builds them in the container's frame (origin at the front-centre base,
+  +z out of the front). Return a generator (`function*`) yielding between items to have them made
+  in time slices.

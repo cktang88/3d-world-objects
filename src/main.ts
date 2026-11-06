@@ -5,11 +5,11 @@ import { loadManifest, allModels } from './assets';
 import { Player } from './player';
 import { CityLevel } from './city';
 import { InteriorLevel } from './interior';
-import { NycLevel } from './nyc';
+import { NycLevel, SHOPS } from './nyc';
 import { ShopLevel } from './shop';
 import { AtriumLevel, GalleryLevel } from './museum';
 import { loadMuseum, museum } from './museumData';
-import { DATASET_LABEL, loadRebuiltIndex, type RemoteEntry } from './remote';
+import { DATASET_LABEL, loadRebuiltIndex, queueHold, type RemoteEntry } from './remote';
 import type { Env, Level, LevelDesc, Portal } from './level';
 import { hashStr } from './rng';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -208,6 +208,37 @@ function seamSwitch(s: Slot, pos: THREE.Vector3 | undefined, yaw: number | undef
   seam.disarm(level, seamFeet.set(player.pos.x, 1, player.pos.z));
   seam.stats.seamless++;
 }
+/** 'opening…' under the black fade while a door's level is still being built (n < 0 hides it) */
+const hintEl = Object.assign(document.createElement('div'), { id: 'seam-hint' });
+hintEl.style.cssText = 'position:fixed;left:50%;bottom:18%;transform:translateX(-50%);z-index:60;color:#cfc8b8;font:13px system-ui,sans-serif;letter-spacing:.08em;opacity:0;transition:opacity .2s;pointer-events:none';
+document.body.appendChild(hintEl);
+function seamHint(n: number) {
+  hintEl.style.opacity = n < 0 ? '0' : '0.85';
+  if (n >= 0) hintEl.textContent = `opening the door ${'·'.repeat(1 + (n % 4))}`;
+}
+/**
+ * The first shop built in a page used to stall for seconds: its fixtures' canvas textures (floor
+ * tiles, tin ceilings...) are made on first use. Make them while the start screen is up instead,
+ * one shop type per idle callback.
+ */
+function prewarmShops() {
+  const types = [...new Set(SHOPS.map((x) => x.type))];
+  let total = 0;
+  const idle = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 400 }) : setTimeout(f, 30));
+  const next = () => {
+    const type = types.shift();
+    if (!type) return seam.stats.log.push(`prewarmed shop textures in ${total.toFixed(0)} ms`);
+    const t = performance.now();
+    const lv = new ShopLevel({ kind: 'interior', seed: 1, name: 'Prewarm', style: 'store', floor: 0, floors: 1, biome: 'metropolis', shop: type }, { staged: true });
+    lv.staging?.next(); // style + shell: where the shared textures are made
+    queueHold.n++;
+    lv.dispose();
+    queueHold.n--;
+    total += performance.now() - t;
+    idle(next);
+  };
+  idle(next);
+}
 // ---- end seamless
 
 function descName(d: LevelDesc): string {
@@ -345,7 +376,12 @@ async function enter(p: Portal) {
   currentDesc = target;
   if (shrink && p.shrink) scale *= p.shrink / 1000;
   roomsVisited++;
-  setLevel(seam.take(target));
+  // not prebuilt: build it behind the black, in slices, with a small hint if it takes a while
+  const hintAt = setTimeout(() => seamHint(0), 300);
+  const built = await seam.buildNow(target, (n) => seamHint(n));
+  clearTimeout(hintAt);
+  seamHint(-1);
+  setLevel(built);
   if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
   else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
   else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} wing — every doorway leads somewhere similar`);
@@ -364,7 +400,8 @@ async function goBack() {
   if (seam.enabled && !wasCity && parent?.ready) {
     // seamless: the level you came from is still alive; walk back out where you went in
     const child = seam.slotOf(level);
-    const carried = child?.portal && child.placement ? seam.carry(child, 'out', player.pos, player.yaw) : null;
+    // through a glass shop door you walk out where you are; through a solid door you come out on its step
+    const carried = child?.portal?.door?.see && child.placement ? seam.carry(child, 'out', player.pos, player.yaw) : null;
     currentDesc = f.desc;
     scale = f.scale;
     if (carried) seamSwitch(seam.take(f.desc), carried.pos, carried.yaw);
@@ -736,6 +773,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
 
 applyQuality();
 ready.then(() => {
+  if (!params.has('lab') && seam.enabled) prewarmShops();
   hud.loading.classList.add('hidden');
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => (b.disabled = false));
   $('museum-count').textContent = museum().total.toLocaleString();

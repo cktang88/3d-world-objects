@@ -138,6 +138,10 @@ export interface Slot {
   desc: LevelDesc;
   level: Level;
   ready: boolean;
+  /** the level is still finishing itself asynchronously (GalleryLevel.built) */
+  waiting: boolean;
+  /** triangles drawn by its meshes (memory budget), measured when built */
+  tris: number;
   /** ms spent constructing (sum of slices) */
   ms: number;
   used: number;
@@ -176,7 +180,25 @@ export interface SeamlessOpts {
   capacity?: number;
   /** ms of staged construction per frame */
   budget?: number;
+  /** triangles the unpinned cached levels may hold together */
+  triBudget?: number;
 }
+
+/** triangles a level's meshes hold (instanced meshes count every instance) */
+export function countTris(o: THREE.Object3D) {
+  let n = 0;
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh || !m.geometry) return;
+    const g = m.geometry;
+    const per = (g.index ? g.index.count : g.getAttribute('position')?.count ?? 0) / 3;
+    n += per * ((c as THREE.InstancedMesh).isInstancedMesh ? (c as THREE.InstancedMesh).count : 1);
+  });
+  return n;
+}
+
+/** the lights that stand in for a previewed level's own (always in the scene: no recompiles) */
+const POOL = 2;
 
 const PREBUILD_KINDS = new Set(['interior', 'gallery', 'atrium']);
 
@@ -197,8 +219,17 @@ export class Seamless {
   private pins = new Set<string>();
   private disarmed: Portal[] = [];
   private blend: { from: number; to: number; t: number } | null = null;
+  private triBudget: number;
+  private pool: THREE.PointLight[] = [];
 
   constructor(o: SeamlessOpts) {
+    this.triBudget = o.triBudget ?? 6_000_000;
+    for (let i = 0; i < POOL; i++) {
+      const l = new THREE.PointLight('#ffffff', 0, 8, 2);
+      l.name = 'seamless-preview-light';
+      this.pool.push(l);
+      o.scene.add(l);
+    }
     this.scene = o.scene;
     this.camera = o.camera;
     this.renderer = o.renderer;
@@ -215,7 +246,8 @@ export class Seamless {
 
   /** is this level built and ready to switch to? */
   ready(desc: LevelDesc) {
-    return !!this.slots.get(descKey(desc))?.ready;
+    const s = this.slots.get(descKey(desc));
+    return !!s && s.ready && !s.waiting;
   }
   slotOf(lv: Level) {
     for (const s of this.slots.values()) if (s.level === lv) return s;
@@ -247,7 +279,7 @@ export class Seamless {
   }
 
   private slot(key: string, desc: LevelDesc, level: Level): Slot {
-    const s: Slot = { key, desc, level, ready: false, ms: 0, used: performance.now(), placement: null, inverse: null, entry: null, foot: null, stripped: [], compiled: 'no', shown: false, portal: null };
+    const s: Slot = { key, desc, level, ready: false, waiting: false, tris: 0, ms: 0, used: performance.now(), placement: null, inverse: null, entry: null, foot: null, stripped: [], compiled: 'no', shown: false, portal: null };
     this.slots.set(key, s);
     this.stats.builds++;
     return s;
@@ -256,9 +288,44 @@ export class Seamless {
     if (s.ready) return;
     s.ready = true;
     s.level.staging = undefined;
+    const built = (s.level as { built?: Promise<void> }).built;
+    if (built) {
+      s.waiting = true;
+      built.then(() => {
+        s.waiting = false;
+        s.tris = countTris(s.level.group);
+      });
+    }
+    s.tris = countTris(s.level.group);
     this.stats.lastBuildMs = s.ms;
     this.log(`built ${s.key.slice(0, 90)} in ${s.ms.toFixed(1)} ms`);
     this.evict();
+  }
+
+  /**
+   * Build desc now but without freezing the page: slices of ~40 ms with a yield between them
+   * (the fade fallback; onProgress gets the number of slices so far for a HUD hint).
+   */
+  async buildNow(desc: LevelDesc, onProgress?: (n: number) => void): Promise<Slot> {
+    const key = descKey(desc);
+    if (!this.slots.has(key)) this.prebuild(desc);
+    const s = this.slots.get(key)!;
+    let n = 0;
+    while (!s.ready && s.level.staging) {
+      const t = performance.now();
+      while (!s.ready && performance.now() - t < 40) {
+        const a = performance.now();
+        const r = s.level.staging.next();
+        s.ms += performance.now() - a;
+        if (r.done) {
+          this.queue = this.queue.filter((q) => q !== s);
+          this.done(s);
+        }
+      }
+      onProgress?.(++n);
+      if (!s.ready) await new Promise((r) => setTimeout(r, 0));
+    }
+    return this.take(desc);
   }
 
   /** start building in the background (staged when the level supports it) */
@@ -283,6 +350,7 @@ export class Seamless {
     s.level.group.quaternion.identity();
     s.level.group.updateMatrixWorld(true);
     this.active = s;
+    for (const p of this.pool) p.intensity = 0;
     s.used = performance.now();
     this.pins = new Set([s.key, ...keep]);
     // previews belong to the level they were shown from
@@ -313,7 +381,12 @@ export class Seamless {
   private evict() {
     const free = [...this.slots.values()].filter((s) => !this.pins.has(s.key) && !s.shown && !this.wanted.has(s.key));
     free.sort((a, b) => a.used - b.used);
-    while (free.length > this.capacity) this.drop(free.shift()!);
+    let tris = free.reduce((n, s) => n + s.tris, 0);
+    while (free.length > this.capacity || (free.length > 1 && tris > this.triBudget)) {
+      const s = free.shift()!;
+      tris -= s.tris;
+      this.drop(s);
+    }
   }
 
   // ---------------------------------------------------------------- per frame
@@ -404,7 +477,7 @@ export class Seamless {
     for (const p of level.portals()) {
       if (!p.door?.see || typeof p.target !== 'object') continue;
       const s = this.slots.get(descKey(p.target));
-      if (!s || !s.ready || s === this.active) continue;
+      if (!s || !s.ready || s.waiting || s === this.active) continue;
       const d = p.door.pos.distanceTo(player);
       if (d < 11) show.push({ s, p, d });
     }
@@ -417,7 +490,35 @@ export class Seamless {
       if (s.shown && p.door?.hole) holes.push(this.holeFor(s, p));
     }
     setHoles(holes);
+    this.lightPreview(show.find((x) => x.s.shown)?.s ?? null, player);
     void level;
+  }
+
+  /** light the nearest preview with the shared pool: its own lights nearest the viewer */
+  private lightPreview(s: Slot | null, player: THREE.Vector3) {
+    const cand: { l: THREE.Light; at: THREE.Vector3; d: number }[] = [];
+    if (s) {
+      for (const [l, parent] of s.stripped) {
+        if (!(l as THREE.PointLight).isPointLight && !(l as THREE.SpotLight).isSpotLight) continue;
+        const at = l.position.clone().applyMatrix4(parent.matrixWorld);
+        cand.push({ l, at, d: at.distanceToSquared(player) });
+      }
+      cand.sort((a, b) => a.d - b.d);
+    }
+    this.pool.forEach((p, i) => {
+      const c = cand[i];
+      if (!c) {
+        p.intensity = 0;
+        return;
+      }
+      const src = c.l as THREE.PointLight;
+      p.position.copy(c.at);
+      p.color.copy(src.color);
+      // the pool stands in for the whole grid: a little brighter than one of its lights
+      p.intensity = (src.userData.base ?? src.intensity) * 1.6;
+      p.distance = src.distance ? src.distance * 1.2 : 12;
+      p.decay = src.decay;
+    });
   }
 
   /** place slot s behind portal p of the active level (for carry()); false if it has no doorway */
