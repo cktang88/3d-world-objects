@@ -10,9 +10,11 @@ import { join } from 'path';
 import { NodeIO, type Document } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
+import { getBounds } from '@gltf-transform/functions';
 import { test, expect, none, soft, fmt } from './qa';
 import './env';
 import { kindOf } from '../src/materials';
+import { checkSize } from '../src/rebuiltCheck';
 
 const ROOT = process.env.QA_ROOT ?? process.cwd();
 const DIR = join(ROOT, 'public', 'rebuilt');
@@ -104,4 +106,28 @@ test('rebaked GLBs (those with COLOR_0) all have metric UVs; report how many are
   none(bad, 'baked GLBs with non-metric UVs', (s) => `${s.id} ratio=${fmt(s.ratio)}`);
   soft(mm === 0, `${mm}/${pick.length} sampled rebuilt GLBs still have millimetre UVs (not rebaked yet; the viewer rescales them)`);
   soft(false, `sample: ${pick.length} GLBs, ${baked} baked`);
+});
+
+test('every rebuilt GLB has its source USDA size and axes (within 1.2x; public/rebuilt/dims.json)', async () => {
+  const dims: Record<string, number[]> = JSON.parse(readFileSync(join(DIR, 'dims.json'), 'utf8'));
+  const files = readdirSync(DIR).filter((f) => f.endsWith('.glb'));
+  none(files.filter((f) => !dims[f.slice(0, -4)]), 'GLBs missing from dims.json (node scripts/audit_rebuilt.mjs --write-dims)');
+  const bad: string[] = [];
+  for (const f of files) {
+    const id = f.slice(0, -4);
+    const want = dims[id];
+    if (!want) continue;
+    const b = getBounds((await read(id)).getRoot().listScenes()[0]);
+    const got = [0, 1, 2].map((i) => b.max[i] - b.min[i]);
+    const c = checkSize(got, want);
+    if (!c.ok) bad.push(`${id} x${fmt(c.scale)}${c.axesOk ? '' : ' (axes)'} got ${got.map(fmt)} want ${want}`);
+  }
+  none(bad, 'rebuilt GLBs whose size/axes disagree with the USDA (node scripts/audit_rebuilt.mjs)');
+});
+
+test('size check: catches scale and axis-order mismatches', () => {
+  expect(checkSize([1.5, 1.09, 0.68], [1.5, 1.09, 0.679]).ok, 'same size');
+  expect(!checkSize([14, 24.5, 123], [1.5, 1.09, 0.679]).ok, 'piano 80x');
+  expect(!checkSize([1.5, 0.68, 1.09], [1.5, 1.09, 0.679]).axesOk, 'on its side');
+  expect(checkSize([0.3, 0.3, 0.31], [0.31, 0.3, 0.3]).ok, 'near-cube in another order is fine');
 });

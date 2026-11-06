@@ -123,6 +123,15 @@ def build_one(program, entry, out_path, bake=False, samples=48):
         roots = [o for o in bpy.context.scene.objects if o.parent is None]
         obj = roots[0] if len(roots) == 1 else s3d.group("object", *roots)
 
+    # Only the entry's tree is the object. Programs leave templates in the scene (a part that is
+    # only ever s3d.copy()'d, e.g. a piano's "ebony" key): the GLB exporter writes the whole scene,
+    # but only the root gets the mm -> m scale, so a stray template came out 1000x too big and
+    # blew up the bounding box (the USDA export only walks the root's tree). Delete the rest.
+    root = getattr(obj, "root", obj)
+    keep = {root, *root.children_recursive}
+    for o in [o for o in bpy.context.scene.objects if o not in keep]:
+        bpy.data.objects.remove(o, do_unlink=True)
+
     # metres per Blender unit: sand3d works in mm unless the program set units
     # (sand3d keeps Blender units at its own unit, MM per millimetre, and scales the root by
     # MM/1000 only when exporting; scene.unit_settings.scale_length stays 1, so it cannot be used:

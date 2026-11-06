@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ParsedObject, JointDef } from './usda/parse';
 import { kindOf, enhance, glassFrom, enhanceTree } from './materials';
 import { gltf } from './detail';
+import { checkSize } from './rebuiltCheck';
 
 /** One object anywhere in the sand3d release, streamed from Hugging Face on demand. */
 export interface RemoteEntry {
@@ -210,11 +211,18 @@ function buildModel(p: ParsedObject, shadows: boolean): RemoteModel {
 
 /** ids rebuilt from their sand3d programs in Blender, with UV maps (public/rebuilt/) */
 let rebuilt: Set<string> = new Set();
+/** the source USDA's size of each rebuilt id (public/rebuilt/dims.json, scripts/audit_rebuilt.mjs) */
+let rebuiltDims: Record<string, [number, number, number]> = {};
 export async function loadRebuiltIndex() {
   try {
     rebuilt = new Set(await (await fetch(`${import.meta.env.BASE_URL}rebuilt/index.json`)).json());
   } catch {
     rebuilt = new Set();
+  }
+  try {
+    rebuiltDims = await (await fetch(`${import.meta.env.BASE_URL}rebuilt/dims.json`)).json();
+  } catch {
+    rebuiltDims = {};
   }
 }
 export function isRebuilt(id: string) {
@@ -245,7 +253,16 @@ function loadRebuilt(e: RemoteEntry) {
 export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: boolean } = {}): Promise<RemoteModel> {
   // prefer the UV-mapped rebuild (static objects only: joints come from the USD)
   if (rebuilt.has(e.id) && !e.joints && gltf()) {
-    return loadRebuilt(e).then((r) => ({ object: r.scene.clone(true), size: r.size.clone(), animator: null, tris: r.tris }));
+    return loadRebuilt(e).then((r) => {
+      // safety net: a rebuild whose size or axes disagree with its source USDA is not used
+      const want = rebuiltDims[e.id];
+      if (want && !checkSize(r.size.toArray(), want, 1.5).ok) {
+        console.warn('rebuilt GLB disagrees with its USDA, using the USDA:', e.id, r.size.toArray(), want);
+        rebuilt.delete(e.id);
+        return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));
+      }
+      return { object: r.scene.clone(true), size: r.size.clone(), animator: null, tris: r.tris };
+    });
   }
   return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));
 }

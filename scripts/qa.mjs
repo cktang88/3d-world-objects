@@ -65,7 +65,7 @@ const SRC_MAP = [
   [/^src\/(seamless|lazy)\.ts$/, ['seamless', 'lazy']],
   [/^src\/(realscale|realsize-labels)\.ts$|^scripts\/build_realsize/, ['realscale']],
   [/^src\/lighting\.ts$/, ['lighting']],
-  [/^src\/materials\.ts$|^scripts\/rebuild\.py$|^public\/rebuilt\//, ['materials', 'nyc', 'interior', 'shop']],
+  [/^src\/(materials|rebuiltCheck|remote)\.ts$|^scripts\/(rebuild\.py|audit_rebuilt\.mjs)$|^public\/rebuilt\//, ['materials', 'nyc', 'interior', 'shop']],
   [/^src\/(assets|remote|materials|textures|pbr)\.ts$/, ['nyc', 'interior', 'shop']],
 ];
 const walk = (d) => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : [p]; });
