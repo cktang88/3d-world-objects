@@ -645,6 +645,52 @@ function hatMatrix(g: Gender, kind: 'beanie' | 'cap') {
     .compose(new THREE.Vector3(0, f.y, f.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(kind === 'beanie' ? -0.32 : -0.18, 0, 0)), new THREE.Vector3(1, 1, 1))
     .multiply(new THREE.Matrix4().makeScale(f.rx, h, f.rz));
 }
+/** The clips were made for the broad base body: after the shoulders are narrowed the arms hang
+ *  out from the sides. Bring them in by rotating the upper arms about the model's forward axis
+ *  (applied in the clavicle's bind-pose frame to every key), more for slimmer bodies. Cached
+ *  per body asset and build. */
+/** ?parm=0 turns the arm correction off (before/after comparisons) */
+const ARM_FIX = (() => {
+  try {
+    return new URLSearchParams(location.search).get('parm') !== '0';
+  } catch {
+    return true;
+  }
+})();
+const armClipCache = new WeakMap<object, Map<string, Map<string, THREE.AnimationClip>>>();
+function armClips(A: BodyAsset, g: Gender, build: number) {
+  let byBuild = armClipCache.get(A);
+  if (!byBuild) armClipCache.set(A, (byBuild = new Map()));
+  const key = `${build}`;
+  let out = byBuild.get(key);
+  if (out) return out;
+  const ang = ARM_FIX ? ((g === 'male' ? [0.17, 0.13, 0.07] : [0.1, 0.08, 0.04])[build] ?? 0.1) : 0;
+  out = new Map();
+  A.scene.updateMatrixWorld(true);
+  const off = new Map<string, THREE.Quaternion>();
+  for (const [bone, sgn] of [['upperarm_l', -1], ['upperarm_r', 1]] as const) {
+    const b = A.scene.getObjectByName(bone);
+    if (!b?.parent) continue;
+    const pw = b.parent.getWorldQuaternion(new THREE.Quaternion());
+    const qw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), sgn * ang);
+    off.set(`${bone}.quaternion`, pw.clone().invert().multiply(qw).multiply(pw));
+  }
+  const q = new THREE.Quaternion();
+  for (const [name, clip] of A.clips) {
+    const c = clip.clone();
+    for (const t of c.tracks) {
+      const o = off.get(t.name);
+      if (!o) continue;
+      const v = t.values;
+      for (let i = 0; i < v.length; i += 4) {
+        q.fromArray(v, i).premultiply(o).toArray(v, i);
+      }
+    }
+    out.set(name, c);
+  }
+  byBuild.set(key, out);
+  return out;
+}
 const propMats = new Map<string, THREE.MeshStandardMaterial>();
 function propMat(color: string, rough = 0.8) {
   const k = `${color}|${rough}`;
@@ -820,7 +866,7 @@ export class Person {
     if (r.chance(0.3)) this.walkClip = 'Walk_Formal_Loop';
     this.twoHands = r.chance(0.3);
     this.mixer = new THREE.AnimationMixer(model);
-    for (const [name, clip] of A.clips) this.actions.set(name, this.mixer.clipAction(clip));
+    for (const [name, clip] of armClips(A, gender, o.build)) this.actions.set(name, this.mixer.clipAction(clip));
     // a phone, shown for phone-users
     this.phone = attach('hand_r', new THREE.Mesh(propGeo.phone, propMat('#0c0c0e', 0.25)), at(-b.wristX - 0.075, b.armY - 0.035, b.armZ + 0.02, Math.PI / 2, 0, Math.PI / 2));
     this.phone.visible = false;
