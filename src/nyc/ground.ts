@@ -56,7 +56,16 @@ const U = {
   gGra: { value: new THREE.Texture() },
   gSet: { value: new THREE.Texture() },
   gReady: { value: 0 },
+  gWet: { value: 0 },
+  gPuddle: { value: 0 },
+  gSnow: { value: 0 },
 };
+/**
+ * Weather hook (for weather.ts): write `.value` every frame (0..1). wet darkens and glosses every
+ * ground surface, puddles fill the gutters, wheel ruts and low spots with mirror-flat water, snow
+ * settles on top (thinner in the wheel tracks and on the walking line).
+ */
+export const groundWeather = { wet: U.gWet, puddles: U.gPuddle, snow: U.gSnow };
 let texPromise: Promise<void> | null = null;
 /** resolves when the ground scans have loaded */
 export function groundReady() {
@@ -106,6 +115,9 @@ varying vec3 vGW;
 varying vec3 vGN;
 varying vec2 vGUv;
 uniform float gReady;
+uniform float gWet;
+uniform float gPuddle;
+uniform float gSnow;
 float gH(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 vec2 gH2(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
 float gN(vec2 p) {
@@ -116,6 +128,20 @@ float gN(vec2 p) {
 float gFbm(vec2 p) { return gN(p) * .5 + gN(p * 2.03 + vec2(17.1, 3.3)) * .3 + gN(p * 4.11 + vec2(3.7, 9.1)) * .2; }
 // a thin line of half width w (metres) at distance d, antialiased; fades out once thinner than a pixel
 float gLine(float d, float w) { float fw = fwidth(d) + 1e-5; return (1. - smoothstep(w - fw, w + fw, d)) * min(1., w / fw); }
+// weather on top of a surface: low = where water collects (0..1), clear = traffic/footfall that keeps snow off
+void gWeather(inout vec3 alb, inout float rough, inout vec3 nW, float low, float clear) {
+  if (gWet + gPuddle + gSnow < .001) return;
+  vec2 w = vGW.xz;
+  float pud = gPuddle * smoothstep(.62, .72, gFbm(w * .3 + 19.) * .55 + low * .6) * step(.97, vGN.y);
+  alb *= 1. - .38 * gWet - .2 * pud;
+  rough = mix(rough, .22, gWet * .75);
+  rough = mix(rough, .02, pud);
+  nW = normalize(mix(nW, vGN, max(pud, gWet * .5)));
+  float sn = gSnow * smoothstep(.25, .6, gFbm(w * .9 + 5.) * .5 + gSnow * .7 - clear * .55) * smoothstep(.3, .9, vGN.y);
+  alb = mix(alb, vec3(.78, .8, .83), sn);
+  rough = mix(rough, .75, sn);
+  nW = normalize(mix(nW, vGN, sn));
+}
 vec2 gChunk(vec2 w) { return floor(w / vec2(G_AX, G_SZ) + .5); }
 // wheel tracks (x) and the oil strip down the lane centres (y), from world position
 vec2 gLanes(vec2 w) {
@@ -235,6 +261,7 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   vec2 tn = (t.ba * 2. - 1.) * .9;
   vec2 tilt = (vec2(h3, h4) - .5) * .025; // flags settle unevenly: catches the light in the sheen
   nW = normalize(vGN + vec3(tn.x + tilt.x, 0., tn.y + tilt.y));
+  gWeather(alb, rough, nW, nearK * .5 + groove * .3, walk * .6);
 }
 `;
 
@@ -306,12 +333,16 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   float dk = (ave && str) ? length(max(a - vec2(G_BX, G_BZ), 0.)) : ave ? a.x - G_BX : a.y - G_BZ;
   float gut = 1. - smoothstep(.12, .6, dk + (gN(w * 2.) - .5) * .25);
   alb = mix(alb, alb * vec3(.8, .77, .72), gut * .8);
-  float sp = gH(floor(w * 40.));
-  alb *= 1. + gut * (sp > .9 ? .7 : sp < .12 ? -.5 : 0.);
+  // grit and litter specks
+  vec2 gc = floor(w * 22.);
+  float sp = gH(gc + 3.);
+  float dotm = gLine(length(w - (gc + .2 + .6 * gH2(gc)) / 22.), .004 + .007 * gH(gc + 8.)) * step(.5, sp);
+  alb *= 1. + gut * dotm * (sp > .8 ? 1.2 : -.6);
   rough = mix(rough, .72, gut * .5);
   alb = mix(alb, vec3(.012), seal * .92);
   rough = mix(rough, .5, seal);
   nW = normalize(vGN + vec3(tn.x, 0., tn.y) * .8 * nk * (1. - seal * .8));
+  gWeather(alb, rough, nW, gut + ln.x * .35, ln.x + ln.y * .5);
 }
 `;
 
@@ -344,6 +375,7 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   alb *= .85 + .2 * gFbm(vec2(u * .7, v * 3.));
   vec2 tn = (t.ba * 2. - 1.) * .5;
   nW = normalize(vGN + vec3(tn.x, tn.y, 0.) * (1. - abs(vGN.y)) + vec3(tn.x, 0., tn.y) * abs(vGN.y));
+  gWeather(alb, rough, nW, 0., 0.);
 }
 `;
 
@@ -458,7 +490,7 @@ float gWear() {
   return (1. - craze * .8) * (1. - chip) * (.72 + .28 * gN(w * .6));
 }
 ` + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-diffuseColor.a *= gWear();
+diffuseColor.a *= gWear() * (1. - gSnow * .85);
 diffuseColor.rgb *= .82 + .18 * gN(vGW.xz * 2.3);`);
   };
   m.customProgramCacheKey = () => 'nycground|mk';
@@ -1061,10 +1093,8 @@ export function groundBase(o: GroundOpts) {
       fix.quad(x - 0.75, z - 1.2, x + 0.75, z + 1.2, 0.012, FX.plate, FX_N, FX_N, '-z');
     }
   }
-  const fm = new THREE.Mesh(fix.geometry(), GM.fixtures());
-  fm.receiveShadow = true;
-  fm.userData.owned = true;
-  o.group.add(fm);
+  // into the baked group: merges with groundDetails()' fixtures into one draw call
+  o.stat.add(new THREE.Mesh(fix.geometry(), GM.fixtures()));
 }
 
 /**
@@ -1093,16 +1123,7 @@ export function groundDetails(o: GroundOpts & { doors: THREE.Vector3[]; seed?: n
     q.quad(36 - 0.45, BZ - 1.6, 36 + 0.45, BZ - 0.7, Y, FX.ecs, FX_N, FX_N, '-z');
     taken.push({ x0: -BX, x1: BX, z0: -BZ, z1: BZ });
   }
-  // cellar doors (pairs of 0.9 × 1.6 leaves) in front of shops on the streets
-  for (const sz of [-1, 1]) {
-    for (let k = rng.int(1, 3); k > 0; k--) {
-      const x = rng.range(-LX + 22, LX - 22);
-      if (!clearOfDoors(x, sz * LZ, 1.9)) continue;
-      const z0 = sz * (LZ + 0.05), z1 = sz * (LZ + 0.05 + 1.6);
-      if (!free(x - 0.9, Math.min(z0, z1), x + 0.9, Math.max(z0, z1))) continue;
-      for (const s of [-1, 1]) q.quad(Math.min(x, x + s * 0.9), Math.min(z0, z1), Math.max(x, x + s * 0.9), Math.max(z0, z1), Y, FX.cellar, FX_N, FX_N, s > 0 ? 'x' : '-x');
-    }
-  }
+  // (cellar doors in front of shops come with the storefronts: buildings-shop.ts)
   // vault lights along the building line, mostly in the older loft districts
   if (rng.chance(o.village ? 0.6 : 0.2)) {
     const sz = rng.chance(0.5) ? 1 : -1;
@@ -1142,8 +1163,5 @@ export function groundDetails(o: GroundOpts & { doors: THREE.Vector3[]; seed?: n
     } else if (free(x - 0.45, z - 0.45, x + 0.45, z + 0.45)) q.quad(x - 0.45, z - 0.45, x + 0.45, z + 0.45, Y, FX.ecs, FX_N, FX_N, '-z');
   }
   if (!q.pos.length) return;
-  const m = new THREE.Mesh(q.geometry(), GM.fixtures());
-  m.receiveShadow = true;
-  m.userData.owned = true;
-  o.group.add(m);
+  o.stat.add(new THREE.Mesh(q.geometry(), GM.fixtures()));
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { AX, SZ, BX, BZ, LX, LZ, CURB, bake, B } from '../nyc/common';
-import { groundBase, groundDetails, groundReady } from '../nyc/ground';
+import { groundBase, groundDetails, groundReady, groundWeather } from '../nyc/ground';
 import * as P from '../nyc/streetprops';
 import { mat } from '../build';
 import { Rng } from '../rng';
@@ -11,6 +11,7 @@ import { Rng } from '../rng';
  * crosswalks, ramps, curb, fixtures and the neighbouring blocks' halves of the roadway.
  *   &village=1   Belgian-block streets
  *   &props=0     no street furniture
+ *   &wet=0..1 &puddles=0..1 &snow=0..1   weather hook (groundWeather)
  * Views: corner  cam=57,1.6,21&look=49,0,28   avenue sidewalk  cam=50.5,1.6,2&look=50,0,14
  *        crosswalk cam=60,1.6,18&look=56,0,26  from above        cam=60,30,40&look=52,0,24
  */
@@ -23,6 +24,9 @@ const scene: LabScene = {
   ground: false,
   async build({ group, params }) {
     const village = params.get('village') === '1';
+    groundWeather.wet.value = Number(params.get('wet') ?? 0);
+    groundWeather.puddles.value = Number(params.get('puddles') ?? 0);
+    groundWeather.snow.value = Number(params.get('snow') ?? 0);
     for (const [cx, cz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
       const g = new THREE.Group();
       g.position.set(cx * AX, 0, cz * SZ);

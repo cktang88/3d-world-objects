@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { AX, SZ, AVE, ST, BX, BZ, LX, LZ, CURB, RX, RZ, avenueName, streetName, bake, unitBox, unitCyl, unitSphere, B, canvasTex, M, SIG, lightFor, type Side } from './nyc/common';
+import { AX, SZ, BX, BZ, LX, LZ, CURB, RX, RZ, avenueName, streetName, bake, unitBox, unitCyl, unitSphere, B, SIG, lightFor, type Side } from './nyc/common';
 import { signalPole, nameSign, lampPost, tree, hydrant, subway, newsBoxes, steamStack, streetExtras } from './nyc/streetprops';
-import { wetSurface, getNight, onTimeChange } from './lighting';
+import { getNight, onTimeChange } from './lighting';
+import { groundBase, groundDetails, GM } from './nyc/ground';
 import { carMesh, Traffic } from './nyc/vehicles';
 import { Pedestrians } from './nyc/people';
 export { avenueName, streetName };
@@ -14,7 +15,6 @@ setBuildingNight(getNight());
 import { Rng, hashN } from './rng';
 import { pickModel, spawn, normScale, type ModelEntry } from './assets';
 import { mat, glow } from './build';
-import { pbr } from './pbr';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, rect } from './level';
 import { BIOMES } from './biomes';
@@ -24,84 +24,6 @@ import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, dis
 
 // ---------------------------------------------------------------- static geometry baking
 
-// ---------------------------------------------------------------- textures
-
-let roadTexCache: THREE.Texture | null = null;
-function nycRoadTex() {
-  if (roadTexCache) return roadTexCache;
-  const P = 10; // px per metre
-  roadTexCache = canvasTex(AX * P, SZ * P, (g) => {
-    const W = AX * P, H = SZ * P;
-    g.fillStyle = '#3d3e41';
-    g.fillRect(0, 0, W, H);
-    const img = g.getImageData(0, 0, W, H);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const n = (Math.random() - 0.5) * 22;
-      img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
-    }
-    g.putImageData(img, 0, 0);
-    // patches and manholes
-    for (let i = 0; i < 30; i++) {
-      g.fillStyle = `rgba(${Math.random() < 0.5 ? '20,20,22' : '80,80,84'},0.35)`;
-      g.fillRect(Math.random() * W, Math.random() * H, 20 + Math.random() * 60, 10 + Math.random() * 40);
-    }
-    g.fillStyle = '#26272a';
-    for (const [x, y] of [[4, 20], [116, 44], [30, 2.5], [90, 61.5]]) {
-      g.beginPath();
-      g.arc(x * P, y * P, 0.45 * P, 0, Math.PI * 2);
-      g.fill();
-    }
-    // avenue lane lines (avenue halves at x=0..8 and 112..120); streets at z=0..5 and 59..64
-    g.fillStyle = 'rgba(235,235,235,0.85)';
-    for (let z = ST / 2 + 1; z < SZ - ST / 2 - 1; z += 6) {
-      for (const x of [0, 4.2, AX - 4.2, AX]) g.fillRect(x * P - 1.2, z * P, 2.4, 3 * P);
-    }
-    for (let x = AVE / 2 + 1; x < AX - AVE / 2 - 1; x += 6) {
-      for (const y of [0, SZ]) g.fillRect(x * P, y * P - 1.2, 3 * P, 2.4);
-    }
-    // crosswalks: across the avenue near the corners, and across the street
-    g.fillStyle = 'rgba(240,240,240,0.92)';
-    for (const z0 of [ST / 2 + 0.4, SZ - ST / 2 - 3.4]) {
-      for (const xs of [[0, AVE / 2], [AX - AVE / 2, AX]]) {
-        for (let x = xs[0] + 0.3; x < xs[1] - 0.2; x += 1.2) g.fillRect(x * P, z0 * P, 0.6 * P, 3 * P);
-      }
-    }
-    for (const x0 of [AVE / 2 + 0.4, AX - AVE / 2 - 3.4]) {
-      for (const zs of [[0, ST / 2], [SZ - ST / 2, SZ]]) {
-        for (let z = zs[0] + 0.3; z < zs[1] - 0.2; z += 1.2) g.fillRect(x0 * P, z * P, 3 * P, 0.6 * P);
-      }
-    }
-    // stop bars
-    for (const z0 of [ST / 2 + 3.9, SZ - ST / 2 - 4.3]) for (const xs of [[0.3, AVE / 2], [AX - AVE / 2, AX - 0.3]]) g.fillRect(xs[0] * P, z0 * P, (xs[1] - xs[0]) * P, 0.4 * P);
-  });
-  return roadTexCache;
-}
-
-// ---------------------------------------------------------------- materials
-
-let roadMaterial: THREE.MeshStandardMaterial | null = null;
-/** road markings from the canvas; surface relief and roughness from photo-scanned asphalt */
-function roadMat() {
-  if (roadMaterial) return roadMaterial;
-  const m = new THREE.MeshStandardMaterial({ map: nycRoadTex(), roughness: 1 });
-  roadMaterial = m;
-  wetSurface(m); // lighting.ts: wet sheen at night
-  const p = pbr('nyc_asphalt');
-  p?.ready.then(() => {
-    const rep = (t: THREE.Texture | null) => {
-      if (!t) return null;
-      const c = t.clone();
-      c.repeat.set(AX / p.tile[0], SZ / p.tile[1]);
-      c.needsUpdate = true;
-      return c;
-    };
-    m.normalMap = rep(p.nor);
-    m.normalScale.setScalar(1.3);
-    m.roughnessMap = rep(p.arm);
-    m.needsUpdate = true;
-  });
-  return m;
-}
 interface Chunk {
   group: THREE.Group;
   colliders: Rect[];
@@ -233,28 +155,15 @@ export class NycLevel implements Level {
     const portals: Portal[] = [];
     // [districts] the neighbourhood: open spaces build themselves; elsewhere it sets the character
     const D = districtAt(cx, cz);
-    if (D.open) return openChunk(D, cx, cz, hashN(this.seed, cx, cz, 5), roadMat());
+    if (D.open) return openChunk(D, cx, cz, hashN(this.seed, cx, cz, 5), GM.road());
     const tower = Math.min(1, Math.max(0, D.tower + 0.2 * Math.sin(cx * 0.9 + this.seed * 0.001) * Math.cos(cz * 0.37 + 1.3)));
     const village = D.village;
 
-    // road + sidewalk
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), roadMat());
-    road.rotation.x = -Math.PI / 2;
-    road.receiveShadow = true;
-    road.userData.owned = true;
-    group.add(road);
-    const sw = new THREE.PlaneGeometry(BX * 2, BZ * 2);
-    const uv = sw.getAttribute('uv') as THREE.BufferAttribute;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * BX * 2) / 3, (uv.getY(i) * BZ * 2) / 3);
-    const swm = new THREE.Mesh(sw, M.sidewalk());
-    swm.rotation.x = -Math.PI / 2;
-    swm.position.y = CURB;
-    stat.add(swm);
-    const curb = M.curb();
-    B(stat, curb, BX * 2, CURB, 0.25, 0, 0, -BZ + 0.125, false);
-    B(stat, curb, BX * 2, CURB, 0.25, 0, 0, BZ - 0.125, false);
-    B(stat, curb, 0.25, CURB, BZ * 2, -BX + 0.125, 0, 0, false);
-    B(stat, curb, 0.25, CURB, BZ * 2, BX - 0.125, 0, 0, false);
+    // road, sidewalk, curbs, ramps and markings (nyc/ground.ts)
+    // Belgian block on the old industrial / loft streets and some brownstone blocks
+    const loft = D.kind === 'industrial' || D.kind === 'canal' || D.kind === 'bowery' || D.kind === 'garment';
+    const cobble = (D.kind === 'industrial' && hashN(this.seed, cx, cz, 9) % 2 === 0) || ((D.kind === 'canal' || village) && hashN(this.seed, cx, cz, 9) % 4 === 0);
+    groundBase({ group, stat, cx, cz, village: loft, cobble });
     // the hidden backyard core of the block
     B(stat, mat('#5a564f'), LX * 2 - 1, 2.5, LZ * 2 - 1, 0, 0, 0, false);
 
@@ -303,6 +212,7 @@ export class NycLevel implements Level {
     }
     this.street(ctx, village, tower);
     districtExtras(ctx, D); // [districts] sidewalk displays, district props
+    groundDetails({ group, stat, cx, cz, village: loft, doors: ctx.doors, seed: this.seed });
 
     // buildings: windows, shop glass, lettering, instanced small parts (pulled out of stat first)
     finishBuildings(ctx);

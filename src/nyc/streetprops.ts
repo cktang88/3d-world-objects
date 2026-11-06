@@ -4,6 +4,7 @@ import { mat, glow } from '../build';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { SIG, CURB, AX, SZ, BX, BZ, LX, LZ, streetName } from './common';
+import { onRamp } from './ground';
 import { rect, overlaps, type Rect as LRect } from '../level';
 import { addTree, pickSpecies, TREE_VARIANTS, type Species } from './streettrees';
 import { streetLightMarker } from '../lighting';
@@ -1038,7 +1039,7 @@ export function standpipe(parent: THREE.Object3D, x: number, z: number, ry: numb
 export function streetExtras(o: { stat: THREE.Object3D; rng: Rng; colliders: LRect[]; near: (x: number, z: number, d?: number) => boolean; village: boolean }) {
   const { stat, rng, colliders, near } = o;
   const free = (x: number, z: number, w: number, d: number, pad = 0.3) => {
-    if (near(x, z, 2.0)) return false;
+    if (near(x, z, 2.0) || onRamp(x, z, w, d)) return false; // keep corner kerb ramps clear (ground.ts)
     const r = rect(x, z, w, d);
     return !colliders.some((c) => overlaps(c, r, pad));
   };
