@@ -207,6 +207,12 @@ test('house (brownstone) stair core: same core on every floor, reachable from th
     expect(reach(lv.spawn.pos.x, lv.spawn.pos.z, 0.5), `floor ${c.floor}: the stair landing connects to the rooms (spawn at the door reachable)`);
   }
   expect(!levels[0].portals().some((p) => /upstairs/i.test(p.label)), 'the in-room stair portal is gone');
+  // upper floors (interiors eda0463): no street door; spawn/doorway at the stair-hall doorway. The stair
+  // hand-over never uses them (the player keeps x/z, y - H), but entering such a floor directly lands there.
+  for (const lv of levels.slice(1)) {
+    const c = lv.vcore!;
+    expect(Math.hypot(lv.spawn.pos.x - c.door.x, lv.spawn.pos.z - c.door.z) < 2.0, `floor ${c.floor}: spawn at the stair-hall doorway`);
+  }
   // climb from the ground floor landing to the top and back
   const w = world('house', 4, desc(0));
   const c = (w.level as InteriorLevel).vcore!, d = c.d;
@@ -219,6 +225,7 @@ test('house (brownstone) stair core: same core on every floor, reachable from th
   for (let f = 1; f <= 3; f++) {
     expect(up.every(([x, z]) => w.walkTo(x, z)), `climbed to house floor ${f}`);
     expect((w.level as InteriorLevel).vcore?.floor === f, `on floor ${f} (got ${(w.level as InteriorLevel).vcore?.floor})`);
+    expect(Math.hypot(w.player.pos.x - up[up.length - 1][0], w.player.pos.z - up[up.length - 1][1]) < 0.2, `floor ${f}: arrived where the stair ends, not at the spawn`);
   }
   // no further up at the top
   const before = w.switches;
