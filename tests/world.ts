@@ -12,9 +12,9 @@ export interface Chunk { group: THREE.Group; colliders: Rect[]; portals: Portal[
 const chunks = new Map<string, Chunk>();
 
 /** one city block exactly as NycLevel builds it (block-local coordinates: origin at the block centre) */
-export function nycChunk(seed = 1, cx = 0, cz = 0): Chunk {
+export function nycChunk(seed = 1, cx = 0, cz = 0, fresh = false): Chunk {
   const k = `${seed},${cx},${cz}`;
-  let c = chunks.get(k);
+  let c = fresh ? undefined : chunks.get(k);
   if (!c) {
     // a bare NycLevel without its constructor (which would build 9 chunks, traffic and people)
     const lv = Object.create(NycLevel.prototype) as any;

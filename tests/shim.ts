@@ -13,7 +13,9 @@ import { join, resolve } from 'node:path';
 const g = globalThis as any;
 const ROOT = resolve(process.env.QA_ROOT ?? process.cwd());
 const PUBLIC = join(ROOT, 'public');
-g.__QA = { notex: true, models: process.env.QA_MODELS === '1' };
+/** models: false (default: binary assets 404), true (all local files), or a RegExp of allowed public/ paths */
+g.__QA = { notex: true, models: (process.env.QA_MODELS === '1') as boolean | RegExp };
+const modelAllowed = (path: string) => { const m = g.__QA.models; return m === true || (m instanceof RegExp && m.test(path)); };
 
 const noop = () => {};
 const listeners = { addEventListener: noop, removeEventListener: noop, dispatchEvent: () => true };
@@ -111,6 +113,7 @@ if (typeof g.document === 'undefined') {
   };
 }
 if (typeof g.window === 'undefined') g.window = g;
+if (typeof g.self === 'undefined') g.self = g;
 Object.assign(g, {
   innerWidth: g.innerWidth ?? 960, innerHeight: g.innerHeight ?? 540, devicePixelRatio: 1,
   addEventListener: g.addEventListener ?? noop, removeEventListener: g.removeEventListener ?? noop,
@@ -120,6 +123,7 @@ g.HTMLCanvasElement ??= FakeCanvas;
 g.HTMLImageElement ??= FakeImage;
 g.Image ??= FakeImage;
 g.ImageBitmap ??= class {};
+g.ProgressEvent ??= class { type: string; lengthComputable: boolean; loaded: number; total: number; constructor(type: string, o: any = {}) { this.type = type; this.lengthComputable = !!o.lengthComputable; this.loaded = o.loaded ?? 0; this.total = o.total ?? 0; } };
 g.HTMLVideoElement ??= class {};
 g.OffscreenCanvas ??= FakeCanvas;
 g.createImageBitmap ??= async () => ({ width: 1, height: 1, close: noop });
@@ -143,10 +147,19 @@ try { if (!g.localStorage || typeof g.localStorage.getItem !== 'function') throw
 try { if (!g.sessionStorage) throw 0; } catch { Object.defineProperty(g, 'sessionStorage', { value: new MemStorage(), configurable: true }); }
 
 // ---- Worker: never runs; messages vanish
-g.Worker = class { onmessage: any = null; onerror: any = null; postMessage = noop; terminate = noop; addEventListener = noop; removeEventListener = noop; };
+// ---- Worker: never runs; every request is answered at once with an error (callers fall back)
+g.Worker = class {
+  onmessage: any = null; onerror: any = null; terminate = noop; addEventListener = noop; removeEventListener = noop;
+  postMessage(data: any) { setTimeout(() => this.onmessage?.({ data: { id: data?.id, error: 'qa shim: no workers (no remote models)' } }), 0); }
+};
 
 // ---- fetch: local paths from public/, remote fails fast (or ?models via QA_MODELS=1 still local only)
 const realFetch = g.fetch?.bind(g);
+// three's FileLoader builds `new Request('/assets/x.glb')`: relative URLs resolve against the page
+const RealRequest = g.Request;
+g.Request = class extends RealRequest {
+  constructor(input: any, init?: any) { super(typeof input === 'string' && !/^[a-z]+:/i.test(input) ? new URL(input, 'http://localhost/').href : input, init); }
+};
 export const fetchLog: string[] = [];
 g.__qaFetchLog = fetchLog;
 g.fetch = async (input: any, init?: any) => {
@@ -163,7 +176,7 @@ g.fetch = async (input: any, init?: any) => {
   fetchLog.push('local ' + path);
   // no textures / no models: binary assets 404 unless QA_MODELS=1
   const binary = /\.(glb|gltf|bin|png|jpe?g|webp|ktx2|hdr|exr|usd[az]?|wasm)$/i.test(path);
-  if (!file.startsWith(PUBLIC) || !existsSync(file) || (binary && !g.__QA.models)) return new Response('not found', { status: 404, statusText: 'Not Found' });
+  if (!file.startsWith(PUBLIC) || !existsSync(file) || (binary && !modelAllowed(path))) return new Response('not found', { status: 404, statusText: 'Not Found' });
   const buf = await readFile(file);
   const type = path.endsWith('.json') ? 'application/json' : 'application/octet-stream';
   return new Response(buf, { status: 200, headers: { 'content-type': type } });
