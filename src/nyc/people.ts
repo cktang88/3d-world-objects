@@ -1530,7 +1530,10 @@ export class Pedestrians {
       for (const pd of this.peds) pd.p.applyWeather(peopleWeather);
     }
     // spawn a few per frame so building the skinned clones does not hitch one frame
-    for (let n = 0; n < 8 && this.peds.length < COUNT; n++) {
+    // (a fixed count so the crowd stays deterministic: 40 on the first frame so the first view is
+    // populated at once, then 16 a frame)
+    const burst = this.peds.length === 0 ? 40 : 16;
+    for (let n = 0; n < burst && this.peds.length < COUNT; n++) {
       const person = new Person(this.assets, this.rng);
       person.applyWeather(peopleWeather);
       this.group.add(person.root);
