@@ -246,8 +246,11 @@ export class NycLevel implements Level {
     }
     if (rng.chance(0.35)) {
       const sx = rng.chance(0.5) ? -1 : 1, sz = rng.chance(0.5) ? -1 : 1;
-      subway(stat, group, sx * (BX - 2.2), sz * (BZ - 9), ctx.cz, rng);
-      colliders.push(rect(sx * (BX - 2.2), sz * (BZ - 9), 2.2, 5.4));
+      // not in front of a door (npm run qa: tests/nyc.test.ts)
+      if (!near(sx * (BX - 2.2), sz * (BZ - 9), 4.5)) {
+        subway(stat, group, sx * (BX - 2.2), sz * (BZ - 9), ctx.cz, rng);
+        colliders.push(rect(sx * (BX - 2.2), sz * (BZ - 9), 2.2, 5.4));
+      }
     }
 
     // along the four kerbs
