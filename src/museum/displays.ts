@@ -490,7 +490,7 @@ export function tableCase(items: Measured[], maxLen: number): { unit: Unit; rest
 /** A bench for the visitors (leather on a dark frame, after the V&A / Louvre). */
 export function bench(): Unit {
   return {
-    type: 'bench', place: 'floor', w: 2.4, d: 1.4, h: 0.45, items: [],
+    type: 'bench', place: 'floor', w: 2.4, d: 1.4, h: 1.25, items: [],
     focus: new THREE.Vector3(), glow: 0,
     build(c, f) {
       const lv = c.lv;

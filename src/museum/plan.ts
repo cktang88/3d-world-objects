@@ -18,7 +18,7 @@ export function classify(m: Measured, st: Style, r: Rng): Kind {
   if (st.hang && L >= 1.5 && L <= 26 && y <= 6 && y < L * 0.7 && /aircraft|spacecraft/.test(m.entry.family)) return 'hang';
   if (L > 1.9 || y > 2.0) return 'floor';
   if (st.mount && thin <= 0.22 * Math.max(L, y) && thin <= 0.3 && y >= 0.25 && L >= 0.3 && y <= 2.0 && r.chance(0.85)) return 'mount';
-  if (y <= 0.25 && L <= 2.3) return 'flat';
+  if (y <= 0.25 && L >= 0.45 && L <= 2.3 && y < L * 0.35) return 'flat';
   if (L >= 0.75 || y >= 0.8) return 'medium';
   if (L < 0.14 && y < 0.2) return 'tiny';
   return 'small';
@@ -94,7 +94,11 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   }
   rest = main;
   if (primary === 'hood') {
-    for (const m of rest) units.push(plinth(m, true, false));
+    while (rest.length) {
+      const n = r.chance(0.65) ? Math.min(rest.length, r.int(2, 4)) : 1;
+      units.push(n > 1 ? cluster(rest.slice(0, n), r, true) : plinth(rest[0], true, false));
+      rest = rest.slice(n);
+    }
     rest = [];
   } else if (primary === 'vitrine') {
     while (rest.length) {
