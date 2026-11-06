@@ -174,6 +174,17 @@ function flatten(root: THREE.Object3D): THREE.Group {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh || Array.isArray(mesh.material)) return;
     let g = mesh.geometry.clone();
+    // meshopt-quantized rebuilds (public/rebuilt/*.glb) store positions/uvs as normalized ints:
+    // transforming those in place clamps them to [-1, 1] (a 2 m cube of a plane) and mixed array
+    // types make mergeGeometries fail (that material's parts dropped). Work in plain floats.
+    for (const k of ['position', 'normal', 'uv']) {
+      const a = g.getAttribute(k) as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+      if (!a || (!(a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute && a.array instanceof Float32Array && !a.normalized)) continue;
+      const f = new Float32Array(a.count * a.itemSize);
+      const get = [a.getX, a.getY, a.getZ, a.getW];
+      for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) f[i * a.itemSize + c] = get[c].call(a, i);
+      g.setAttribute(k, new THREE.BufferAttribute(f, a.itemSize));
+    }
     g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, mesh.matrixWorld));
     if (g.index) g = g.toNonIndexed();
     for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
