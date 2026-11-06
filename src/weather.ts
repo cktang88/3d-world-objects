@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { groundWeather } from './nyc/ground';
 import { setPeopleWeather } from './nyc/people';
-import { PRESETS, getNight, getTimeOfDay, setWeather as setLightingWeather, type Lighting, type Quality } from './lighting';
+import { getNight, getTimeOfDay, setWeather as setLightingWeather, type Lighting, type Quality } from './lighting';
 
 /**
  * Dynamic weather: a cloud dome over the HDRI sky, clear / partly cloudy / overcast / light rain /
@@ -601,22 +601,6 @@ void main() {
 }
 `;
 
-const COMPOSITE_F = /* glsl */ `
-varying vec2 vUv;
-uniform sampler2D tBase;
-uniform mat3 uRot;
-uniform float uInvScale;
-${CLOUD_GLSL}
-void main() {
-  float phi = (vUv.x - 0.5) * 6.2831853;
-  float el = (vUv.y - 0.5) * 3.14159265;
-  vec3 d = vec3(cos(el) * cos(phi), sin(el), cos(el) * sin(phi));
-  float hz;
-  vec4 c = clouds(normalize(uRot * d), hz);
-  vec3 base = texture2D(tBase, vUv).rgb;
-  gl_FragColor = vec4(base * (1.0 - c.a) + mix(c.rgb, uHaze, hz) * c.a * uInvScale, 1.0);
-}
-`;
 
 const WINDOW_VIEW = /* glsl */ `
 {
@@ -660,16 +644,6 @@ export class Weather {
   private occT = 0;
   private occInfo = new THREE.Vector4(0, 0, OCC_TOP, OCC_FAR - OCC_NEAR);
   private occMat4 = new THREE.Matrix4();
-  // env composite: the HDRI sky with our clouds, prefiltered for reflections / ambient light
-  private pmremGen: THREE.PMREMGenerator;
-  private compRT: THREE.WebGLRenderTarget | null = null;
-  private envRT: THREE.WebGLRenderTarget | null = null;
-  private compScene = new THREE.Scene();
-  private compCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private compMat: THREE.ShaderMaterial;
-  private baseEnv: THREE.Texture | null = null;
-  private baseBg: THREE.Texture | null = null;
-  private envState = { cover: -1, dark: -1, t: -1e9, fog: -1, tod: '' };
 
   private counts = COUNTS.ultra;
   // state machine
@@ -700,7 +674,6 @@ export class Weather {
     private camera: THREE.PerspectiveCamera,
     private lighting: Lighting,
   ) {
-    this.pmremGen = new THREE.PMREMGenerator(renderer);
     this.cloudU = {
       tNoise: { value: noiseTex },
       uCloud: { value: new THREE.Vector4(0, 0, 0, 0) },
@@ -755,20 +728,12 @@ export class Weather {
     this.group.name = 'weather';
     this.group.userData.noOcclude = true;
 
-    this.compMat = new THREE.ShaderMaterial({
-      uniforms: { ...this.cloudU, tBase: { value: null }, uRot: { value: new THREE.Matrix3() }, uInvScale: { value: 1 } },
-      vertexShader: 'varying vec2 vUv;\nvoid main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-      fragmentShader: COMPOSITE_F, depthTest: false, depthWrite: false,
-    });
-    const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.compMat);
-    q.frustumCulled = false;
-    this.compScene.add(q);
 
     // compile the particle / dome / composite shaders up front: weather changes never compile anything
     try {
       const tmp = new THREE.Scene();
       const vis = [this.dome, this.precip, this.splash].map((o) => o.visible);
-      tmp.add(this.group, q.clone());
+      tmp.add(this.group);
       renderer.compile(tmp, camera);
       scene.add(this.group);
       [this.dome, this.precip, this.splash].forEach((o, i) => (o.visible = vis[i]));
@@ -807,7 +772,6 @@ export class Weather {
       lerpParams(this.to, this.to, 1, this.cur);
       info.wetness = s === 'rain' ? 1 : s === 'lightrain' ? 0.75 : s === 'snow' ? 0.35 : s === 'fog' ? 0.25 : 0;
       info.snowCover = s === 'snow' ? 0.85 : 0;
-      this.envState.cover = -1;
       this.snap = true;
     }
     info.state = s;
@@ -843,7 +807,7 @@ export class Weather {
   debug() {
     return {
       state: this.target, progress: +this.tTrans.toFixed(2), auto: this.auto, cur: Object.fromEntries(Object.entries(this.cur).map(([k, v]) => [k, +v.toFixed(4)])),
-      wet: +info.wetness.toFixed(2), snowCover: +info.snowCover.toFixed(2), sunOcc: +this.sunOcc.toFixed(2), occ: this.occInfo.x, env: this.scene.environment === this.envRT?.texture,
+      wet: +info.wetness.toFixed(2), snowCover: +info.snowCover.toFixed(2), sunOcc: +this.sunOcc.toFixed(2), occ: this.occInfo.x,
       far: this.camera.far,
     };
   }
@@ -918,7 +882,6 @@ export class Weather {
     this.updateFar();
     this.updateOcclusion(dt, focus);
     this.updateParticles(dt);
-    this.updateEnv();
   }
 
   private pickNext(s: WeatherState): WeatherState {
@@ -1009,12 +972,12 @@ export class Weather {
 
   private updateLighting() {
     const c = this.cur;
-    const tod = getTimeOfDay();
-    const pre = PRESETS[tod];
     const night = getNight();
     const occ = this.sunOcc;
-    // overcast light comes from the whole sky: lift the sky light as the sun goes (a camera would expose up)
-    const skyMul = 1 + 0.35 * c.cloud * (1 - night) - 0.25 * c.dark;
+    // lighting crossfades sky + env to its grey overcast HDRI; rain clouds dim it a little more
+    const skyMul = 1 + 0.1 * c.cloud * (1 - night) - 0.25 * c.dark;
+    const s = THREE.MathUtils.clamp((c.cloud - 0.55) / 0.4, 0, 1);
+    const overcast = Math.max(s * s * (3 - 2 * s), c.fogSky);
     const cloudCol = this.cloudBase();
     const fogMix = Math.min(1, 0.25 + 0.6 * c.cloud + 0.3 * c.fogSky) * Math.min(1, c.cloud * 1.5 + c.fogSky);
     const mods = {
@@ -1025,6 +988,7 @@ export class Weather {
       fogColor: '#' + cloudCol.clone().multiplyScalar(0.92).getHexString(),
       fogMix,
       wet: info.wetness,
+      overcast: +overcast.toFixed(3),
     };
     const key = JSON.stringify(mods);
     if (key !== this.lastMods) {
@@ -1032,18 +996,17 @@ export class Weather {
       setLightingWeather(mods);
     }
     for (const l of this.csmLights) l.shadow.intensity = 1 - 0.55 * Math.min(1, occ * 1.4);
-    void pre;
   }
 
   /** colour of the cloud deck's underside in scene units (also the fog colour under cloud) */
   private cloudBase() {
     const c = this.cur;
     const tod = getTimeOfDay();
-    const pre = PRESETS[tod];
+    const pre = this.lighting.preset;
     const night = getNight();
     const amb = new THREE.Color(0.82, 0.85, 0.9).multiplyScalar(pre.sky * 1.6);
     if (tod === 'golden') amb.lerp(new THREE.Color(pre.sunColor).multiplyScalar(pre.sky), 0.25);
-    if (pre.fogTint) amb.lerp(new THREE.Color(pre.fogTint).multiplyScalar(pre.sky * 2), 0.5);
+    amb.lerp(new THREE.Color(pre.fogTint).multiplyScalar(pre.sky * 2), 0.6 * pre.fogTintMix);
     amb.multiplyScalar(1 - 0.5 * c.dark);
     // city light on the clouds at night: NYC's low cloud glows orange-brown
     amb.add(new THREE.Color(0.55, 0.36, 0.24).multiplyScalar(0.06 * night * c.cloud));
@@ -1053,7 +1016,7 @@ export class Weather {
   private updateCloudUniforms(focus: THREE.Vector3) {
     const c = this.cur;
     const u = this.cloudU;
-    const pre = PRESETS[getTimeOfDay()];
+    const pre = this.lighting.preset;
     const night = getNight();
     u.uCloud.value.set(c.cloud, c.dark, this.cloudOff.x, this.cloudOff.y);
     u.uCloud2.value.set(focus.x, focus.z, c.fogSky, Math.max(0, (c.cloud - 0.85) / 0.15) * 0.85);
@@ -1113,7 +1076,11 @@ export class Weather {
     const r = this.renderer, sc = this.scene;
     const prev = { rt: r.getRenderTarget(), bg: sc.background, ov: sc.overrideMaterial, au: r.shadowMap.autoUpdate, nu: r.shadowMap.needsUpdate, fog: sc.fog };
     const hidden: THREE.Object3D[] = [];
-    for (const o of sc.children) if (o.visible && ((o as unknown as { isSky?: boolean }).isSky || o.userData.noOcclude)) hidden.push(o);
+    // skies, domes and decals (no depth write) are not roofs
+    for (const o of sc.children) {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (o.visible && ((o as unknown as { isSky?: boolean }).isSky || o.userData.noOcclude || (m && !Array.isArray(m) && !m.depthWrite))) hidden.push(o);
+    }
     hidden.forEach((o) => (o.visible = false));
     sc.background = null;
     sc.fog = null;
@@ -1171,55 +1138,5 @@ export class Weather {
     su.uSplash.value.set(this.time, 12, 1, 2.4);
     (su.uColor.value as THREE.Color).copy(base).multiplyScalar(1.5);
     su.uOpacity.value = 0.45;
-  }
-
-  // ------------------------------------------------------------ environment (reflections / ambient light)
-
-  private updateEnv() {
-    const sc = this.scene;
-    const mine = this.envRT?.texture;
-    if (sc.environment && sc.environment !== mine) {
-      if (sc.environment !== this.baseEnv) this.envState.t = -1e9;
-      this.baseEnv = sc.environment;
-    }
-    const bg = sc.background as THREE.Texture | null;
-    if (bg && bg !== this.baseBg && (bg as THREE.DataTexture).isDataTexture && bg.mapping === THREE.EquirectangularReflectionMapping) {
-      this.baseBg = bg;
-      this.envState.t = -1e9;
-    }
-    if (!this.baseEnv || !this.baseBg || sc.background !== this.baseBg) return;
-    const c = this.cur;
-    const e = this.envState;
-    const tod = getTimeOfDay();
-    const cover = c.cloud, any = cover > 0.2 || c.fogSky > 0.05;
-    if (!any) {
-      if (sc.environment === mine) sc.environment = this.baseEnv;
-      e.cover = cover;
-      return;
-    }
-    const changed = Math.abs(cover - e.cover) > 0.025 || Math.abs(c.dark - e.dark) > 0.04 || Math.abs(c.fogSky - e.fog) > 0.04 || tod !== e.tod;
-    if (!(changed && this.time - e.t > 1.2) && this.time - e.t < 12 && sc.environment === mine) return;
-    Object.assign(e, { cover, dark: c.dark, fog: c.fogSky, t: this.time, tod });
-    const img = this.baseBg.image as { width: number; height: number };
-    const W = img.width, H = img.width / 2;
-    if (!this.compRT || this.compRT.width !== W) {
-      this.compRT?.dispose();
-      this.envRT?.dispose();
-      this.envRT = null;
-      this.compRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false });
-      this.compRT.texture.mapping = THREE.EquirectangularReflectionMapping;
-      this.compRT.texture.colorSpace = THREE.LinearSRGBColorSpace;
-    }
-    const u = this.compMat.uniforms;
-    u.tBase.value = this.baseBg;
-    u.uRot.value.setFromMatrix4(new THREE.Matrix4().makeRotationY(sc.environmentRotation.y));
-    u.uInvScale.value = 1 / Math.max(1e-4, sc.environmentIntensity);
-    const r = this.renderer;
-    const prevRT = r.getRenderTarget();
-    r.setRenderTarget(this.compRT);
-    r.render(this.compScene, this.compCam);
-    r.setRenderTarget(prevRT);
-    this.envRT = this.pmremGen.fromEquirectangular(this.compRT.texture, this.envRT);
-    sc.environment = this.envRT.texture;
   }
 }

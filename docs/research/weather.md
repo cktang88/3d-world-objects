@@ -42,15 +42,17 @@ sphere around the camera at the far plane (only background pixels pay for it):
 - The CPU evaluates **the same noise** along the sun ray (same texture data), so in partly
   cloudy weather the sun really goes in and out behind the clouds you see (sunMul low-passed).
 
-### Reflections / ambient: PMREM from a composite
-`scene.environment` is rebuilt from an equirect composite (the HDRI + the same clouds) through a
-separate PMREMGenerator, **only when cover / darkness / fog changed noticeably (≥ 1.2 s apart) or
-every 12 s for drift**. The composite has the HDRI's own width, so the PMREM has the same size as
-lighting.ts's and no material recompiles (the CUBEUV defines depend on that size).
+### Reflections / ambient light
+lighting.ts owns the sky dome and the environment map: it crossfades the time-of-day HDRI(s) with
+a grey overcast HDRI (`potsdamer_platz`) by `setWeather({ overcast })`, in a blended CubeUV
+render target of fixed size (no recompiles). weather.ts drives `overcast` from cloud cover
+(smoothstep 0.55-0.95, and fog) and draws its own cloud deck over lighting's dome (transparent,
+after the opaque pass, at the far plane). An earlier version re-prefiltered an HDRI+clouds
+composite through PMREM; dropped when lighting moved to its own blended env.
 
 ### Lighting hook
-`setWeather({ cloud, sunMul, skyMul, fogMul, fogColor, fogMix, wet })` in lighting.ts (lighting
-agent's API). Weather sends it only when values change. Cast shadows soften under thin cloud via
+`setWeather({ cloud, sunMul, skyMul, fogMul, fogColor, fogMix, wet, overcast })` in lighting.ts
+(lighting agent's API); cloud colours come from `lighting.preset` (the blended preset). Weather sends it only when values change. Cast shadows soften under thin cloud via
 `light.shadow.intensity` on the CSM lights.
 
 ### Surfaces: wet, ripples, snow (global, uniforms only)
@@ -119,9 +121,9 @@ transition starts (the target state). Suggested: hash each person to decide, so 
 smoothly as rain sets in; umbrellas mostly black (see the 65th St reference).
 
 ### Performance
-- Per frame: dome (background pixels only, ~11 texture taps), particle VS work
-  (≤ 20k quads, one VTF each), splash quads, + one depth tap and ~40 ALU in standard materials
-  while wet/snowy. Throttled: exposure depth pass (≤ every 3 s), env composite + PMREM
-  (≤ every 1.2 s while changing, else 12 s).
+- Per frame: 3 draw calls (cloud dome — background pixels only, ~11 texture taps; rain/snow;
+  splashes), particle VS work (≤ 20k quads, one VTF each), + one depth tap and ~40 ALU in
+  standard materials while wet/snowy. Throttled: the exposure depth pass (≤ every 3 s, only
+  while something is wet or falling; skies/domes/decals without depth write are skipped).
 - No shader is compiled on a weather change; only uniforms change. Particle counts and the
   exposure map size follow the G quality levels.
