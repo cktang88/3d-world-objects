@@ -327,6 +327,11 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   rows.sort((a, b) => Math.max(...a.map((u) => u.h)) - Math.max(...b.map((u) => u.h)));
   for (const rw of rows) r.shuffle(rw);
   if (heroU) rows.splice(rows.length >= 2 ? Math.floor(rows.length / 2) : rows.length, 0, [heroU]);
+  // the rows hold fewer than the area guess assumed (depths must match within a row): the floor is
+  // only as wide as the widest row plus a doorway's corridor (2.6 m), else small things stand lost in
+  // a hall (the placement below widens it again if anything does not fit)
+  const rowW = Math.max(0, ...rows.map((rw) => rw.reduce((s, u) => s + u.w + 0.6, 0)));
+  if (rows.length) Wf = Math.min(Wf, Math.max(maxW, rowW + 2.6 + 0.6, hangS + 2 - 2 * inset, floorU.length ? 6.5 : 4.5));
 
   const hangLanes = hangU.length >= 7 ? 3 : hangU.length >= 3 ? 2 : 1;
   let W = Math.max(Wf + 2 * inset, intimate ? 6 : 8, hangLanes * (hangS + 1.5));
@@ -409,8 +414,21 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   };
 
   for (let it = 0; it < 60; it++) {
-    const proposed = exitDoors(W, D, exits, big, r.fork(it), intimate);
-    const placed = placeRows(W, D, proposed.filter((d) => d.wall === 'N'));
+    let proposed = exitDoors(W, D, exits, big, r.fork(it), intimate);
+    let placed = placeRows(W, D, proposed.filter((d) => d.wall === 'N'));
+    if (!placed && proposed.some((d) => d.wall === 'N')) {
+      // a wide display does not fit beside the north doorway's corridor: move the doorway towards a
+      // side wall (one wide stretch of floor) before making the room bigger
+      for (const side of [1, -1]) {
+        const moved = proposed.map((d) => (d.wall === 'N' ? { ...d, at: side * (W / 2 - 1.2 - d.w / 2) } : d));
+        if (moved.filter((d) => d.wall === 'N').length > 1) break;
+        placed = placeRows(W, D, moved.filter((d) => d.wall === 'N'));
+        if (placed) {
+          proposed = moved;
+          break;
+        }
+      }
+    }
     if (!placed) {
       W += 2;
       continue;
@@ -444,7 +462,7 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
       return { ...d, at: best };
     });
     if (!ok) {
-      D += 2;
+      D += 1; // the room's slack spreads over every gap between rows: grow in small steps
       continue;
     }
     doors = [entrance, ...final];

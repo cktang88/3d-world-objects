@@ -328,7 +328,7 @@ export class GalleryLevel extends MuseumBase {
     // the stand-in light while this room is seen through a doorway, a few metres in, high up
     // modest, and short-ranged: it stands just behind another room's doorway, so it must not flood that room
     this.previewLight(new THREE.Vector3(0, H - 1, -Math.min(7, D / 3)), st.light, Math.min(140, (st.dark ? 1.4 : 0.7) * W * Math.sqrt(D)), Math.min(D, 18));
-    this.fillLevel = st.dark ? 0.3 : 0.5;
+    this.fillLevel = 0.3; // pale rooms washed out to white through a doorway at 0.5
     if (st.outdoor && st.arch === 'openair') return;
     this.maxSpots = st.dark ? 10 : 5; // requests: the rig's few real spots follow the visitor
     const high = H > 7.5;

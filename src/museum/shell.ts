@@ -18,7 +18,8 @@ export function floorMaterial(k: Floor): THREE.Material {
   switch (k) {
     case 'parquet': return surface('floor_parquet', [1, 1], { roughness: 0.75, normalScale: 0.8 });
     case 'marble': return surface('floor_marble', [1, 1], { roughness: 0.5, normalScale: 0.5 });
-    case 'concrete': return surface('floor_concrete', [1, 1], { roughness: 0.55, normalScale: 0.6, color: '#c9c9c6' });
+    // polished concrete: the photo texture's dirt read as mud across a big hall's floor
+    case 'concrete': return mat('#8e8b85', { rough: 0.42 });
     case 'oak': return surface('floor_laminate', [1, 1], { roughness: 0.6, normalScale: 0.6, color: '#efe6d8' });
     case 'tiles': return surface('floor_tiles', [1, 1], { roughness: 0.6, normalScale: 0.5 });
     case 'carpet': return surface('floor_carpet', [1, 1], { roughness: 1, normalScale: 0.6, color: '#4a3a33' });
