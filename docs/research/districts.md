@@ -99,3 +99,24 @@ trees closing the vista 3.5 blocks away, where the avenue meets the park wall an
 - Every shown object is an inspect portal (E: details and program); originals swap in close up.
 - Open chunks remove the roads between them: traffic stops at the dead end (and is recycled out
   of sight), pedestrians re-place / turn back where `walkable()` says no (river, airport).
+
+## Coverage (scripts/district_coverage.py)
+
+Distinct objects of each family a player can meet in the city (district showcase pools, shop stock,
+bundled street props / interiors) against the 22K catalogue. Before → after the flea market (garment
+district, W 39th St style) and the architectural salvage yard (industrial blocks):
+
+| family | catalogue | before | after |
+|---|---:|---:|---:|
+| furniture | 1440 | 506 (35%) | 752 (52%) |
+| tableware | 1393 | 338 (24%) | 612 (44%) |
+| electronics | 1356 | 427 (31%) | 599 (44%) |
+| container | 1344 | 357 (27%) | 648 (48%) |
+| lighting | 1334 | 426 (32%) | 652 (49%) |
+| architectural element | 1315 | 249 (19%) | 733 (56%) |
+| building | 973 | 159 (16%) | 159 (16%) |
+| hand tool | 1368 | 449 (33%) | 442 (32%) |
+| machine or industrial | 1355 | 430 (32%) | 430 (32%) |
+
+Still under-shown: building (small structures at real size need open ground), hand tools and machines
+(construction site / yards only show a few dozen at a time), home appliances, weapons & armour.

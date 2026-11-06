@@ -195,8 +195,8 @@ function track(ctx: BCtx, x0: number, x1: number, z: number) {
 
 export function buildYard(ctx: BCtx, r: Rng): Plan {
   const slot = slotter(ctx);
-  // every other industrial block keeps its buildings (lofts, garages)
-  if ((ctx.cx + ctx.cz) % 2 === 0) return { ave: [true, true], rows: [true, true] };
+  // every other industrial block: lofts and garages with an architectural salvage yard on one end
+  if ((ctx.cx + ctx.cz) % 2 === 0) return buildSalvage(ctx, r);
   const row = r.chance(0.5) ? 1 : -1, s = r.chance(0.5) ? 1 : -1;
   // ---- the rail yard in one row: three tracks, trains and wagons on them
   const R = rowArea(row, 18);
@@ -306,4 +306,93 @@ export function buildMuseum(ctx: BCtx, r: Rng): Plan {
     ctx.colliders.push(rect(px0 + 6, z, 5, 5));
   }
   return { ave: [true, false], rows: [true, true], core: false };
+}
+
+// ---------------------------------------------------------------- architectural salvage yard
+
+/**
+ * An architectural salvage yard (Demolition Depot / Olde Good Things): columns, doors, gates,
+ * mantels, ironwork, cornices and urns stood up in rows on gravel behind a chain-link fence,
+ * at real size. Shows the architectural-element family, the least-met family in the city.
+ */
+export function buildSalvage(ctx: BCtx, r: Rng): Plan {
+  const slot = slotter(ctx);
+  const s = r.chance(0.5) ? 1 : -1;
+  const A = aveEnd(s);
+  ctx.stat.add(slab(flat('#8c857a', 1), A.x0, A.x1, A.z0, A.z1, Y, 3));
+  // the fence on the avenue, a gate in the middle, the yard's sign over it
+  chainFence(ctx.stat, s * LX, -LZ, s * LX, -3, 2.4, CURB);
+  chainFence(ctx.stat, s * LX, 3, s * LX, LZ, 2.4, CURB);
+  ctx.colliders.push({ minX: s * LX - 0.15, maxX: s * LX + 0.15, minZ: -LZ, maxZ: -3 }, { minX: s * LX - 0.15, maxX: s * LX + 0.15, minZ: 3, maxZ: LZ });
+  sign(ctx, 'ARCHITECTURAL SALVAGE', s * (LX + 0.1), CURB + 3.1, 0, s > 0 ? Math.PI / 2 : -Math.PI / 2, 0.55, 8, '#f2e8c8', 'paint');
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 6.4), flat('#2b2b2b', 0.6, 0.4));
+  beam.position.set(s * LX, CURB + 3.1, 0);
+  beam.userData.owned = true;
+  ctx.stat.add(beam);
+  // four rows of pieces with aisles between them; the tallest (columns, doors, gates) at the back
+  const xs = [-7.5, -2.5, 2.5, 7.5].map((u) => (A.x0 + A.x1) / 2 + u);
+  const back = s > 0 ? 0 : 3, front = s > 0 ? 3 : 0;
+  for (const [i, x] of xs.entries()) {
+    for (let z = -LZ + 3; z < LZ - 2; z += 4.2) {
+      if (Math.abs(z) < 3.2 && i === front) continue; // the gate aisle
+      slot({ kind: 'salvage', x, y: Y, z, rot: Math.PI / 2, w: 3.6, d: 2.2, h: i === back ? 5 : 3.2, min: 0.5, radius: 60, maxTris: 120_000 });
+    }
+  }
+  return { ave: s > 0 ? [true, false] : [false, true], rows: [true, true], core: false };
+}
+
+// ---------------------------------------------------------------- flea market
+
+const UMBRELLA = ['#b03a2e', '#2e5f8a', '#e2c044', '#3f7f4f', '#e8e4dc', '#7a3f8a'];
+/**
+ * A weekend flea market in a side-street parking lot (the Hell's Kitchen Flea Market on W 39th St):
+ * two rows of folding tables under umbrellas with tableware, vases and boxes, lamps and old radios,
+ * and furniture on the asphalt behind them. Covers tableware, containers, lighting, electronics
+ * and furniture, the biggest families players hardly met (scripts/district_coverage.py).
+ */
+export function buildFlea(ctx: BCtx, r: Rng): Plan {
+  if ((((ctx.cx + ctx.cz) % 2) + 2) % 2 !== 0) return { ave: [true, true], rows: [true, true] };
+  const slot = slotter(ctx);
+  const row = r.chance(0.5) ? 1 : -1;
+  const R = rowArea(row, 18);
+  ctx.stat.add(slab(apronMat(), R.x0, R.x1, R.z0, R.z1, Y, 10));
+  const zc = (R.z0 + R.z1) / 2;
+  const table = flat('#d8d2c2', 0.8);
+  const leg = flat('#8d9192', 0.4, 0.8);
+  const SMALL = ['tableware', 'vessel', 'fleaLight', 'tableware', 'fleaTech', 'stationery'];
+  let k = 0;
+  for (const side of [-1, 1]) {
+    // tables face the aisle down the middle of the lot
+    const tz = zc + side * 3.4;
+    for (let x = R.x0 + 2.5; x < R.x1 - 2; x += 3.4, k++) {
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.04, 0.8), table);
+      top.position.set(x, CURB + 0.74, tz);
+      top.userData.owned = true;
+      ctx.stat.add(top);
+      for (const dx of [-0.8, 0.8]) {
+        const l = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.72, 0.7), leg);
+        l.position.set(x + dx, CURB + 0.37, tz);
+        l.userData.owned = true;
+        ctx.stat.add(l);
+      }
+      ctx.colliders.push(rect(x, tz, 1.8, 0.8));
+      const kind = SMALL[(k + (side > 0 ? 3 : 0)) % SMALL.length];
+      for (const dx of [-0.45, 0.45]) slot({ kind: kind === 'tableware' ? ['tableware', 'kitchen'] : kind, x: x + dx, y: CURB + 0.76, z: tz, rot: r.range(-0.5, 0.5) + (side > 0 ? Math.PI : 0), w: 0.8, d: 0.7, h: 0.75, min: 0.06, radius: 40, maxTris: 40_000 }, false);
+      // an umbrella over every other table
+      if (k % 2 === 0) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.3, 6), leg);
+        pole.position.set(x + 1.0, CURB + 1.15, tz + side * 0.45);
+        pole.userData.owned = true;
+        ctx.stat.add(pole);
+        const can = new THREE.Mesh(new THREE.ConeGeometry(1.3, 0.45, 8, 1, true), flat(r.pick(UMBRELLA), 0.9));
+        can.position.set(x + 1.0, CURB + 2.35, tz + side * 0.45);
+        can.userData.owned = true;
+        ctx.stat.add(can);
+      }
+      // furniture for sale on the asphalt behind every other table
+      if (k % 2 === 1) slot({ kind: 'fleaFurniture', x, y: Y, z: tz + side * 3.0, rot: side > 0 ? Math.PI : 0, w: 2.6, d: 1.6, h: 2.3, min: 0.4, radius: 55, maxTris: 100_000 });
+    }
+  }
+  sign(ctx, 'FLEA MARKET · SAT & SUN', 0, CURB + 2.8, row * (LZ + 0.1), row > 0 ? 0 : Math.PI, 0.55, 10, '#c21f2a', 'paint');
+  return { ave: [true, true], rows: row > 0 ? [true, false] : [false, true], core: false };
 }

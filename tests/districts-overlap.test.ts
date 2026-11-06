@@ -7,10 +7,10 @@ import type { Rect } from '../src/level';
 
 const ALL: [string, number, number][] = [
   ['park fountain', 0, -4], ['park pond', 1, -4], ['park playground', -1, -4], ['park ballfield', 2, -4], ['park dogrun', -1, -5], ['park garden', 1, -5], ['park meadow', 0, -5], ['park kiosk', 2, -5],
-  ['auto row', 4, -4], ['construction', 4, -1], ['rail yard', 5, -1], ['greenmarket', -2, 2], ['museum', -2, -5], ['bowery', 1, 2], ['canal', -1, 2], ['brownstone', -2, 0], ['times sq', 2, -3],
+  ['auto row', 4, -4], ['construction', 4, -1], ['rail yard', 5, -1], ['greenmarket', -2, 2], ['museum', -2, -5], ['bowery', 1, 2], ['canal', -1, 2], ['brownstone', -2, 0], ['times sq', 2, -3], ['flea market', 3, -1], ['salvage yard', 5, -1],
   ['pier shed', 6, 0], ['pier aircraft', 6, 1], ['pier marina', 6, -1], ['carrier', 7, -1], ['airport stands', -3, -2], ['airport hangar', -4, -3], ['airport ramp', -3, -1],
 ];
-const SPECIAL = process.env.QA_DISTRICTS === 'all' ? ALL : ALL.filter(([n]) => /^(park fountain|park playground|auto row|pier marina|airport stands|construction)$/.test(n));
+const SPECIAL = process.env.QA_DISTRICTS === 'all' ? ALL : ALL.filter(([n]) => /^(park fountain|park playground|auto row|pier marina|airport stands|construction|flea market|salvage yard)$/.test(n));
 
 /** a slot's footprint rect (its w along the slot's x, d along z, turned by rot) */
 function foot(s: SlotSpec, shrink = 0.7): Rect {
