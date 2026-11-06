@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mat } from '../build';
 import { surface, pbr } from '../pbr';
+import { wallpaperTex } from '../textures';
 import { subwayTex, hexTex, checkerTex, dropCeilingTex, carpetTileTex, spinesTex, leafTex } from './tex';
 
 /** Interior materials. Tiled ones expect world-metre UVs (see Kit). */
@@ -60,10 +61,12 @@ export const M = {
   pine: (color = '#ffffff') => surface('pine', [1, 1], { color, roughness: 0.6 }),
   marble: (color = '#ffffff') => surface('marble', [1, 1], { color, roughness: 0.25 }),
   fabric: (color: string) => surface('fabric', [1, 1], { color, roughness: 0.95 }),
+  drape: (color: string) => memo(`drape${color}`, () => new THREE.MeshStandardMaterial({ color, roughness: 0.92, side: THREE.DoubleSide })),
   velvet: (color: string) => surface('velvet', [1, 1], { color, roughness: 0.85 }),
   leather: (color: string) => surface('leather', [1, 1], { color, roughness: 0.55 }),
   carpet: (color: string) => surface('floor_carpet', [1, 1], { color, roughness: 1 }),
   painted: (color: string) => mat(color, { rough: 0.45 }),
+  wallpaper: (seed: number, color: string) => tiled(`wp${seed % 4}${color}`, wallpaperTex(color, seed % 4), 0.53, { rough: 0.85 }),
   matte: (color: string) => mat(color, { rough: 0.85 }),
   brass: () => mat('#b8925a', { metal: 1, rough: 0.32 }),
   chrome: () => mat('#dfe2e5', { metal: 1, rough: 0.12 }),

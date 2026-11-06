@@ -45,12 +45,22 @@ export function sofa(k: Kit, r: Rng, w: number, fabric: THREE.Material, legs: TH
     k.boxM(fabric, cw - 0.03, 0.42, 0.14, 0, 0.2, 0, new THREE.Euler(-0.16, 0, 0));
     k.pop();
   }
-  // throw pillows at the arms
+  // throw pillows at the arms, two deep on long sofas
   for (const sx of [-1, 1]) {
-    if (!r.chance(0.8)) continue;
+    if (!r.chance(0.9)) continue;
+    const two = w > 2.0 && r.chance(0.7);
     k.push(sx * (w / 2 - arm - 0.24), seatH + 0.02, -d / 2 + 0.38, sx * -0.25);
-    k.boxM(r.pick(accent), 0.42, 0.4, 0.12, 0, 0.2, 0, new THREE.Euler(-0.3, 0, sx * 0.08));
+    k.boxM(r.pick(accent), 0.46, 0.44, 0.13, 0, 0.21, -0.02, new THREE.Euler(-0.3, 0, sx * 0.08));
+    if (two) k.boxM(r.pick(accent), 0.36, 0.34, 0.11, sx * -0.12, 0.17, 0.09, new THREE.Euler(-0.25, 0, sx * -0.1));
     k.pop();
+  }
+  // a throw folded over one arm
+  if (r.chance(0.6)) {
+    const sx = r.chance(0.5) ? -1 : 1;
+    const t = r.pick(accent);
+    k.box(t, arm + 0.05, 0.025, 0.55, sx * (w / 2 - arm / 2), 0.65, 0.08);
+    k.box(t, 0.025, 0.4, 0.55, sx * (w / 2 + 0.012), 0.27, 0.08);
+    k.box(t, 0.025, 0.25, 0.55, sx * (w / 2 - arm - 0.012), 0.42, 0.08);
   }
   return { w, d, h: 0.85, tops: [] };
 }

@@ -168,6 +168,10 @@ export class InteriorLevel implements Level {
   private style: string;
   private night: boolean;
   private paint = new Map<Room, THREE.Material>();
+  private roomFabric = new Map<Room, THREE.Material>();
+  private curtainRooms = new Set<Room>();
+  /** wall panel mouldings in pre-war rooms */
+  private panels: 'tall' | 'wainscot' | 'none' = 'none';
   private pal: { wood: THREE.Material; dark: THREE.Material; fabric: THREE.Material; accent: THREE.Material[]; metal: THREE.Material; door: THREE.Material; cab: THREE.Material; counter: THREE.Material };
 
   constructor(private desc: Extract<LevelDesc, { kind: 'interior' }>) {
@@ -320,7 +324,14 @@ export class InteriorLevel implements Level {
     // paint per room
     const cols = WALL_COLS[style] ?? WALL_COLS.house;
     const base = r.pick(cols);
-    for (const rm of leaves) this.paint.set(rm, M.paint(r.chance(0.6) ? base : r.pick(cols)));
+    this.panels = style === 'house' ? (r.chance(0.6) ? 'tall' : 'wainscot') : style === 'apartment' ? r.pick(['tall', 'wainscot', 'none', 'tall'] as const) : 'none';
+    for (const rm of leaves) {
+      // brownstones: patterned wallpaper in some bedrooms, dining rooms and studies
+      if (style === 'house' && ['bedroom', 'dining', 'study'].includes(rm.type) && r.chance(0.6)) this.paint.set(rm, M.wallpaper(r.int(0, 99), r.pick(['#e8dcc8', '#d9e0d4', '#e6d3c3', '#c9d2c6', '#2f3d4a', '#5a3a3a'])));
+      else this.paint.set(rm, M.paint(r.chance(0.6) ? base : r.pick(cols)));
+      this.roomFabric.set(rm, M.drape(r.pick(['#ece6da', '#e4dccb', '#d9d4c8', '#b9c2c4', '#8a96a3', '#c9b79c', '#6e7f6a', '#7a4a42'])));
+      if (r.chance(0.55)) this.curtainRooms.add(rm);
+    }
 
     // which room gets the stairs up
     const canGoUp = this.desc.floor < this.desc.floors - 1;
@@ -530,6 +541,9 @@ export class InteriorLevel implements Level {
       if (this.style === 'house') along(sd.e0, sd.e1, H - 0.48, 0.035, 0.02, trim); // picture rail
     }
 
+    // panel mouldings on the stretches of wall between openings (pre-war living, dining, bedrooms)
+    if (this.panels !== 'none' && ['living', 'dining', 'bedroom', 'study'].includes(rm.type)) this.wallPanels(sd, opens, along, trim);
+
     // openings: casings, jambs, windows
     for (const o of opens) {
       const hw = o.w / 2;
@@ -581,6 +595,71 @@ export class InteriorLevel implements Level {
       put(frame, t - 0.025, t + 0.025, 0, H, 0.06);
     }
     void m;
+  }
+
+  private wallPanels(sd: Side, opens: Opening[], along: (s0: number, s1: number, y: number, h: number, depth: number, mt: THREE.Material) => void, trim: THREE.Material) {
+    const H = this.H;
+    const tall = this.panels === 'tall';
+    const y0 = tall ? 0.42 : 0.32, y1 = tall ? H - 0.5 : 0.78;
+    const bar = 0.035, dep = 0.016;
+    let a = sd.e0;
+    const stretches: [number, number][] = [];
+    for (const o of [...opens].sort((p, q) => p.t - q.t)) {
+      stretches.push([a, o.t - o.w / 2 - 0.12]);
+      a = o.t + o.w / 2 + 0.12;
+    }
+    stretches.push([a, sd.e1]);
+    for (const [s0, s1] of stretches) {
+      if (!tall) along(s0 - 0.03, s1 + 0.03, 0.88, 0.05, 0.025, trim); // chair rail
+      const L = s1 - s0 - 0.24;
+      if (L < 0.45) continue;
+      const n = Math.max(1, Math.round(L / (tall ? 1.1 : 0.9)));
+      const pw = L / n;
+      for (let i = 0; i < n; i++) {
+        const p0 = s0 + 0.12 + pw * i + 0.06, p1 = p0 + pw - 0.12;
+        along(p0, p1, y0, bar, dep, trim);
+        along(p0, p1, y1 - bar, bar, dep, trim);
+        along(p0, p0 + bar, y0, y1 - y0, dep, trim);
+        along(p1 - bar, p1, y0, y1 - y0, dep, trim);
+      }
+    }
+  }
+
+  /** curtains or a roman shade for a window */
+  private treatment(sd: Side, o: Opening) {
+    const k = this.kit;
+    const r = this.rng;
+    const t = sd.room.type;
+    if (this.style === 'office' || t === 'bathroom') return;
+    const fabric = this.roomFabric.get(sd.room) ?? M.drape('#e9e2d4');
+    const h = o.y1 - o.y0;
+    const curtains = ['living', 'bedroom', 'dining', 'study'].includes(t) && this.curtainRooms.has(sd.room);
+    const rot = this.alongRot(sd);
+    if (curtains) {
+      const rodY = Math.min(this.H - 0.2, o.y1 + 0.25);
+      const [rx, rz] = this.at(sd, o.t, 0.1);
+      k.at(rx, 0, rz, rot, () => {
+        const dir = sd.axis === 'z' ? sd.inward : -sd.inward;
+        k.rod(M.brass(), 0.014, o.w + 1.0, 0, rodY, 0, 'x', 8);
+        for (const sx of [-1, 1]) k.sphere(M.brass(), 0.03, sx * (o.w / 2 + 0.5), rodY, 0);
+        for (const sx of [-1, 1]) {
+          const geo = curtainGeo(0.42, rodY - 0.02);
+          const m = new THREE.Matrix4().makeTranslation(sx * (o.w / 2 + 0.24), (rodY - 0.02) / 2, dir * 0.02);
+          k.add(geo, fabric, m, 'keep');
+        }
+      });
+      sd.used.push({ a: o.t - o.w / 2 - 0.5, b: o.t + o.w / 2 + 0.5, h: 1.0 });
+    } else {
+      // roman shade pulled part way down, inside the casing
+      const drop = h * r.range(0.18, 0.45);
+      const [x, z] = this.at(sd, o.t, 0.03);
+      k.at(x, 0, z, rot, () => {
+        const dir = sd.axis === 'z' ? sd.inward : -sd.inward;
+        const folds = Math.max(2, Math.round(drop / 0.12));
+        for (let i = 0; i < folds; i++) k.box(fabric, o.w - 0.04, drop / folds - 0.004, 0.03 + (i === folds - 1 ? 0.015 : 0), 0, o.y1 - (drop * (i + 1)) / folds, dir * 0.01);
+        k.box(M.matte('#e8e2d6'), o.w - 0.04, 0.03, 0.035, 0, o.y1 - drop - 0.03, dir * 0.015);
+      });
+    }
   }
 
   private window(sd: Side, o: Opening, thick: number, mid: number) {
@@ -646,6 +725,7 @@ export class InteriorLevel implements Level {
       const fp = footprint(len + 0.2, 0.24, this.rotOf(sd), rx, rz);
       this.cols.push(fp);
     }
+    this.treatment(sd, o);
     // a plant or a cup on some sills
     if (!office && r.chance(0.25)) {
       const [px, pz] = this.at(sd, o.t + r.range(-hw * 0.5, hw * 0.5), 0.0);
@@ -841,7 +921,7 @@ export class InteriorLevel implements Level {
   }
 
   /** place a piece with its back to a side; returns the frame or null */
-  private onWall(c: RoomCtx, sd: Side, w: number, d: number, h: number, prefer: number | 'center' | 'any' = 'any', gap = 0.02, pad = 0.04): Frame | null {
+  private onWall(c: RoomCtx, sd: Side, w: number, d: number, h: number, prefer: number | 'center' | 'any' = 'any', gap = 0.02, pad = 0.04, maxShift = Infinity): Frame | null {
     const lo = sd.e0 + w / 2 + 0.02, hi = sd.e1 - w / 2 - 0.02;
     if (hi < lo) return null;
     const want = prefer === 'center' ? (sd.e0 + sd.e1) / 2 : prefer === 'any' ? c.r.range(lo, hi) : prefer;
@@ -849,6 +929,7 @@ export class InteriorLevel implements Level {
     for (let i = 0; i <= 24; i++) cands.push(lo + ((hi - lo) * i) / 24);
     cands.sort((p, q) => Math.abs(p - want) - Math.abs(q - want));
     for (const t of cands) {
+      if (Math.abs(t - want) > maxShift) break;
       if (sd.used.some((u) => u.h > 0 && t + w / 2 > u.a && t - w / 2 < u.b && (u.h > 8 || h > 0))) continue;
       const [x, z] = this.at(sd, t, d / 2 + gap);
       const rot = this.rotOf(sd);
@@ -994,13 +1075,14 @@ export class InteriorLevel implements Level {
     // sofa facing the focal wall: against the opposite wall if the room is shallow enough, else floating
     const opp = c.sides.find((s) => s.axis === focal.axis && s.inward === -focal.inward)!;
     const across = Math.abs(opp.face - focal.face);
-    const sofaId = r.chance(0.6) ? pickLib('sofa', r) : null;
-    const sofaW = sofaId ? LIB[sofaId][0] : THREE.MathUtils.clamp(Math.min(focal.axis === 'z' ? w : d) * 0.55, 1.7, 2.3);
+    const span = focal.axis === 'z' ? w : d;
+    const sofaId = span < 4.6 && r.chance(0.5) ? pickLib('sofa', r) : null;
+    const sofaW = sofaId ? LIB[sofaId][0] : THREE.MathUtils.clamp(span * 0.5, 2.0, 2.5);
     const sofaD = sofaId ? LIB[sofaId][2] : 0.92;
     const tf = (ff as Frame & { t: number }).t ?? (focal.e0 + focal.e1) / 2;
     let sf: Frame | null = null;
     const dist = Math.min(across - sofaD, 3.6);
-    if (across < 4.8) sf = this.onWall(c, opp, sofaW, sofaD, 0.85, tf, 0.03);
+    if (across < 4.8) sf = this.onWall(c, opp, sofaW, sofaD, 0.85, tf, 0.03, 0.04, 0.25);
     if (!sf) {
       const [x, z] = this.at(focal, tf, dist + sofaD / 2);
       sf = this.freeAt(c, sofaW, sofaD, x, z, this.rotOf(focal) + Math.PI);
@@ -1012,10 +1094,12 @@ export class InteriorLevel implements Level {
     const ctDepth = sofaDepth - 0.45 - 0.3;
     const mid = (0.75 + sofaDepth) / 2;
     // rug under the front legs of the group
-    const rugW = Math.min(sofaW + 1.2, (focal.axis === 'z' ? w : d) - 0.6);
-    const rugD = Math.min(sofaDepth - 0.5, 3.0);
+    const rugW = Math.min(sofaW + 1.6, span - 0.5);
+    const rugD = Math.min(sofaDepth - 0.3, 3.2);
     if (rugD > 1.4) {
-      const [x, z] = this.at(focal, tf, 0.5 + rugD / 2 + Math.max(0, sofaDepth - 0.4 - rugD - 0.5));
+      const [x, z] = this.at(focal, tf, 0.5 + rugD / 2 + Math.max(0, sofaDepth - 0.2 - rugD - 0.5));
+      // layered: a big jute rug under the patterned one
+      if (r.chance(0.6)) k.flat(M.carpet('#b9a684'), Math.min(rugW + 0.5, span - 0.3), rugD + 0.45, x, 0.005, z, 'world', [1, 1], this.rotOf(focal));
       k.flat(M.mapped(`rug${this.desc.seed % 9}`, rugTex(hashN(this.desc.seed, room2n(c.room)) % 40)), rugW, rugD, x, 0.008, z, 'keep', [1, 1], this.rotOf(focal) + (focal.axis === 'z' ? 0 : 0));
     }
     // coffee table
@@ -1072,6 +1156,8 @@ export class InteriorLevel implements Level {
         break;
       }
     }
+    this.consoleGroup(c);
+    this.accentChair(c);
     this.corners(c, 'plant', r.int(1, 2));
     // a dining table in the other half of a long living room
     if (Math.max(w, d) > 6.5) this.diningGroup(c, 4);
@@ -1464,6 +1550,45 @@ export class InteriorLevel implements Level {
     }
   }
 
+  /** a console or chest against a free wall: lamp, books, objects, a painting above */
+  private consoleGroup(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    const id = r.chance(0.5) ? pickLib('dresser', r, (s) => s[1] < 1.0) : null;
+    const s = id ? LIB[id] : [1.3, 0.86, 0.45];
+    for (const cand of this.sidesByFreeLength(c, s[0] + 0.3)) {
+      const f = this.onWall(c, cand.sd, s[0], s[2], s[1], midFree(cand.sd), 0.02) as (Frame & { t: number }) | null;
+      if (!f) continue;
+      const p = this.libPiece(f, id, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
+      const top = id ? { x: 0, z: 0, y: s[1], w: s[0] - 0.12, d: s[2] - 0.12 } : p.tops[0];
+      this.kit.at(f.x, 0, f.z, f.rot, () => {
+        F.tableLamp(k, r, -top.w / 2 + 0.18, top.y, 0);
+        F.bookStack(k, r, 0.05, top.y, 0.02);
+      });
+      this.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.25));
+      this.libTop(r, f, { ...top, x: top.w / 4, w: top.w / 2 }, 'table', 1, 0.5);
+      this.painting(r, cand.sd, f.t, top.y + 1.0, Math.min(1.1, s[0] * 0.8));
+      return;
+    }
+  }
+
+  /** a side chair against a wall with a small table and a plant or lamp */
+  private accentChair(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    for (const cand of this.sidesByFreeLength(c, 1.4)) {
+      const f = this.onWall(c, cand.sd, 1.25, 0.62, 1.0, 'any', 0.04) as (Frame & { t: number }) | null;
+      if (!f) continue;
+      const id = r.chance(0.6) ? pickLib('diningchair', r) : null;
+      const cx = -0.3;
+      const c0 = Math.cos(f.rot), s0 = Math.sin(f.rot);
+      this.libPiece({ x: f.x + cx * c0, z: f.z - cx * s0, rot: f.rot + r.range(-0.2, 0.2) }, id, (kk) => F.diningChair(kk, this.pal.wood, r.pick(this.pal.accent)));
+      // the side table sits at +0.35 along
+      const tx = f.x + 0.35 * c0, tz = f.z - 0.35 * s0;
+      this.kit.at(tx, 0, tz, f.rot, () => F.sideTable(k, this.pal.wood, 0.5));
+      this.libTop(r, { x: tx, z: tz, rot: f.rot }, { x: 0, z: 0, y: 0.5, w: 0.36, d: 0.36 }, r.chance(0.5) ? 'smallplant' : 'table', 1, 0.45);
+      return;
+    }
+  }
+
   /** fill some corners with a plant, a floor lamp, an armchair or a container */
   private corners(c: RoomCtx, what: 'plant' | 'floorlamp' | 'armchair' | 'container', n: number) {
     const r = c.r, k = this.kit;
@@ -1751,4 +1876,18 @@ function freeRun(sd: Side) {
 function midFree(sd: Side) {
   const [a, b] = longestFree(sd);
   return (a + b) / 2;
+}
+
+/** a curtain panel: a vertical sheet with soft folds, centred on x, base at y = -h/2 */
+const curtainCache = new Map<string, THREE.BufferGeometry>();
+function curtainGeo(w: number, h: number) {
+  const key = `${w.toFixed(2)}|${h.toFixed(2)}`;
+  let g = curtainCache.get(key);
+  if (g) return g;
+  g = new THREE.PlaneGeometry(w, h, 24, 1);
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin((p.getX(i) / w) * Math.PI * 7) * 0.035);
+  g.computeVertexNormals();
+  curtainCache.set(key, g);
+  return g;
 }
