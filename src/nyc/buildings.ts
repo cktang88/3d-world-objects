@@ -40,13 +40,15 @@ export interface BCtx {
   win: WindowBatch;
   shop: ShopGlass;
   text: TextBatch;
+  /** style of the building being generated (storefronts read it) */
+  style: BuildingStyle;
   /** facade groups inside stat (their unit boxes are instanced by finishBuildings) */
   faceGroups: THREE.Object3D[];
 }
 
 export function makeCtx(rng: Rng, group: THREE.Group, stat: THREE.Group, cx: number, cz: number, seed: number): BCtx {
   const fine = new THREE.Group();
-  return { rng, group, stat, fine, colliders: [], portals: [], cx, cz, seed, doors: [], win: new WindowBatch(), shop: new ShopGlass(), text: new TextBatch(), faceGroups: [] };
+  return { rng, group, stat, fine, colliders: [], portals: [], cx, cz, seed, doors: [], win: new WindowBatch(), shop: new ShopGlass(), text: new TextBatch(), faceGroups: [], style: {} };
 }
 
 /** bake the block's buildings and add the instanced windows and shop glass */
@@ -700,10 +702,37 @@ const TRIM_STONE = ['#d9d1bf', '#cfc6b2', '#e4dccb', '#bfb5a0'];
 const PAINT = ['#ece6da', '#1c1c1c', '#2f3b2f', '#6b3a2a', '#d8d0c0', '#40352c'];
 const CORNICE_PAINT = ['#d8d2c4', '#8a8a84', '#3a3a38', '#b8ad94', '#5a6a5c', '#e8e2d2', '#7a5a44'];
 
-export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: number, store: boolean, cornerSides: [boolean, boolean]) {
+/**
+ * Style knobs a district (or anything else) can pass to building(); every field is optional and
+ * falls back to the type's defaults.
+ */
+export interface BuildingStyle {
+  /** facade colour (brick/stone/paint), tinting the photo texture */
+  wall?: string;
+  /** facade material family */
+  material?: 'brick' | 'brownstone' | 'limestone' | 'castiron' | 'panel' | 'glass';
+  /** window lintels/sills */
+  trim?: TrimKind;
+  /** cornice: bracketed (19th c.), modillioned (pre-war), Art Deco crown, or a plain parapet */
+  cornice?: 'bracket' | 'modillion' | 'deco' | 'parapet';
+  cornicePaint?: string;
+  /** chances 0..1 */
+  fireEscape?: number;
+  waterTower?: number;
+  acUnits?: number;
+  /** storefronts: which SHOPS types to draw from, and how they dress */
+  shops?: string[];
+  gate?: number;
+  awning?: number;
+  signs?: ('board' | 'lightbox' | 'letters')[];
+}
+
+export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: number, store: boolean, cornerSides: [boolean, boolean], opts: BuildingStyle = {}) {
   const { rng, stat, fine, colliders } = ctx;
-  const style: FacadeStyle = { brownstone: 'brownstone', tenement: 'brick', prewar: 'prewar', midrise: rng.pick(['brick', 'brick', 'panel'] as const), tower: rng.pick(['glass', 'glass', 'panel'] as const), castiron: 'castiron' }[type] as FacadeStyle;
-  const wall = {
+  const matStyle: Record<NonNullable<BuildingStyle['material']>, FacadeStyle> = { brick: 'brick', brownstone: 'brownstone', limestone: 'prewar', castiron: 'castiron', panel: 'panel', glass: 'glass' };
+  const style: FacadeStyle = opts.material ? matStyle[opts.material] : ({ brownstone: 'brownstone', tenement: 'brick', prewar: 'prewar', midrise: rng.pick(['brick', 'brick', 'panel'] as const), tower: rng.pick(['glass', 'glass', 'panel'] as const), castiron: 'castiron' }[type] as FacadeStyle);
+  ctx.style = opts;
+  let wall = {
     brownstone: rng.pick(['#6e4632', '#7a5038', '#5e3c2c', '#83604a']),
     tenement: rng.pick(['#8c3b2a', '#9a5a3c', '#a3683f', '#7a3a2e', '#b58a5a', '#6b4a3a', '#c9b08a']),
     prewar: rng.pick(['#b89d78', '#a8896a', '#9a5a3c', '#c9a982', '#8c4a34']),
@@ -711,6 +740,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
     tower: rng.pick(['#7b8d9e', '#6d7f8c', '#8fa1ad', '#5b6670']),
     castiron: rng.pick(['#e2ddd0', '#c9cec9', '#d8ccb0', '#bfbfb8', '#a9b2a8']),
   }[type];
+  if (opts.wall) wall = opts.wall;
   const fm = facadeMat(style, rng.int(0, 2));
   const tint = FACADE_PBR[style] ? softTint(wall, type === 'castiron' ? 0.7 : type === 'brownstone' ? 0.8 : 0.35) : wall;
   const plain = mat(shade(wall, 0.82), { rough: 0.95 });
@@ -741,10 +771,10 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   const trimC = new THREE.Color(type === 'brownstone' ? shade(wall, 1.05) : type === 'castiron' ? shade(tint, 0.95) : rng.pick(TRIM_STONE));
   const revealC = new THREE.Color(type === 'castiron' ? shade(tint, 0.6) : shade(wall, 0.75));
   const sashC = new THREE.Color(rng.pick(type === 'brownstone' ? ['#2a1d16', '#e8e2d6', '#1d2a22', '#3a2a20'] : type === 'castiron' ? ['#1c1c1c', '#3a4a3a', '#e8e4da', '#5a3a2a'] : PAINT));
-  const trim: TrimKind = type === 'brownstone' ? 'hood' : type === 'castiron' ? 'arch' : type === 'tenement' ? rng.pick(['stone', 'stone', 'arch', 'hood', 'flat'] as const) : type === 'prewar' ? rng.pick(['stone', 'flat', 'stone'] as const) : rng.pick(['flat', 'none'] as const);
+  const trim: TrimKind = opts.trim ?? (type === 'brownstone' ? 'hood' : type === 'castiron' ? 'arch' : type === 'tenement' ? rng.pick(['stone', 'stone', 'arch', 'hood', 'flat'] as const) : type === 'prewar' ? rng.pick(['stone', 'flat', 'stone'] as const) : rng.pick(['flat', 'none'] as const));
   const sash: SashKind = type === 'castiron' ? 'case' : type === 'midrise' && style === 'panel' ? 'case' : 'dh';
   const kind = type === 'castiron' ? 'loft' : type === 'midrise' && style === 'panel' ? 'office' : 'apt';
-  const acRate = type === 'tenement' ? 0.22 : type === 'prewar' ? 0.15 : type === 'midrise' ? 0.12 : type === 'brownstone' ? 0.08 : 0.04;
+  const acRate = opts.acUnits ?? (type === 'tenement' ? 0.22 : type === 'prewar' ? 0.15 : type === 'midrise' ? 0.12 : type === 'brownstone' ? 0.08 : 0.04);
   const muntins = type === 'brownstone' && rng.chance(0.3) ? 1 : type === 'tenement' && rng.chance(0.15) ? 1 : 0;
   const winOpts = { trim, sash, trimColor: trimC, revealColor: revealC, sashColor: sashC, kind: kind as 'apt' | 'office' | 'loft', ac: acRate, muntins };
 
@@ -921,8 +951,8 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), (yy / 0.6) % 2 < 1 ? 0.7 : 0.45, 0.3, 0.05, s2 * (L / 2 - 0.3), yy, 0.025, '#e3dccb', false);
     }
     // ---- cornice
-    const cKind: CorniceKind = type === 'midrise' ? 'parapet' : type === 'prewar' ? (rng.chance(0.65) ? 'modillion' : 'deco') : 'bracket';
-    const cColor = type === 'brownstone' ? rng.pick(['#3a2a20', '#2a2420', '#5a4a3a', shade(wall, 0.85)]) : type === 'prewar' ? '#d9d1bf' : type === 'castiron' ? shade(tint, 1.0) : rng.pick(CORNICE_PAINT);
+    const cKind: CorniceKind = opts.cornice ?? (type === 'midrise' ? 'parapet' : type === 'prewar' ? (rng.chance(0.65) ? 'modillion' : 'deco') : 'bracket');
+    const cColor = opts.cornicePaint ?? (type === 'brownstone' ? rng.pick(['#3a2a20', '#2a2420', '#5a4a3a', shade(wall, 0.85)]) : type === 'prewar' ? '#d9d1bf' : type === 'castiron' ? shade(tint, 1.0) : rng.pick(CORNICE_PAINT));
     const ex: [boolean, boolean] = [false, false];
     cornice(F, cKind, h, cColor, type === 'castiron' ? 1.3 : type === 'prewar' ? 1.15 : type === 'brownstone' ? 0.85 : 1, ex);
     // tenement name plate: a raised pediment over the cornice with the year (or name) in the frieze
@@ -936,7 +966,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       ctx.text.add(F.m, label, 0, h - (type === 'castiron' ? 1.3 : 1.0) * 0.72, 0.075, 0.3, Math.min(L * 0.5, 3.5), shade(cColor, 0.55), 1, 'paint');
     }
     // ---- fire escape on the front
-    if (isFront && (type === 'tenement' || type === 'castiron' || (type === 'midrise' && floors <= 8)) && levels.length >= 2 && rng.chance(type === 'castiron' ? 0.5 : 0.85)) {
+    if (isFront && (type === 'tenement' || type === 'castiron' || (type === 'midrise' && floors <= 8)) && levels.length >= 2 && rng.chance(opts.fireEscape ?? (type === 'castiron' ? 0.5 : 0.85))) {
       const fw = n >= 4 ? (centres[1] - centres[0]) * 2 + 0.6 : Math.min(L - 0.6, 3.6);
       const fu = n >= 4 ? (rng.chance(0.5) ? (centres[0] + centres[1]) / 2 : (centres[n - 2] + centres[n - 1]) / 2) : 0;
       fireEscape(F, fu, Math.min(fw, L - 0.4), levels.map((l) => l - 0.02), h, rng.pick(['#1c1d1f', '#1c1d1f', '#2a3a2e', '#3a2420']));
@@ -950,7 +980,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   const along = alongX ? 'x' : 'z';
   if (type === 'brownstone' || type === 'tenement') chimneys(stat, fine, r, roofY, rng, along === 'x' ? 'x' : 'z');
   if (type !== 'brownstone' && rng.chance(0.6)) bulkhead(stat, (r.minX + r.maxX) / 2 + rng.range(-1, 1), roofY, (r.minZ + r.maxZ) / 2, fm, tint, ROT[front] + Math.PI);
-  if ((type === 'tenement' || type === 'prewar' || type === 'midrise' || type === 'castiron') && floors >= 5 && rng.chance(type === 'prewar' ? 0.65 : 0.4)) {
+  if ((type === 'tenement' || type === 'prewar' || type === 'midrise' || type === 'castiron') && floors >= 5 && rng.chance(opts.waterTower ?? (type === 'prewar' ? 0.65 : 0.4))) {
     waterTower(stat, fine, (r.minX + r.maxX) / 2 + rng.range(-1, 1), roofY, (r.minZ + r.maxZ) / 2 + rng.range(-2, 2), rng);
   }
   rooftopClutter(stat, fine, r, roofY, rng, type === 'brownstone' ? rng.int(0, 1) : rng.int(1, 3));

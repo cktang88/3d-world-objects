@@ -398,7 +398,9 @@ function shade(hex: string, f: number) {
  */
 export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: number, addr: string, btype: BType) {
   const { rng } = ctx;
-  const shopIdx = rng.int(0, SHOPS.length - 1);
+  const st = ctx.style;
+  const pool = st.shops?.length ? SHOPS.map((x, i) => (st.shops!.includes(x.type) ? i : -1)).filter((i) => i >= 0) : [];
+  const shopIdx = pool.length ? rng.pick(pool) : rng.int(0, SHOPS.length - 1);
   const shop = SHOPS[shopIdx];
   const name = `${rng.chance(0.5) ? rng.pick(PREFIX) + ' ' : ''}${rng.pick(shop.names)}`;
   const color = rng.pick(shop.colors);
@@ -409,11 +411,11 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
   const alu = mat('#9ea3a8', { rough: 0.35, metal: 0.85 });
   const T = ctx.text;
   const font = rng.int(0, 3);
-  const gate = rng.chance(btype === 'castiron' ? 0.25 : 0.45);
+  const gate = rng.chance(st.gate ?? (btype === 'castiron' ? 0.25 : 0.45));
   const closed = gate && rng.chance(0.3);
   const halfShut = gate && !closed && rng.chance(0.15);
-  const signKind = rng.pick(['board', 'board', 'lightbox', 'letters'] as const);
-  const awningKind = rng.chance(0.5) ? rng.pick(['slope', 'slope', 'box'] as const) : 'none';
+  const signKind = rng.pick(st.signs?.length ? st.signs : (['board', 'board', 'lightbox', 'letters'] as const));
+  const awningKind = rng.chance(st.awning ?? 0.5) ? rng.pick(['slope', 'slope', 'box'] as const) : 'none';
 
   // ---- pilasters framing the shop
   for (const s of [-1, 1]) {
