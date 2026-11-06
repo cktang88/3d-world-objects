@@ -358,6 +358,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
   };
   depth.customProgramCacheKey = () => 'ped-body-depth-v1';
   m.userData.depth = depth;
+  m.userData.u = u; // the paint uniforms (QA compares them with the far-crowd instance colours)
   return m;
 }
 

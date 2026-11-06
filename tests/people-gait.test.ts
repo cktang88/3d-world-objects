@@ -161,3 +161,43 @@ test('pushing a stroller: both hands are on its handlebar (two-bone IK), within 
   expect(checked > 0, 'no stroller found on the pushers');
   expect(!bad.length, bad.slice(0, 6).join('\n'));
 });
+
+test('near/far hand-off: the far proxy is as tall as the near body and painted the same, per person', async () => {
+  // cheap: no FarCrowd. The far crowd bakes the person's own 2.5k-tri Body_LOD through the same
+  // clips and draws it at pd.pos with scale scaleH, so the LOD posed by the person's skeleton, in
+  // model space x scaleH, is what the far instance shows; the near body is the full mesh as drawn
+  const ps = await people(40, 31);
+  const bad: string[] = [];
+  const dh: number[] = [];
+  const box = new THREE.Box3(), loc = new THREE.Box3();
+  for (const [i, p] of ps.entries()) {
+    p.setActivity(i % 3 ? 'walk' : 'idle', (i * 0.13) % 1);
+    p.update(1 / 30);
+    p.root.updateMatrixWorld(true);
+    const P = p as unknown as { fullMesh: THREE.SkinnedMesh | null; lodMesh: THREE.SkinnedMesh | null; far: { top: THREE.Color; bottom: THREE.Color; shoe: THREE.Color; skin: THREE.Color } };
+    const full = P.fullMesh, lod = P.lodMesh;
+    if (!full || !lod) { bad.push(`${p.gender} #${i}: no full/LOD body`); continue; }
+    full.skeleton.update();
+    // near: the full body as drawn (world), from the root's ground
+    box.makeEmpty().expandByObject(full, true);
+    const nearTop = box.max.y - p.root.position.y;
+    // far: LOD posed by the same skeleton, back in the model's own frame, x scaleH from the ground
+    loc.makeEmpty();
+    const v = new THREE.Vector3(), inv = (p.root.children[0] as THREE.Object3D).matrixWorld.clone().invert();
+    for (let k = 0; k < lod.geometry.attributes.position.count; k++) loc.expandByPoint(lod.getVertexPosition(k, v).applyMatrix4(lod.matrixWorld).applyMatrix4(inv));
+    const farTop = loc.max.y * p.scaleH;
+    dh.push(farTop - nearTop);
+    if (Math.abs(farTop - nearTop) > 0.03) bad.push(`${p.gender} #${i}: far ${fmt(farTop)} m vs near ${fmt(nearTop)} m`);
+    const u = (full.material as THREE.Material).userData.u as Record<string, { value: THREE.Color }> | undefined;
+    if (!u) { bad.push('near body material has no paint uniforms'); continue; }
+    for (const [k, f] of [['uTop', P.far.top], ['uBottom', P.far.bottom], ['uShoe', P.far.shoe], ['uSkin', P.far.skin]] as const) {
+      const c = u[k].value;
+      const d = Math.max(Math.abs(c.r - f.r), Math.abs(c.g - f.g), Math.abs(c.b - f.b));
+      if (d > 0.02) bad.push(`${p.gender} #${i} ${k}: near #${c.getHexString()} far #${f.getHexString()}`);
+    }
+  }
+  const m = dh.reduce((s, x) => s + x, 0) / Math.max(1, dh.length);
+  console.log(`   ${dh.length} people: far - near height mean ${fmt(m * 100)} cm, worst ${fmt(Math.max(...dh.map(Math.abs)) * 100)} cm`);
+  expect(dh.length > 0, 'nobody measured');
+  expect(!bad.length, bad.slice(0, 8).join('\n'));
+});
