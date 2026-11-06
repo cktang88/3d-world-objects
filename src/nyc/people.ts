@@ -24,7 +24,7 @@ import { GROUND } from './ground';
 type Gender = 'male' | 'female';
 
 /** body-space landmarks of each base mesh in its T-pose (metres, +z forward) */
-const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wristX: number; elbowX: number; ankle: number; knee: number; height: number; armY: number; armZ: number; legX: number; legZ: number }> = {
+export const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wristX: number; elbowX: number; ankle: number; knee: number; height: number; armY: number; armZ: number; legX: number; legZ: number }> = {
   male: { waist: 1.0, neck: 1.505, shoulderX: 0.2, wristX: 0.675, elbowX: 0.46, ankle: 0.115, knee: 0.54, height: 1.83, armY: 1.455, armZ: -0.065, legX: 0.114, legZ: -0.036 },
   female: { waist: 0.985, neck: 1.47, shoulderX: 0.15, wristX: 0.61, elbowX: 0.39, ankle: 0.105, knee: 0.53, height: 1.74, armY: 1.418, armZ: -0.054, legX: 0.111, legZ: -0.045 },
 };
@@ -486,22 +486,9 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
 
 // ---------------------------------------------------------------- props
 /** a backpack strap with real thickness that follows the torso: up the chest, over the
- *  trapezius and down into the top of the pack (model space; was a flat 12 mm card standing off
- *  the chest). Cached per body / side / padding. */
-const strapGeos = new Map<string, THREE.BufferGeometry>();
-function strapGeo(side: number, neck: number, sp: number, pad: number, chest: number) {
-  const k = `${side}|${neck}|${sp}|${pad}|${chest}`;
-  let g = strapGeos.get(k);
-  if (g) return g;
-  const x = side * 0.076;
-  const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(x + side * 0.02, sp + 0.0, chest - 0.01 + pad), // ends low on the chest, toward the armpit
-    new THREE.Vector3(x + side * 0.008, sp + 0.12, chest + pad),
-    new THREE.Vector3(x, neck - 0.04, chest - 0.04 + pad),
-    new THREE.Vector3(x - side * 0.005, neck, 0.0), // over the trapezius
-    new THREE.Vector3(x, neck - 0.04, -0.075 - pad),
-    new THREE.Vector3(x, sp + 0.13, -0.12 - pad), // into the pack's top
-  ]);
+ *  trapezius and down into the top of the pack, through `pts` (model space, on the drawn body) */
+function strapGeo(pts: THREE.Vector3[]) {
+  const curve = new THREE.CatmullRomCurve3(pts);
   const N = 14, hw = 0.022, ht = 0.007;
   const pos: number[] = [], idx: number[] = [];
   const t = new THREE.Vector3(), w = new THREE.Vector3(), n = new THREE.Vector3(), c = new THREE.Vector3();
@@ -518,11 +505,10 @@ function strapGeo(side: number, neck: number, sp: number, pad: number, chest: nu
       idx.push(a, b, b + 4, a, b + 4, a + 4);
     }
   for (const e of [0, N * 4]) idx.push(e, e + 1, e + 2, e, e + 2, e + 3, e, e + 2, e + 1, e, e + 3, e + 2);
-  g = new THREE.BufferGeometry();
+  const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
-  strapGeos.set(k, g);
   return g;
 }
 const propGeo = {
@@ -657,6 +643,12 @@ interface RigidPart {
   color?: string;
   /** where its texture sits in the people atlas */
   rect?: AtlasRect;
+  /** blend to a second bone below: weight on `bone` rises from 0 at blendY[0] to 1 at blendY[1]
+   *  (body-space y), the rest on bone2 (a backpack follows the whole back, not one vertebra) */
+  bone2?: string;
+  blendY?: [number, number];
+  /** set by mergeParts: [first vertex, count] in the merged geometry */
+  range?: [number, number];
 }
 /** [u0, v0, width, height] in the atlas */
 type AtlasRect = [number, number, number, number];
@@ -757,15 +749,25 @@ function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeom
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     return g;
   };
+  let start = 0;
   for (const p of parts) {
     const g = finish(floatCopy(p.geo), p.color, p.rect);
     g.applyMatrix4(p.m);
     const n = g.attributes.position.count, bi = Math.max(0, names.indexOf(p.bone));
+    const b2 = p.bone2 ? names.indexOf(p.bone2) : -1;
     const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    const py = g.attributes.position;
     for (let i = 0; i < n; i++) {
+      const w = b2 >= 0 && p.blendY ? THREE.MathUtils.smoothstep(py.getY(i), p.blendY[0], p.blendY[1]) : 1;
       si[i * 4] = bi;
-      sw[i * 4] = 1;
+      sw[i * 4] = w;
+      if (w < 1) {
+        si[i * 4 + 1] = b2;
+        sw[i * 4 + 1] = 1 - w;
+      }
     }
+    p.range = [start, n];
+    start += n;
     g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     out.push(g);
@@ -1056,10 +1058,36 @@ export class Person {
     const sp = gender === 'male' ? 1.25 : 1.22;
     if (bagRoll < 0.22) {
       const bc = r.pick(['#151517', '#22262e', '#3a3f45', '#2f3a2a', '#5a1a1c', '#1f3d5a']);
-      parts.push({ geo: propGeo.backpack, bone: 'spine_03', m: at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)), color: bc });
+      // rests on the drawn back: the shader's torso ellipse (this person's hip/chest half-depth,
+      // centred at z -0.02) plus the top's inflation; the lower half follows spine_02 so the
+      // pack does not swing off the lower back when the walk bends the spine
+      const U = bm.userData.u as Record<string, { value: THREE.Vector4 }>;
+      const py = sp - 0.04, hb = THREE.MathUtils.smoothstep(py, b.waist - 0.1, b.waist + 0.3);
+      const backZ = -0.02 - THREE.MathUtils.lerp(U.uShape2.value.y, U.uShape2.value.z, hb) - [0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle];
+      this.packPart = { geo: propGeo.backpack, bone: 'spine_03', bone2: 'spine_02', blendY: [py - 0.2, py + 0.08], m: at(0, py, backZ - 0.075 + 0.004), color: bc };
+      parts.push(this.packPart);
       this.far.props |= 1;
       this.far.bag.set(bc);
-      for (const s of [-1, 1]) parts.push({ geo: strapGeo(s, b.neck, sp, [0, 0.008, 0.028, 0.014, 0.012][o.topStyle], (gender === 'male' ? 0.128 : 0.1) + (o.build === 2 ? 0.03 : o.build === 0 ? -0.01 : 0)), bone: 'spine_03', m: new THREE.Matrix4(), color: bc });
+      // straps on the shader's torso ellipse (front and back), over the top's inflation
+      const ss = THREE.MathUtils.smoothstep, lerp = THREE.MathUtils.lerp, infl = [0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle] + 0.008;
+      const surf = (x: number, y: number, sgn: number) => {
+        const h = ss(y, b.waist - 0.1, b.waist + 0.3);
+        const rx = lerp(U.uShape.value.z, U.uShape2.value.x, h) * (1 - 0.3 * ss(y, b.neck - 0.12, b.neck + 0.04));
+        const rz = lerp(U.uShape2.value.y, U.uShape2.value.z, h) * (1 - 0.25 * ss(y, b.neck - 0.1, b.neck + 0.04));
+        return -0.02 + sgn * (rz * Math.sqrt(Math.max(0.1, 1 - (x / rx) ** 2)) + infl);
+      };
+      for (const s of [-1, 1]) {
+        const x = s * 0.076, P = (dx: number, y: number, z: number) => new THREE.Vector3(x + s * dx, y, z);
+        const pts = [
+          P(0.02, sp, surf(x + s * 0.02, sp, 1)), // ends low on the chest, toward the armpit
+          P(0.008, sp + 0.12, surf(x, sp + 0.12, 1)),
+          P(0, b.neck - 0.04, surf(x, b.neck - 0.04, 1)),
+          P(-0.005, b.neck + 0.005, -0.02), // over the trapezius
+          P(0, b.neck - 0.04, surf(x, b.neck - 0.04, -1)),
+          P(0, py + 0.17, backZ - 0.012), // into the pack's top
+        ];
+        parts.push({ geo: strapGeo(pts), bone: 'spine_03', m: new THREE.Matrix4(), color: bc });
+      }
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       parts.push({ geo: propGeo.crossbody, bone: 'pelvis', m: at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0), color: bc });
@@ -1192,6 +1220,8 @@ export class Person {
       };
     }
   }
+  /** the backpack, if any (QA reads its vertex range in the props mesh) */
+  packPart: RigidPart | null = null;
   far!: { top: THREE.Color; bottom: THREE.Color; shoe: THREE.Color; skin: THREE.Color; hair: THREE.Color; style: THREE.Vector4; coat: number; props: number; bag: THREE.Color };
   umbrellaColor = new THREE.Color('#111113');
   /** the far crowd's animation state: clip 0 walk / 1 idle, phase 0..1 */

@@ -69,8 +69,9 @@ const sstep = (e0: number, e1: number, x: number) => {
 /** the near shader's bind-space slimming, at average settings (see bodyMaterial in people.ts) */
 /** the near shader's reshaping (tubes for limbs, an ellipse for the torso; see bodyMaterial in
  *  people.ts) at average proportions; updates the position and normal, returns clothing bulk */
-function slim(p: THREE.Vector3, n: THREE.Vector3, b: FarBody, female: boolean) {
-  const [armR, thighR, hipRx, chestRx, hipRz, chestRz] = female ? [0.044, 0.086, 0.178, 0.148, 0.112, 0.122] : [0.05, 0.083, 0.165, 0.168, 0.108, 0.118];
+export function slim(p: THREE.Vector3, n: THREE.Vector3, b: FarBody, female: boolean, sh?: number[]) {
+  // sh: one person's proportions (QA measures the drawn back with them); default average
+  const [armR, thighR, hipRx, chestRx, hipRz, chestRz] = sh ?? (female ? [0.044, 0.086, 0.178, 0.148, 0.112, 0.122] : [0.05, 0.083, 0.165, 0.168, 0.108, 0.118]);
   const ax = Math.abs(p.x), waist = b.waist, neck = b.neck;
   const lerp = THREE.MathUtils.lerp;
   const wa = sstep(b.shoulderX - 0.03, b.shoulderX + 0.06, ax) * sstep(waist + 0.15, waist + 0.25, p.y);

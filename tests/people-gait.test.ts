@@ -201,3 +201,74 @@ test('near/far hand-off: the far proxy is as tall as the near body and painted t
   expect(dh.length > 0, 'nobody measured');
   expect(!bad.length, bad.slice(0, 8).join('\n'));
 });
+
+test('a backpack stays on the back through the walk cycle (top and bottom of its back panel within 3 cm of the back)', async () => {
+  const { BODY, loadPeopleAssets } = await import('../src/nyc/people');
+  const { slim } = await import('../src/nyc/peopleFar');
+  const assets = await loadPeopleAssets();
+  const all = await people(160, 41);
+  const ps = all.filter((p) => p.packPart).slice(0, 8);
+  expect(ps.length > 0, 'nobody with a backpack');
+  const bad: string[] = [];
+  const gaps: number[] = [];
+  const v = new THREE.Vector3(), n = new THREE.Vector3(), c = new THREE.Vector3();
+  for (const p of ps) {
+    const P = p as unknown as { fullMesh: THREE.SkinnedMesh; propsMesh: THREE.SkinnedMesh; far: { style: THREE.Vector4 } };
+    const full = P.fullMesh, props = P.propsMesh, [s0, cnt] = p.packPart!.range!;
+    const female = p.gender === 'female';
+    // the back as drawn: the shader's torso reshaping (this person's proportions) + the top's
+    // inflation, applied to the bind positions, then skinned by the same skeleton
+    const U = (full.material as THREE.Material).userData.u as Record<string, { value: THREE.Vector4 }>;
+    const sh = [U.uShape.value.x, U.uShape.value.y, U.uShape.value.z, U.uShape2.value.x, U.uShape2.value.y, U.uShape2.value.z];
+    const infl = [0.006, 0.014, 0.034, 0.02, 0.018][P.far.style.x];
+    const G = assets.body[p.gender].geo, Gi = G.clone().invert(), nG = new THREE.Matrix3().getNormalMatrix(G);
+    const g2 = full.geometry.clone();
+    const pos = g2.attributes.position as THREE.BufferAttribute, nrm = g2.attributes.normal as THREE.BufferAttribute;
+    const back: number[] = [];
+    for (let k = 0; k < pos.count; k++) {
+      v.fromBufferAttribute(pos, k).applyMatrix4(G);
+      if (Math.abs(v.x) > 0.07 || v.z > -0.02 || v.y < 0.9 || v.y > 1.5) continue;
+      n.fromBufferAttribute(nrm, k).applyMatrix3(nG).normalize();
+      slim(v, n, BODY[p.gender], female, sh);
+      v.addScaledVector(n, infl).applyMatrix4(Gi);
+      pos.setXYZ(k, v.x, v.y, v.z);
+      back.push(k);
+    }
+    const drawn = new THREE.SkinnedMesh(g2, full.material);
+    full.parent!.add(drawn);
+    drawn.position.copy(full.position); drawn.quaternion.copy(full.quaternion); drawn.scale.copy(full.scale);
+    drawn.bind(full.skeleton, full.bindMatrix);
+    const model = p.root.children[0];
+    p.setActivity('walk', 0);
+    p.setSpeed(1.3);
+    let lo = 1, hi = -1;
+    for (let f = 0; f < 36; f++) {
+      p.update(1 / 30);
+      p.root.updateMatrixWorld(true);
+      full.skeleton.update();
+      const inv = model.matrixWorld.clone().invert();
+      const pv: THREE.Vector3[] = [];
+      for (let k = s0; k < s0 + cnt; k++) pv.push(props.getVertexPosition(k, new THREE.Vector3()).applyMatrix4(props.matrixWorld).applyMatrix4(inv));
+      const ys = pv.map((q) => q.y), top = Math.max(...ys), bot = Math.min(...ys);
+      const bv = back.map((k) => drawn.getVertexPosition(k, new THREE.Vector3()).applyMatrix4(drawn.matrixWorld).applyMatrix4(inv));
+      // the centres of the pack's top and bottom thirds, each to the nearest point of the back
+      for (const [a, b] of [[bot, bot + (top - bot) / 3], [top - (top - bot) / 3, top]]) {
+        c.set(0, 0, 0);
+        let m = 0;
+        for (const q of pv) if (q.y >= a && q.y <= b) { c.add(q); m++; }
+        c.divideScalar(Math.max(1, m));
+        let d = 9;
+        for (const q of bv) d = Math.min(d, q.distanceTo(c));
+        const gap = d - 0.075; // the pack is 0.15 m deep: centre line to back panel
+        gaps.push(gap);
+        lo = Math.min(lo, gap);
+        hi = Math.max(hi, gap);
+      }
+    }
+    drawn.removeFromParent();
+    g2.dispose();
+    if (lo < -0.03 || hi > 0.03) bad.push(`${p.gender}: back panel ${fmt(lo * 100)}..${fmt(hi * 100)} cm off the back`);
+  }
+  console.log(`   ${ps.length} backpacks x 36 frames, top and bottom: back panel to back ${fmt(Math.min(...gaps) * 100)}..${fmt(Math.max(...gaps) * 100)} cm`);
+  expect(!bad.length, bad.join('\n'));
+});
