@@ -11,7 +11,7 @@
  *   QA_VERBOSE=1 npm run qa       show passing tests, KNOWN notes and the shim's suppressed warnings
  *
  * Hard limits (nothing may run long): QA_TEST_TIMEOUT per test (default 20 s), QA_FILE_TIMEOUT
- * per file (default 45 s, the process is killed), QA_MAX for the whole run (default 120 s).
+ * per file (default 45 s, the process is killed), QA_MAX for the whole run (default 240 s; the suite outgrew 120 s under parallel-agent load).
  *
  * esbuild bundles each test file (three stays external, so Node loads it once from
  * node_modules), then up to QA_JOBS (default 3) node processes run them in parallel, each with
@@ -110,7 +110,7 @@ const tBuild = performance.now() - t0;
 
 const jobs = Number(process.env.QA_JOBS ?? 3);
 const FILE_TIMEOUT = Number(process.env.QA_FILE_TIMEOUT ?? 45000);
-const MAX = Number(process.env.QA_MAX ?? 120000);
+const MAX = Number(process.env.QA_MAX ?? 240000);
 const children = new Set();
 const cap = setTimeout(() => {
   console.log(`qa: total cap of ${MAX / 1000} s reached, killing ${children.size} running file(s)`);
