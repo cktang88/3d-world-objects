@@ -512,7 +512,16 @@ export class InteriorLevel implements Level {
     }
     along(b0, sd.e1, 0, baseH, 0.018, baseM);
     if (!bath && !office) along(b0, sd.e1, baseH, 0.02, 0.03, trim);
-    if (bath) along(sd.e0, sd.e1, wains, 0.05, 0.03, M.porcelain());
+    if (bath) {
+      // tile cap along the wainscot, broken by doorways
+      let w0 = sd.e0;
+      for (const o of opens) {
+        if (o.kind === 'window' && o.y0 > wains) continue;
+        along(w0, o.t - o.w / 2, wains, 0.05, 0.03, M.porcelain());
+        w0 = o.t + o.w / 2;
+      }
+      along(w0, sd.e1, wains, 0.05, 0.03, M.porcelain());
+    }
     if (!office) {
       // crown: a cove of three steps
       along(sd.e0 - 0.1, sd.e1 + 0.1, H - 0.16, 0.16, 0.025, trim);
