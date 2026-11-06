@@ -889,6 +889,13 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
   const h = lobby + floors * 3.6;
   const finM = mat(rng.pick(['#8a9096', '#b8bcc0', '#3a3e42', '#6a6258']), { rough: 0.35, metal: 0.8 });
   const stoneBase = mat(rng.pick(['#2a2c2e', '#8a8680', '#c9c4b8']), { rough: 0.4, metal: 0.1 });
+  const curtain = rng.chance(0.6);
+  const spandrelHex = rng.pick(['#2a3138', '#3a4048', '#1e2428', '#4a5058', '#5a5650']);
+  const spandrel = mat(spandrelHex, { rough: 0.25, metal: 0.7 });
+  const spandrelC = new THREE.Color(spandrelHex);
+  const panelM = facadeMat('panel', rng.int(0, 2));
+  const panelTint = softTint(rng.pick(['#b8b0a2', '#9a8c7c', '#c9c4b8', '#8a8680']), 0.4);
+  void fm;
   let rr = { ...r };
   let y = 0;
   const tiers = rng.int(1, 3);
@@ -897,9 +904,19 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
     for (const s of sides) {
       const F = new Face(ctx, rr, s);
       const y0 = t === 0 ? lobby : y;
-      F.wall(fm, y0, y + th, tint);
       // vertical mullion fins every 1.5 m and spandrel bands every floor
       const nf = Math.floor(F.len / 1.5);
+      // office floors: tall glazing (curtain wall) or punched windows in panels, offices behind
+      const bw = F.len / nf;
+      for (let fy = lobby; fy + 3.6 <= y + th + 0.01; fy += 3.6) {
+        if (fy < y0 - 0.01) continue;
+        for (let k = 0; k < nf; k++) {
+          const u = -F.len / 2 + bw * k + 0.06;
+          if (curtain) F.window(u, fy + 0.25, bw - 0.12, 3.05, { trim: 'none', sash: 'store', trimColor: spandrelC, revealColor: spandrelC, sashColor: spandrelC, kind: 'office' });
+          else F.window(u + 0.2, fy + 0.9, bw - 0.52, 1.9, { trim: 'none', sash: 'case', trimColor: spandrelC, revealColor: new THREE.Color(panelTint).multiplyScalar(0.6), sashColor: spandrelC, kind: 'office' });
+        }
+      }
+      F.wall(curtain ? spandrel : panelM, y0, y + th, curtain ? undefined : panelTint);
       for (let k = 0; k <= nf; k++) B(k % 4 ? F.f : F.g, finM, 0.08, y + th - y0, k % 4 ? 0.12 : 0.3, -F.len / 2 + (k * F.len) / nf, y0, k % 4 ? 0.06 : 0.15, false);
       for (let yy = y0 + 3.6; yy < y + th - 0.5; yy += 3.6) B(F.f, finM, F.len, 0.12, 0.05, 0, yy - 0.06, 0.025, false);
       if (t === 0) {
