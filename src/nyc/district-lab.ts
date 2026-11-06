@@ -34,13 +34,19 @@ export function districtLab(name: string, description: string, cx: number, cz: n
       if (params.get('radius')) SHOWCASE.radius = Number(params.get('radius'));
       if (params.get('cap')) SHOWCASE.cap = Number(params.get('cap')); // load only slots this close to the player (px, pz)
       // a bare NycLevel: just the chunk builder, no traffic or pedestrians
-      const lv = Object.create(NycLevel.prototype) as { seed: number; chunks: Map<string, unknown>; group: THREE.Group; steam: unknown[]; ensure(x: number, z: number): boolean };
+      const lv = Object.create(NycLevel.prototype) as { seed: number; chunks: Map<string, unknown>; group: THREE.Group; steam: unknown[]; block(x: number, z: number): { group: THREE.Group } };
       lv.seed = Number(params.get('seed') ?? 20261105);
       lv.chunks = new Map();
       lv.group = new THREE.Group();
       lv.steam = [];
       group.add(lv.group);
-      for (let dz = -rz; dz <= rz; dz++) for (let dx = -rx; dx <= rx; dx++) lv.ensure(ccx + dx, ccz + dz);
+      for (let dz = -rz; dz <= rz; dz++)
+        for (let dx = -rx; dx <= rx; dx++) {
+          // block-local build (as tests/world.ts does), placed at its grid position
+          const ch = lv.block(ccx + dx, ccz + dz);
+          ch.group.position.set((ccx + dx) * AX, 0, (ccz + dz) * SZ);
+          lv.group.add(ch.group);
+        }
       const until = performance.now() + Number(params.get('wait') ?? 40) * 1000;
       let calm = 0;
       while (performance.now() < until) {
