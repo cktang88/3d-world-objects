@@ -4,7 +4,7 @@ import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST, CYCLE, SIGNAL } from './common';
 import { laneOpen } from './districts'; // [districts]
-import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, fleetTimings, loadFleet, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
+import { FLEET, PAINTS, TAXI_YELLOW, footprintOf, fleetInstances, fleetTimings, loadFleet, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
 import { truckMesh } from './vehicleTruck';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
@@ -597,7 +597,12 @@ export class Traffic {
   }
   private finish(c: Car, x: number, z: number) {
     c.obj.position.set(x, 0, z);
-    const hx = (c.axis === 'x' ? c.len : c.wid) / 2, hz = (c.axis === 'x' ? c.wid : c.len) / 2;
-    c.rect.minX = x - hx; c.rect.maxX = x + hx; c.rect.minZ = z - hz; c.rect.maxZ = z + hz;
+    // the footprint of the model as drawn (mirrors included, its centre where the model has it)
+    const model = c.obj.userData.model as string | undefined;
+    const fp = model ? footprintOf(model) : null;
+    const len = fp?.len ?? c.len, wid = fp?.wid ?? c.wid;
+    const ry = c.obj.rotation.y, ox = fp ? fp.cz * Math.sin(ry) + fp.cx * Math.cos(ry) : 0, oz = fp ? fp.cz * Math.cos(ry) - fp.cx * Math.sin(ry) : 0;
+    const hx = (c.axis === 'x' ? len : wid) / 2, hz = (c.axis === 'x' ? wid : len) / 2;
+    c.rect.minX = x + ox - hx; c.rect.maxX = x + ox + hx; c.rect.minZ = z + oz - hz; c.rect.maxZ = z + oz + hz;
   }
 }

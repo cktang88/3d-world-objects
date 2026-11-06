@@ -685,6 +685,29 @@ function staticWheels(p: Prepared) {
   return stillCache.get(p.id)!;
 }
 
+const footprints = new Map<string, { len: number; wid: number; cx: number; cz: number }>();
+/**
+ * The ground footprint of a fleet model as it is drawn (car frame, nose toward -z): length, width with the
+ * mirrors, and the centre's offset from the car's origin. From the loaded LODs; the FLEET entry until then.
+ * Traffic rects (pedestrian avoidance, player collision) use this, so what you see is what is avoided.
+ */
+export function footprintOf(id: string) {
+  let f = footprints.get(id);
+  if (f) return f;
+  const p = ready.get(id);
+  const spec = FLEET[id];
+  if (!p?.lod1.length) return { len: spec?.len ?? 4.8, wid: spec?.wid ?? 1.9, cx: 0, cz: 0 };
+  // the larger of the near and mid LODs (a simplified mid LOD may have lost the mirrors)
+  const b = new THREE.Box3();
+  for (const part of p.nearReady ? [...p.lod1, ...p.lod0] : p.lod1) {
+    part.geo.computeBoundingBox();
+    b.union(part.geo.boundingBox!);
+  }
+  f = { len: b.max.z - b.min.z, wid: b.max.x - b.min.x, cx: (b.max.x + b.min.x) / 2, cz: (b.max.z + b.min.z) / 2 };
+  if (p.nearReady) footprints.set(id, f);
+  return f;
+}
+
 export function nearObject(p: Prepared, paint: THREE.Material) {
   const near = new THREE.Group();
   for (const part of p.lod0) {
