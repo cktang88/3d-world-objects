@@ -88,5 +88,6 @@ Lab: `/?lab=shop-interior&type=<type>&seed=<n>&budget=<tris>&containers=closed`.
 | ![antiques](img/shop-antiques.jpg) antiques (cf. antique1) | ![furniture](img/shop-furniture.jpg) furniture vignettes (cf. furn2) |
 | ![garden](img/shop-garden.jpg) plant shop (cf. plants1) | ![electronics](img/shop-electronics.jpg) electronics |
 | ![stationery](img/shop-stationery.jpg) books & stationery | ![toys](img/shop-toys.jpg) toys (cf. toys1) |
+| ![hardware](img/shop-hardware.jpg) hardware: pegboard, tall shelving + ladder, pressed tin (cf. hw2) | |
 
 Screenshots are software-rendered at `--quality low` with a reduced product budget.
