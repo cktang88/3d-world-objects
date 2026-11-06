@@ -6,6 +6,7 @@ import { paintingTex, signTex } from './textures';
 import { BIOMES, ROLE_BIOMES } from './biomes';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, overlaps, rect } from './level';
+import { getTimeOfDay } from './lighting';
 import { Kit } from './rooms/kit';
 import { M } from './rooms/mats';
 import { rugTex, windowViewTex } from './rooms/tex';
@@ -212,7 +213,8 @@ export class InteriorLevel implements Level {
     this.rng = new Rng(hashN(desc.seed, desc.floor));
     this.name = desc.floor > 0 ? `${desc.name} · floor ${desc.floor + 1}` : desc.name;
     const b = BIOMES[desc.biome] ?? BIOMES.town;
-    this.night = !!b.night;
+    // night views and dimmer daylight when the world outside is dark
+    this.night = !!b.night || getTimeOfDay() === 'night' || getTimeOfDay() === 'dusk';
     this.style = desc.style === 'store' ? 'shop' : desc.style;
     this.H = this.style === 'house' ? 3.35 : this.style === 'office' ? 2.85 : this.style === 'museum' ? 3.8 : 3.05;
     this.env = {
