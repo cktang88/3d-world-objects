@@ -20,6 +20,7 @@ import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
+import { Weather } from './weather';
 import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
 import { Seamless, descKey, doorOf, type Slot } from './seamless';
@@ -98,6 +99,7 @@ function applyQuality() {
   sun.shadow.map?.dispose();
   sun.shadow.map = null;
   lighting.setQuality(quality);
+  weather.setQuality(quality);
 }
 function draw() {
   if (quality === 'low') renderer.render(scene, camera);
@@ -121,6 +123,8 @@ const lighting = new Lighting(renderer, scene, camera, pmrem, sun, hemi, ambient
 lighting.bloom = bloom;
 composer.addPass(lighting.grade);
 if (params0.get('tod') && (TIMES as string[]).includes(params0.get('tod')!)) lighting.setTime(params0.get('tod') as TimeOfDay);
+// weather.ts: clouds, rain, snow, fog (Y cycles, ?weather=clear|partly|overcast|lightrain|rain|fog|snow|random)
+const weather: Weather = new Weather(renderer, scene, camera, lighting);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -567,6 +571,8 @@ addEventListener('keydown', (e) => {
   } else if (e.code === 'KeyT') {
     const label = lighting.cycle(e.shiftKey ? -1 : 1);
     toast(lighting.place === 'outdoor' ? `Time of day: ${label}` : `Time of day: ${label} (outside)`);
+  } else if (e.code === 'KeyY') {
+    toast(`Weather: ${weather.cycle(e.shiftKey ? -1 : 1)}`);
   } else if (e.code === 'KeyO') {
     applyOriginals(!originalsEnabled);
     toast(originalsEnabled ? 'Original textured models: on (streamed from Objaverse as you get close)' : 'Original models off: pure sand3d programs');
@@ -650,6 +656,7 @@ function frame() {
     lab.controls.update();
     lab.level.update(dt, camera.position, time);
     lighting.update(dt, lab.controls.target);
+    weather.update(dt, lab.controls.target);
     updateDetail(camera.position, 60);
     draw();
     requestAnimationFrame(frame);
@@ -692,6 +699,7 @@ function frame() {
       hud.prompt.classList.remove('show');
     }
     lighting.update(dt, player.pos);
+    weather.update(dt, player.pos);
     updateDetail(player.pos, mode === 'museum' ? 40 : 30);
     draw();
   }
@@ -712,7 +720,7 @@ async function startMode(m: Mode) {
   document.body.dataset.mode = m;
   hud.help.innerHTML = m === 'museum'
     ? '<kbd>WASD</kbd> walk · walk through a doorway to go on · <kbd>E</kbd> inspect · <kbd>Q</kbd> previous room'
-    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>T</kbd> time of day · <kbd>C</kbd> credits';
+    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>T</kbd> time of day · <kbd>Y</kbd> weather · <kbd>C</kbd> credits';
   if (m === 'museum') currentDesc = { kind: 'atrium' };
   else {
     const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;
@@ -785,7 +793,7 @@ ready.then(() => {
 });
 
 Object.assign(window, {
-  __world: { seam, renderer, lighting, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+  __world: { seam, renderer, lighting, weather, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
 });
 
 // ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----

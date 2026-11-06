@@ -781,6 +781,7 @@ export class InteriorLevel implements Level {
     // the view across the street: an emissive backdrop outside the wall (bathrooms: frosted glass, daylight only)
     const vseed = hashN(this.desc.seed, Math.round(o.t * 10), Math.round(sd.c * 10)) % 5;
     const view = sd.room.type === 'bathroom' ? M.matte(this.night ? '#1a2238' : '#dfe8ee') : M.emissiveMap(`view${vseed}${this.night}`, windowViewTex(vseed, this.night), this.night ? 0.6 : 1.0);
+    view.userData.windowView = true; // weather.ts: overcast / rain / snow / fog in the view
     const out = sd.face - sd.inward * (thick + 1.4);
     const vw = o.w + 2.4, vh = h + 2.0;
     const [vx, vz] = sd.axis === 'z' ? [o.t, out] : [out, o.t];
