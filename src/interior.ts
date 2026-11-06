@@ -1532,7 +1532,6 @@ export class InteriorLevel implements Level {
       }
     });
     this.container('cabinet', fr, { x: 0, y: 0.1, z: 0.13, w: iw - 0.04, h: 0.6, d: idp - 0.34 });
-    this.cols.push(shrink(footprint(iw, idp, rot, x, z), 0.05));
     // stools
     const n = Math.max(2, Math.floor(iw / 0.6));
     const c0 = Math.cos(rot), s0 = Math.sin(rot);
