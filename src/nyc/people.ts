@@ -250,6 +250,7 @@ interface BodyAsset {
   base: THREE.MeshStandardMaterial;
   hairBase: THREE.MeshStandardMaterial;
   geo: THREE.Matrix4;
+  geoInv: THREE.Matrix4;
   geoScale: number;
   /** inverse bind-pose world matrix of each bone, to attach props built in body space */
   bindInv: Map<string, THREE.Matrix4>;
@@ -309,7 +310,7 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
         cc.tracks = cc.tracks.filter((t) => !/^root\./.test(t.name));
         clips.set(c.name, cc);
       }
-      body[g] = { scene, base: sk.material as THREE.MeshStandardMaterial, hairBase: hairBase!, geo, geoScale, bindInv, clips };
+      body[g] = { scene, base: sk.material as THREE.MeshStandardMaterial, hairBase: hairBase!, geo, geoInv: geo.clone().invert(), geoScale, bindInv, clips };
     }
     const hairMap: PeopleAssets['hair'] = new Map();
     hair.scene.updateMatrixWorld(true);
@@ -368,7 +369,6 @@ function shoeGeo(upper: string, sole: string, len: number, boot: boolean) {
   return g;
 }
 const leashMat = new THREE.LineBasicMaterial({ color: '#1a1a1a' });
-const shoeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
 
 /** the lower half of a long coat: an elliptical skirt from the waist to below the knee, skinned
  *  to pelvis + both thighs so it swings with the legs and stretches between them */
@@ -412,11 +412,62 @@ function coatSkirtGeo(g: Gender, len: number) {
   skirtGeos.set(k, geo);
   return geo;
 }
-const clothMats = new Map<string, THREE.MeshStandardMaterial>();
-function clothMat(color: string) {
-  let m = clothMats.get(color);
-  if (!m) clothMats.set(color, (m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide })));
-  return m;
+interface RigidPart {
+  geo: THREE.BufferGeometry;
+  bone: string;
+  /** body (bind-pose) space placement */
+  m: THREE.Matrix4;
+  /** flat colour, unless the geometry has vertex colours */
+  color?: string;
+}
+const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide });
+/** one skinned geometry from rigid parts (100 % on their bone) plus an optional coat skirt
+ *  (whose skinIndex 0/1/2 = pelvis/thigh_l/thigh_r); vertices in body space */
+function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeometry | null, skirtColor: string) {
+  const out: THREE.BufferGeometry[] = [];
+  const prep = (src: THREE.BufferGeometry, color: string | undefined) => {
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const n = g.attributes.position.count;
+    if (!g.attributes.color) {
+      const c = new THREE.Color(color ?? '#808080'), a = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) c.toArray(a, i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    }
+    return g;
+  };
+  for (const p of parts) {
+    const g = prep(p.geo, p.color);
+    g.applyMatrix4(p.m);
+    const n = g.attributes.position.count, bi = names.indexOf(p.bone);
+    const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      si[i * 4] = bi;
+      sw[i * 4] = 1;
+    }
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+    out.push(g);
+  }
+  if (skirt) {
+    const g = prep(skirt, skirtColor);
+    const map = ['pelvis', 'thigh_l', 'thigh_r'].map((n) => names.indexOf(n));
+    const si = g.attributes.skinIndex as THREE.BufferAttribute;
+    const nsi = new Uint16Array(si.count * 4);
+    for (let i = 0; i < si.count; i++) for (let k = 0; k < 4; k++) nsi[i * 4 + k] = map[si.getComponent(i, k)] ?? 0;
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(nsi, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(new Float32Array((g.attributes.skinWeight as THREE.BufferAttribute).array), 4));
+    out.push(g);
+  }
+  if (!out.length) {
+    // nothing to carry: an empty geometry with the right attributes
+    const g = new THREE.BufferGeometry();
+    for (const [k, n] of [['position', 3], ['normal', 3], ['color', 3], ['skinWeight', 4]] as const) g.setAttribute(k, new THREE.BufferAttribute(new Float32Array(0), n));
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(new Uint16Array(0), 4));
+    return g;
+  }
+  return mergeGeometries(out)!;
 }
 const propMats = new Map<string, THREE.MeshStandardMaterial>();
 function propMat(color: string, rough = 0.8) {
@@ -522,43 +573,51 @@ export class Person {
       style: new THREE.Vector4(o.topStyle, o.topStyle === 0 ? b0.shoulderX + 0.13 : b0.wristX - 0.035, o.bottomStyle === 2 ? b0.knee + 0.07 : b0.ankle, hat ? 0 : style === 'Hair_Long' ? 1 : style ? 0 : -1),
       coat: o.coatLen >= 0 ? b0.knee - o.coatLen : -1,
     };
+    // rigid props (hat, bags, hood, shoes) and the coat skirt are merged into ONE skinned mesh
+    // per person: rigid parts are weighted 100 % to their bone, the skirt keeps its blend
+    const parts: RigidPart[] = [];
     if (hat) {
       const hc = r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a']);
       this.far.hair.set(hc);
-      const bm = propMat(hc, 0.95);
-      attach('Head', new THREE.Mesh(propGeo.beanie, bm), at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)));
-      this.detail.push(attach('Head', new THREE.Mesh(propGeo.cuff, bm), at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12))));
+      parts.push({ geo: propGeo.beanie, bone: 'Head', m: at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)), color: hc });
+      parts.push({ geo: propGeo.cuff, bone: 'Head', m: at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12)), color: hc });
     }
     // bags
     const bagRoll = r.next();
     const sp = gender === 'male' ? 1.25 : 1.22;
     if (bagRoll < 0.22) {
       const bc = r.pick(['#151517', '#22262e', '#3a3f45', '#2f3a2a', '#5a1a1c', '#1f3d5a']);
-      const bm = propMat(bc, 0.7);
-      attach('spine_03', new THREE.Mesh(propGeo.backpack, bm), at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)));
-      for (const s of [-1, 1]) this.detail.push(attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0)));
+      parts.push({ geo: propGeo.backpack, bone: 'spine_03', m: at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)), color: bc });
+      for (const s of [-1, 1]) parts.push({ geo: propGeo.strap, bone: 'spine_03', m: at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0), color: bc });
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
-      attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0));
+      parts.push({ geo: propGeo.crossbody, bone: 'pelvis', m: at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0), color: bc });
     }
     // hoods lying on the upper back (hoodies, most puffers)
-    if (o.topStyle === 4 || (o.topStyle === 2 && r.chance(0.6))) {
-      const hood = new THREE.Mesh(propGeo.hood, clothMat(o.top));
-      attach('spine_03', hood, at(0, b.neck - 0.03, -0.075, -0.35, 0, 0).multiply(new THREE.Matrix4().makeScale(1.05, 0.62, 0.8)));
-    }
-    // long coats (most of the open coats in the reference photos reach the knee)
-    if (o.coatLen >= 0) {
-      const bones = ['pelvis', 'thigh_l', 'thigh_r'].map((n) => this.bones.get(n)!);
-      const skirt = new THREE.SkinnedMesh(coatSkirtGeo(gender, o.coatLen), clothMat(o.top));
-      skirt.bind(new THREE.Skeleton(bones, ['pelvis', 'thigh_l', 'thigh_r'].map((n) => A.bindInv.get(n)!.clone())), new THREE.Matrix4());
-      skirt.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.7, 0), 0.8);
-      model.add(skirt);
-      this.meshes.push(skirt);
-    }
+    this.hood = o.topStyle === 4 || (o.topStyle === 2 && r.chance(0.6));
+    if (this.hood) parts.push({ geo: propGeo.hood, bone: 'spine_03', m: at(0, b.neck - 0.03, -0.075, -0.35, 0, 0).multiply(new THREE.Matrix4().makeScale(1.05, 0.62, 0.8)), color: o.top });
     // shoes (the bare feet are shrunk inside them in the shader)
     const dark = !/^#[de]/.test(o.shoe);
     const sg = shoeGeo(o.shoe, o.sole, gender === 'male' ? 0.285 : 0.255, dark && r.chance(0.3));
-    for (const [s, bone] of [[1, 'foot_l'], [-1, 'foot_r']] as const) this.detail.push(attach(bone, new THREE.Mesh(sg, shoeMat), at(s * b.legX, 0, gender === 'male' ? 0.02 : 0.025)));
+    for (const [s, bone] of [[1, 'foot_l'], [-1, 'foot_r']] as const) parts.push({ geo: sg, bone, m: at(s * b.legX, 0, gender === 'male' ? 0.02 : 0.025) });
+    // long coats (most of the open coats in the reference photos reach the knee)
+    const skirt = o.coatLen >= 0 ? coatSkirtGeo(gender, o.coatLen) : null;
+    {
+      // shares the body's skeleton (no extra bone update / texture): vertices go into the body
+      // geometry's space and the bone indices are the body skin's
+      const body = this.fullMesh as THREE.SkinnedMesh;
+      const names = body.skeleton.bones.map((bn) => bn.name);
+      const geo = mergeParts(parts, names, skirt, o.top);
+      geo.applyMatrix4(A.geoInv);
+      const pm = new THREE.SkinnedMesh(geo, propsMat);
+      pm.matrix.copy(body.matrix);
+      pm.matrix.decompose(pm.position, pm.quaternion, pm.scale);
+      body.parent!.add(pm);
+      pm.bind(body.skeleton, body.bindMatrix);
+      pm.boundingSphere = body.boundingSphere!.clone();
+      pm.name = 'props';
+      this.meshes.push(pm);
+    }
     // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
     const target = (gender === 'male' ? 1.76 : 1.63) * r.range(0.94, 1.06);
     model.scale.setScalar(target / b.height);
@@ -696,6 +755,8 @@ export class Person {
   get scaleH() {
     return this.model().scale.x;
   }
+  /** wears a hood (raised in the rain) */
+  hood = false;
   /** this frame: keep last frame's pose and matrices */
   frozen = false;
   /** skeleton updates performed (all people), for perf readouts */
