@@ -422,6 +422,9 @@ export class Lighting {
 
   setQuality(q: Quality) {
     this.quality = q;
+    // real lamp lights near the viewer: each one costs every lit pixel, so fewer on lower settings
+    const n = q === 'ultra' ? LAMP_POOL : q === 'high' ? 4 : 2;
+    this.lamps.forEach((l, i) => (l.visible = i < n));
     if (this.csm) {
       this.disposeCsm();
       this.makeCsm();
@@ -786,6 +789,7 @@ export class Lighting {
     });
     list.sort((a, b) => a.d - b.d);
     const I = 70 * night;
+    const n = this.lamps.filter((l) => l.visible).length;
     this.lamps.forEach((l, i) => {
       const it = list[i];
       if (!it) {
@@ -795,7 +799,7 @@ export class Lighting {
       l.position.copy(it.p);
       l.target.position.set(it.p.x, 0, it.p.z);
       // fade the furthest pooled light so swapping lamps doesn't pop
-      const fade = i < LAMP_POOL - 2 ? 1 : 0.5;
+      const fade = i < n - 1 ? 1 : 0.5;
       l.intensity = I * fade;
     });
   }
