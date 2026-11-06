@@ -2,3 +2,4 @@ node_modules
 dist
 scripts/.cache
 __pycache__
+.claude/
