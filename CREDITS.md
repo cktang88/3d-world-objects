@@ -524,3 +524,8 @@
 - **vehicle** — "hovercar" by RheeceSyson, https://sketchfab.com/3d-models/ccf989e3acdc4483a88df146dcfd7ca0, CC-BY-4.0; modified: rewritten as a sand3d program
 - **vehicle** — "one part of the HN2 car" by adiel, https://sketchfab.com/3d-models/3fb4008043d04130aaea792df7a2efca, CC-BY-4.0; modified: rewritten as a sand3d program
 - **vehicle** — "pace car" by hammer1734, https://sketchfab.com/3d-models/0f2592d5a67f41469a3b79e8cfa14ab3, CC-BY-4.0; modified: rewritten as a sand3d program
+
+## People (public/assets/people/)
+
+- **male.glb, female.glb, hair.glb** — "Universal Base Characters [Standard]" by Quaternius, https://quaternius.com/packs/universalbasecharacters.html (https://quaternius.itch.io/universal-base-characters), CC0 1.0; modified: light skin textures swapped in, textures resized to 1024 webp, meshopt-compressed (scripts/build-people.mjs)
+- **anims.glb** — "Universal Animation Library [Standard]" by Quaternius, https://quaternius.com/packs/universalanimationlibrary.html (https://quaternius.itch.io/universal-animation-library), CC0 1.0; modified: 6 clips kept, scale/bone-translation tracks removed, resampled, meshopt-compressed

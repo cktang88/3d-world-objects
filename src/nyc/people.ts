@@ -1,144 +1,533 @@
 import * as THREE from 'three';
+import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { gltf } from '../detail';
 import { Rng, hashN } from '../rng';
-import { mat } from '../build';
 import { CURB, AX, SZ, AVE, ST } from './common';
 
-/** Pedestrians walking the sidewalks. */
-export const SKIN = ['#f1c9a5', '#d9a77e', '#a8714a', '#7a4a2a', '#5a3620', '#e8b996'];
-export const CLOTH = ['#1c1c1e', '#2a3f66', '#7a1d1d', '#e8e8e8', '#4a5a3a', '#b8946a', '#5a2a5a', '#c46a2a', '#3a3a44', '#d6c8a8'];
-export const pedGeo = {
-  torso: new THREE.CapsuleGeometry(0.16, 0.36, 6, 14),
-  hips: new THREE.CapsuleGeometry(0.15, 0.08, 6, 14),
-  neck: new THREE.CylinderGeometry(0.05, 0.06, 0.1, 10),
-  head: new THREE.SphereGeometry(0.105, 18, 14),
-  hair: new THREE.SphereGeometry(0.112, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
-  thigh: new THREE.CapsuleGeometry(0.07, 0.34, 4, 10),
-  shin: new THREE.CapsuleGeometry(0.055, 0.34, 4, 10),
-  shoe: new THREE.BoxGeometry(0.1, 0.07, 0.26),
-  upperArm: new THREE.CapsuleGeometry(0.048, 0.24, 4, 10),
-  forearm: new THREE.CapsuleGeometry(0.04, 0.22, 4, 10),
-  hand: new THREE.SphereGeometry(0.045, 10, 8),
-  bag: new THREE.BoxGeometry(0.08, 0.3, 0.36),
+/**
+ * Pedestrians: skinned, animated people on the sidewalks.
+ *
+ * Bodies, hair and animations are Quaternius' CC0 "Universal Base Characters" and "Universal
+ * Animation Library" (built into public/assets/people/ by scripts/build-people.mjs). Clothing is
+ * painted onto the body in the shader from the bind-pose position (shirt/coat, trousers, shoes),
+ * with the cloth regions pushed out along the normal so jackets read as a layer over the body.
+ * Research: docs/research/people.md.
+ */
+
+type Gender = 'male' | 'female';
+
+/** body-space landmarks of each base mesh in its T-pose (metres, +z forward) */
+const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wristX: number; elbowX: number; ankle: number; knee: number; height: number }> = {
+  male: { waist: 1.0, neck: 1.505, shoulderX: 0.2, wristX: 0.675, elbowX: 0.46, ankle: 0.115, knee: 0.54, height: 1.83 },
+  female: { waist: 0.985, neck: 1.47, shoulderX: 0.15, wristX: 0.61, elbowX: 0.39, ankle: 0.105, knee: 0.53, height: 1.74 },
 };
-pedGeo.torso.scale(1.15, 1, 0.72); // shoulders wider than deep
-pedGeo.hips.scale(1.1, 1, 0.75);
-pedGeo.head.scale(0.92, 1.05, 1);
-export interface Ped {
-  g: THREE.Group;
-  legs: THREE.Object3D[];
-  arms: THREE.Object3D[];
+
+// ---------------------------------------------------------------- wardrobe (from the reference photos)
+const SKIN_TINT = ['#ffffff', '#f4e2d4', '#e6c4a6', '#c99a74', '#a8734e', '#7d5236', '#5c3a26'];
+const HAIR = ['#14100c', '#1c1410', '#2a1c12', '#3d2a1a', '#5a3d24', '#8a6a44', '#b89868', '#6b6b6b', '#a8a8a4'];
+const COAT = ['#151517', '#1b1d22', '#22262e', '#1d2433', '#2b2f36', '#3a3f45', '#4a4238', '#5b4a36', '#8a6c4a', '#a8865c', '#3b4232', '#4a1f22', '#6b6e72'];
+const PUFFER = ['#121214', '#1a1c22', '#1c2638', '#2f3a2a', '#5a1a1c', '#7a7f86', '#c8c4ba', '#1f3d5a'];
+const SHIRT = ['#e8e6e0', '#d8d4cc', '#9aa0a8', '#2a2c30', '#6b7a8c', '#a83a32', '#3a5a7a', '#c8b48c', '#7a8a6a', '#e0c0b8'];
+const JEANS = ['#1e2a40', '#26344e', '#34486a', '#4a6488', '#6a84a8', '#1a1a1e', '#2a2a30'];
+const TROUSERS = ['#1a1a1c', '#2a2c30', '#3a3c42', '#4a4a50', '#5a5040', '#8a7a5a', '#b0a080', '#2a3040'];
+const SHOES = ['#121212', '#1a1a1a', '#2a1a12', '#4a2e1c', '#e8e8e4', '#d8d8d4', '#3a3a3e', '#7a5a3a'];
+
+interface Outfit {
+  top: string;
+  inner: string;
+  /** 0 tee, 1 sweater / long sleeve, 2 puffer, 3 open coat, 4 hoodie */
+  topStyle: number;
+  bottom: string;
+  /** 0 jeans, 1 trousers, 2 shorts, 3 leggings */
+  bottomStyle: number;
+  shoe: string;
+  sole: string;
+  skin: string;
+  hair: string;
+}
+
+function pickOutfit(r: Rng, gender: Gender): Outfit {
+  const topStyle = r.pick([0, 1, 1, 2, 2, 3, 3, 3, 4]);
+  const top = topStyle === 2 ? r.pick(PUFFER) : topStyle === 3 ? r.pick(COAT) : topStyle === 4 ? r.pick([...COAT, '#7a7f86', '#8a2a2a']) : r.pick(SHIRT);
+  const bottomStyle = gender === 'female' ? r.pick([0, 0, 1, 3, 3]) : r.pick([0, 0, 0, 1, 1, topStyle === 0 ? 2 : 1]);
+  const bottom = bottomStyle === 0 ? r.pick(JEANS) : bottomStyle === 3 ? r.pick(['#111113', '#18181a', '#2a2a2e']) : r.pick(TROUSERS);
+  const shoe = r.pick(SHOES);
+  const light = shoe === '#e8e8e4' || shoe === '#d8d8d4';
+  return {
+    top, topStyle, bottom, bottomStyle, shoe,
+    inner: r.pick(SHIRT),
+    sole: light || r.chance(0.4) ? '#ecebe6' : '#1a1a1a',
+    skin: r.pick(SKIN_TINT),
+    hair: r.pick(HAIR),
+  };
+}
+
+// ---------------------------------------------------------------- shader: clothes painted on the skinned body
+const REGION_GLSL = /* glsl */ `
+uniform mat4 uGeo;
+uniform float uGeoScale;
+uniform vec4 uCut;   // waist y, neckline y, sleeve end |x|, trouser hem y
+uniform vec4 uBody;  // shoulder |x|, ankle y, jacket bottom y, top style
+uniform vec4 uInfl;  // top, bottom, shoes, bottom style
+// 0 skin, 1 top, 2 bottom, 3 shoes
+float pedRegion(vec3 p) {
+  float ax = abs(p.x);
+  if (ax > uBody.x && p.y > uCut.x + 0.25) return ax < uCut.z ? 1.0 : 0.0;   // arm (T-pose)
+  if (p.y < uBody.y) return 3.0;
+  float neck = uCut.y - (uBody.w > 2.5 && uBody.w < 3.5 ? 0.07 : 0.035) * smoothstep(0.0, 0.07, p.z);
+  if (p.y > uCut.x) return p.y < neck ? 1.0 : 0.0;
+  if (p.y > uBody.z && ax < 0.24 && uBody.w > 1.5) return 1.0;               // jacket hangs over the hips
+  return p.y > uCut.w ? 2.0 : 0.0;
+}
+`;
+
+function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number) {
+  const m = base.clone();
+  const b = BODY[g];
+  const sleeve = o.topStyle === 0 ? b.shoulderX + 0.13 : b.wristX - 0.035;
+  const hem = o.bottomStyle === 2 ? b.knee + 0.07 : o.bottomStyle === 3 ? b.ankle + 0.06 : b.ankle;
+  const neck = b.neck + (o.topStyle === 2 || o.topStyle === 4 ? 0.035 : o.topStyle === 3 ? 0.02 : 0);
+  const infl = [[0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle], [0.007, 0.008, 0.007, 0.002][o.bottomStyle], 0.012];
+  const u = {
+    uGeo: { value: geo },
+    uGeoScale: { value: geoScale },
+    uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
+    uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
+    uInfl: { value: new THREE.Vector4(infl[0], infl[1], infl[2], o.bottomStyle) },
+    uTop: { value: new THREE.Color(o.top) },
+    uInner: { value: new THREE.Color(o.inner) },
+    uBottom: { value: new THREE.Color(o.bottom) },
+    uShoe: { value: new THREE.Color(o.shoe) },
+    uSole: { value: new THREE.Color(o.sole) },
+    uSkin: { value: new THREE.Color(o.skin) },
+  };
+  m.onBeforeCompile = (s) => {
+    Object.assign(s.uniforms, u);
+    s.vertexShader = s.vertexShader
+      .replace('#include <common>', `#include <common>\n${REGION_GLSL}\nvarying vec3 vBody;`)
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vBody = (uGeo * vec4(position, 1.0)).xyz;
+        float pr = pedRegion(vBody);
+        float inf = pr == 1.0 ? uInfl.x : pr == 2.0 ? uInfl.y : pr == 3.0 ? uInfl.z : 0.0;
+        transformed += normalize(normal) * (inf / uGeoScale);`,
+      );
+    s.fragmentShader = s.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\n${REGION_GLSL}\nvarying vec3 vBody;
+        uniform vec3 uTop, uInner, uBottom, uShoe, uSole, uSkin;
+        float pedHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float pedNoise(vec3 x) {
+          vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(pedHash(i), pedHash(i + vec3(1,0,0)), f.x), mix(pedHash(i + vec3(0,1,0)), pedHash(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(pedHash(i + vec3(0,0,1)), pedHash(i + vec3(1,0,1)), f.x), mix(pedHash(i + vec3(0,1,1)), pedHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+        }`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        float pr = pedRegion(vBody);
+        float cloth = pr > 0.5 ? 1.0 : 0.0;
+        float clothRough = 0.88;
+        if (pr < 0.5) diffuseColor.rgb *= uSkin;
+        else {
+          vec3 c = pr == 1.0 ? uTop : pr == 2.0 ? uBottom : uShoe;
+          float st = uBody.w;
+          float ax = abs(vBody.x);
+          if (pr == 1.0) {
+            bool arm = ax > uBody.x && vBody.y > uCut.x + 0.25;
+            if (st > 1.5 && st < 2.5) {            // puffer: quilted baffles, satin nylon
+              float q = arm ? ax * 11.0 : vBody.y * 9.0;
+              float d = abs(fract(q) - 0.5) * 2.0;
+              c *= 0.72 + 0.32 * smoothstep(0.0, 0.55, d);
+              clothRough = 0.42;
+            } else if (st > 2.5 && st < 3.5) {     // open coat: shirt shows down the front
+              if (!arm && vBody.z > 0.02 && ax < 0.045 + 0.03 * smoothstep(uCut.x + 0.2, uCut.y, vBody.y) && vBody.y > uCut.x - 0.02) c = uInner;
+              if (!arm && vBody.y < uCut.x + 0.02 && vBody.y > uCut.x - 0.01) c *= 0.7;
+              clothRough = 0.8;
+            } else if (st > 3.5) {                  // hoodie: kangaroo pocket seam + hood bulk at the neck
+              if (!arm && vBody.z > 0.06 && vBody.y > uCut.x + 0.05 && vBody.y < uCut.x + 0.2 && ax < 0.13) c *= 0.88;
+            }
+            if (arm && ax > uCut.z - 0.03) c *= 0.85;                      // cuffs
+            if (!arm && vBody.y < uBody.z + 0.035 && vBody.y > uBody.z - 0.04) c *= 0.85;   // hem band
+          } else if (pr == 2.0) {
+            float bs = uInfl.w;
+            if (vBody.y > uCut.x - 0.04) c *= bs > 2.5 ? 0.9 : 0.55;      // waistband / belt
+            if (bs < 0.5) {                          // denim: twill + fading on the thighs
+              c *= 0.92 + 0.12 * pedNoise(vec3(vBody.x * 90.0 + vBody.y * 90.0, vBody.y * 6.0, vBody.z * 90.0));
+              c *= 1.0 + 0.22 * smoothstep(0.2, 0.0, abs(vBody.y - 0.72)) * step(0.0, vBody.z);
+            }
+            if (bs > 2.5) clothRough = 0.6;
+          } else {
+            if (vBody.y < 0.028) c = uSole;
+            clothRough = 0.55;
+          }
+          c *= 0.93 + 0.1 * pedNoise(vBody * 60.0);
+          diffuseColor.rgb = c;
+        }`,
+      )
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, clothRough, cloth);')
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nvec3 pedGeoNormal = normal;')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, pedGeoNormal, cloth));');
+  };
+  m.customProgramCacheKey = () => 'ped-body-v1';
+  return m;
+}
+
+// ---------------------------------------------------------------- assets
+interface BodyAsset {
+  scene: THREE.Object3D;
+  base: THREE.MeshStandardMaterial;
+  hairBase: THREE.MeshStandardMaterial;
+  geo: THREE.Matrix4;
+  geoScale: number;
+  /** inverse bind-pose world matrix of each bone, to attach props built in body space */
+  bindInv: Map<string, THREE.Matrix4>;
+  clips: Map<string, THREE.AnimationClip>;
+}
+interface PeopleAssets {
+  body: Record<Gender, BodyAsset>;
+  hair: Map<string, { geo: THREE.BufferGeometry; matrix: THREE.Matrix4; mat: THREE.MeshStandardMaterial }>;
+}
+let assetsP: Promise<PeopleAssets> | null = null;
+
+export function loadPeopleAssets(): Promise<PeopleAssets> {
+  if (assetsP) return assetsP;
+  const base = `${import.meta.env.BASE_URL}assets/people/`;
+  const load = (f: string) => gltf()!.loadAsync(base + f);
+  assetsP = Promise.all([load('male.glb'), load('female.glb'), load('hair.glb'), load('anims.glb')]).then(([male, female, hair, anims]) => {
+    anims.scene.updateMatrixWorld(true);
+    const animPelvis = anims.scene.getObjectByName('pelvis')!.position.clone();
+    const body = {} as Record<Gender, BodyAsset>;
+    for (const [g, gl] of [['male', male], ['female', female]] as const) {
+      const scene = gl.scene;
+      scene.updateMatrixWorld(true);
+      let skinned: THREE.SkinnedMesh | null = null, hairBase: THREE.MeshStandardMaterial | null = null;
+      scene.traverse((o) => {
+        const m = o as THREE.SkinnedMesh;
+        if (!m.isSkinnedMesh) return;
+        const mat = m.material as THREE.MeshStandardMaterial;
+        if (/Superhero/i.test(mat.name)) skinned = m;
+        if (/Hair/i.test(mat.name)) hairBase = mat;
+      });
+      const sk = skinned as unknown as THREE.SkinnedMesh;
+      // geometry -> body space at the bind pose. Quantization (meshopt) is folded into the inverse
+      // bind matrices for skinned meshes, so go through the skin rather than the node transform.
+      const b0 = sk.skeleton.bones[0];
+      const geo = sk.matrixWorld.clone().multiply(sk.bindMatrixInverse).multiply(b0.matrixWorld).multiply(sk.skeleton.boneInverses[0]).multiply(sk.bindMatrix);
+      const geoScale = new THREE.Vector3().setFromMatrixScale(geo).x;
+      const bindInv = new Map<string, THREE.Matrix4>();
+      scene.traverse((o) => {
+        if ((o as THREE.Bone).isBone) bindInv.set(o.name, o.matrixWorld.clone().invert());
+      });
+      // the clips were authored on the UAL mannequin: shift the pelvis track to this body's hip height
+      const pelvis = scene.getObjectByName('pelvis')!.position;
+      const d = pelvis.clone().sub(animPelvis);
+      const clips = new Map<string, THREE.AnimationClip>();
+      for (const c of anims.animations) {
+        const cc = c.clone();
+        for (const t of cc.tracks) {
+          if (t.name === 'pelvis.position') {
+            const v = t.values;
+            for (let i = 0; i < v.length; i += 3) {
+              v[i] += d.x;
+              v[i + 1] += d.y;
+              v[i + 2] += d.z;
+            }
+          }
+        }
+        cc.tracks = cc.tracks.filter((t) => !/^root\./.test(t.name));
+        clips.set(c.name, cc);
+      }
+      body[g] = { scene, base: sk.material as THREE.MeshStandardMaterial, hairBase: hairBase!, geo, geoScale, bindInv, clips };
+    }
+    const hairMap: PeopleAssets['hair'] = new Map();
+    hair.scene.updateMatrixWorld(true);
+    hair.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      let name = m.name;
+      for (let p: THREE.Object3D | null = m; p; p = p.parent) if (/^Hair_/.test(p.name)) name = p.name;
+      hairMap.set(name, { geo: m.geometry, matrix: m.matrixWorld.clone(), mat: m.material as THREE.MeshStandardMaterial });
+    });
+    return { body, hair: hairMap };
+  });
+  return assetsP;
+}
+
+// ---------------------------------------------------------------- props
+const propGeo = {
+  backpack: new RoundedBoxGeometry(0.3, 0.42, 0.15, 3, 0.045),
+  strap: new THREE.BoxGeometry(0.045, 0.34, 0.012),
+  crossbody: new RoundedBoxGeometry(0.22, 0.16, 0.07, 2, 0.02),
+  tote: new RoundedBoxGeometry(0.36, 0.34, 0.1, 2, 0.015),
+  phone: new RoundedBoxGeometry(0.075, 0.155, 0.009, 2, 0.006),
+  beanie: new THREE.SphereGeometry(0.112, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
+  cuff: new THREE.CylinderGeometry(0.106, 0.11, 0.05, 20, 1, true),
+};
+const propMats = new Map<string, THREE.MeshStandardMaterial>();
+function propMat(color: string, rough = 0.8) {
+  const k = `${color}|${rough}`;
+  let m = propMats.get(k);
+  if (!m) propMats.set(k, (m = new THREE.MeshStandardMaterial({ color, roughness: rough })));
+  return m;
+}
+const hairMats = new Map<string, THREE.MeshStandardMaterial>();
+function hairMat(base: THREE.MeshStandardMaterial, color: string) {
+  const k = `${base.uuid}|${color}`;
+  let m = hairMats.get(k);
+  if (!m) {
+    m = base.clone();
+    m.color.set(color);
+    m.roughness = 0.75;
+    hairMats.set(k, m);
+  }
+  return m;
+}
+
+// ---------------------------------------------------------------- one person
+export type Activity = 'walk' | 'idle' | 'phone' | 'talk';
+export class Person {
+  root: THREE.Group;
+  mixer: THREE.AnimationMixer;
+  actions = new Map<string, THREE.AnimationAction>();
+  bones = new Map<string, THREE.Bone>();
+  meshes: THREE.Mesh[] = [];
+  activity: Activity = 'walk';
+  private phone: THREE.Object3D | null = null;
+  constructor(public assets: PeopleAssets, r: Rng, public gender: Gender = r.chance(0.5) ? 'male' : 'female') {
+    const A = assets.body[gender];
+    const model = skeletonClone(A.scene);
+    this.root = new THREE.Group();
+    this.root.add(model);
+    const o = pickOutfit(r, gender);
+    const hm = hairMat(A.hairBase, o.hair);
+    model.traverse((x) => {
+      if ((x as THREE.Bone).isBone) this.bones.set(x.name, x as THREE.Bone);
+      const m = x as THREE.SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      const name = (m.material as THREE.Material).name;
+      if (/Superhero/i.test(name)) m.material = bodyMaterial(A.base, o, gender, A.geo, A.geoScale);
+      else if (/Hair/i.test(name)) m.material = hm;
+      this.meshes.push(m);
+    });
+    // hair (static meshes riding the head bone)
+    const styles = gender === 'male' ? ['Hair_SimpleParted', 'Hair_SimpleParted', 'Hair_Buzzed', 'Hair_Buzzed', ''] : ['Hair_Long', 'Hair_Long', 'Hair_Buns', 'Hair_BuzzedFemale'];
+    const style = r.pick(styles);
+    const head = this.bones.get('Head')!;
+    const attach = (bone: string, obj: THREE.Object3D, bodyMatrix: THREE.Matrix4) => {
+      obj.matrixAutoUpdate = false;
+      obj.matrix.multiplyMatrices(A.bindInv.get(bone)!, bodyMatrix);
+      this.bones.get(bone)!.add(obj);
+      if ((obj as THREE.Mesh).isMesh) this.meshes.push(obj as THREE.Mesh);
+      return obj;
+    };
+    const hat = r.chance(0.22);
+    if (style && !hat) {
+      const h = assets.hair.get(style);
+      if (h) attach('Head', new THREE.Mesh(h.geo, hm), h.matrix);
+    }
+    if (gender === 'male' && r.chance(0.25)) {
+      const h = assets.hair.get('Hair_Beard');
+      if (h) attach('Head', new THREE.Mesh(h.geo, hm), h.matrix);
+    }
+    void head;
+    const b = BODY[gender];
+    const at = (x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) =>
+      new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
+    const headTop = gender === 'male' ? 1.712 : 1.655;
+    if (hat) {
+      const hc = r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a']);
+      const bm = propMat(hc, 0.95);
+      attach('Head', new THREE.Mesh(propGeo.beanie, bm), at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)));
+      attach('Head', new THREE.Mesh(propGeo.cuff, bm), at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12)));
+    }
+    // bags
+    const bagRoll = r.next();
+    const sp = gender === 'male' ? 1.25 : 1.22;
+    if (bagRoll < 0.22) {
+      const bc = r.pick(['#151517', '#22262e', '#3a3f45', '#2f3a2a', '#5a1a1c', '#1f3d5a']);
+      const bm = propMat(bc, 0.7);
+      attach('spine_03', new THREE.Mesh(propGeo.backpack, bm), at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)));
+      for (const s of [-1, 1]) attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.07, 0.115 + (o.topStyle === 2 ? 0.03 : 0), -0.15, 0, 0));
+    } else if (bagRoll < 0.4) {
+      const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
+      attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.15, b.waist - 0.02, 0.1, 0, -0.5, 0));
+    }
+    // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
+    const target = (gender === 'male' ? 1.76 : 1.63) * r.range(0.94, 1.06);
+    model.scale.setScalar(target / b.height);
+    this.mixer = new THREE.AnimationMixer(model);
+    for (const [name, clip] of A.clips) this.actions.set(name, this.mixer.clipAction(clip));
+    // a phone, shown for phone-users
+    this.phone = attach('hand_r', new THREE.Mesh(propGeo.phone, propMat('#0c0c0e', 0.25)), at(-b.wristX - 0.08, 1.45 - 0.01, 0.03, 0, 0, Math.PI / 2));
+    this.phone.visible = false;
+    this.setActivity('walk', r.range(0, 10));
+  }
+  setActivity(a: Activity, phase = 0) {
+    this.activity = a;
+    const clip = a === 'walk' ? 'Walk_Loop' : a === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop';
+    for (const [n, act] of this.actions) {
+      if (n === clip) {
+        if (!act.isRunning()) {
+          act.reset().play();
+          act.time = phase % act.getClip().duration;
+        }
+      } else act.stop();
+    }
+    if (this.phone) this.phone.visible = a === 'phone';
+  }
+  /** walking speed in m/s drives the cadence (clip walks ~0.98 m/s) */
+  setSpeed(v: number) {
+    const w = this.actions.get('Walk_Loop');
+    if (w) w.timeScale = Math.max(0.5, v / (0.98 * this.model().scale.x * (BODY[this.gender].height / 1.83)));
+  }
+  private model() {
+    return this.root.children[0];
+  }
+  setShadows(on: boolean) {
+    for (const m of this.meshes) m.castShadow = on;
+  }
+  update(dt: number) {
+    this.mixer.update(dt);
+    if (this.activity === 'phone') this.phonePose();
+  }
+  private q = new THREE.Quaternion();
+  private e = new THREE.Euler();
+  /** hold the phone up in front of the chest and look down at it */
+  private phonePose() {
+    const set = (n: string, x: number, y: number, z: number, w = 1) => {
+      const b = this.bones.get(n);
+      if (!b) return;
+      this.q.setFromEuler(this.e.set(x, y, z));
+      b.quaternion.slerp(this.q, w);
+    };
+    set('upperarm_r', 1.25, 0.25, 0.25, 1);
+    set('lowerarm_r', 0, 0, 1.85, 1);
+    set('hand_r', -0.2, 0.3, 0, 1);
+    const h = this.bones.get('Head');
+    if (h) h.rotateX(0.35);
+    const n = this.bones.get('neck_01');
+    if (n) n.rotateX(0.2);
+  }
+}
+
+// ---------------------------------------------------------------- the crowd
+interface Ped {
+  p: Person;
   axis: 'x' | 'z';
   dir: number;
   line: number;
   t: number;
   v: number;
-  ph: number;
+  /** sidestep offset across the walking line (to pass the player) */
+  off: number;
+  /** standing: seconds left before walking on */
+  wait: number;
+  tick: number;
+  acc: number;
 }
+const COUNT = 40;
+
 export class Pedestrians {
   peds: Ped[] = [];
   private rng: Rng;
+  private assets: PeopleAssets | null = null;
+  private frame = 0;
   constructor(private group: THREE.Group, seed: number) {
     this.rng = new Rng(hashN(seed, 909));
-  }
-  private make(): Ped {
-    const r = this.rng;
-    const g = new THREE.Group();
-    const skin = mat(r.pick(SKIN), { rough: 0.6 });
-    const top = mat(r.pick(CLOTH), { rough: 0.9 });
-    const bottom = mat(r.pick(['#1c1c22', '#2a3550', '#3a3a40', '#4a3f35', '#20263a', '#6b6255']), { rough: 0.9 });
-    const hairM = mat(r.pick(['#1a120c', '#3a2414', '#6b4a2a', '#c8a060', '#2a2a2a', '#8a8a8a']), { rough: 0.7 });
-    const shoeM = mat(r.pick(['#111111', '#3a2618', '#e8e8e8', '#5a1d1d']), { rough: 0.5 });
-    const h = r.range(0.92, 1.08);
-    const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = g) => {
-      const o = new THREE.Mesh(geo, m);
-      o.position.set(x, y, z);
-      parent.add(o);
-      return o;
-    };
-    const torso = add(pedGeo.torso, top, 0, 1.3, 0);
-    torso.castShadow = true;
-    add(pedGeo.hips, bottom, 0, 0.98, 0);
-    add(pedGeo.neck, skin, 0, 1.58, 0);
-    add(pedGeo.head, skin, 0, 1.7, 0.01);
-    add(pedGeo.hair, hairM, 0, 1.715, -0.005);
-    if (r.chance(0.2)) {
-      const cap = add(pedGeo.hair, mat(r.pick(CLOTH)), 0, 1.74, 0);
-      cap.scale.set(1.05, 0.8, 1.05);
-    }
-    const legs: THREE.Object3D[] = [], arms: THREE.Object3D[] = [];
-    for (const s of [-1, 1]) {
-      // leg: hip joint -> thigh -> knee joint -> shin -> shoe
-      const hip = new THREE.Group();
-      hip.position.set(s * 0.09, 0.95, 0);
-      add(pedGeo.thigh, bottom, 0, -0.22, 0, hip);
-      const knee = new THREE.Group();
-      knee.position.y = -0.46;
-      hip.add(knee);
-      add(pedGeo.shin, bottom, 0, -0.2, 0, knee);
-      add(pedGeo.shoe, shoeM, 0, -0.44, 0.05, knee);
-      hip.userData.knee = knee;
-      g.add(hip);
-      legs.push(hip);
-      // arm: shoulder -> upper arm -> elbow -> forearm -> hand
-      const sh = new THREE.Group();
-      sh.position.set(s * 0.215, 1.47, 0);
-      add(pedGeo.upperArm, top, 0, -0.15, 0, sh);
-      const elbow = new THREE.Group();
-      elbow.position.y = -0.3;
-      sh.add(elbow);
-      add(pedGeo.forearm, r.chance(0.5) ? skin : top, 0, -0.14, 0, elbow);
-      add(pedGeo.hand, skin, 0, -0.3, 0, elbow);
-      sh.userData.elbow = elbow;
-      g.add(sh);
-      arms.push(sh);
-    }
-    if (r.chance(0.3)) add(pedGeo.bag, mat(r.pick(['#3a2618', '#111', '#7a1d1d', '#2a3550'])), 0.26, 1.0, 0);
-    g.scale.setScalar(h);
-    this.group.add(g);
-    return { g, legs, arms, axis: 'x', dir: 1, line: 0, t: 0, v: 1.4, ph: r.range(0, 6) };
+    loadPeopleAssets()
+      .then((a) => (this.assets = a))
+      .catch((e) => console.warn('people assets failed to load', e));
   }
   private place(pd: Ped, p: THREE.Vector3, ahead: boolean) {
     const r = this.rng;
     pd.axis = r.chance(0.55) ? 'x' : 'z';
     pd.dir = r.chance(0.5) ? 1 : -1;
+    pd.off = 0;
+    const standing = ahead ? r.chance(0.3) : r.chance(0.12);
     if (pd.axis === 'x') {
       const k = Math.round(p.z / SZ - 0.5) + r.int(-1, 1);
-      pd.line = (k + 0.5) * SZ + r.pick([-1, 1]) * (ST / 2 + r.range(1.0, 3.2));
+      pd.line = (k + 0.5) * SZ + r.pick([-1, 1]) * (ST / 2 + r.range(0.9, 3.4));
       pd.t = p.x + (ahead ? r.range(-60, 60) : -pd.dir * r.range(40, 70));
     } else {
       const k = Math.round(p.x / AX - 0.5) + r.int(-1, 1);
-      pd.line = (k + 0.5) * AX + r.pick([-1, 1]) * (AVE / 2 + r.range(1.0, 3.2));
+      pd.line = (k + 0.5) * AX + r.pick([-1, 1]) * (AVE / 2 + r.range(0.9, 3.4));
       pd.t = p.z + (ahead ? r.range(-60, 60) : -pd.dir * r.range(40, 70));
     }
-    pd.v = r.range(1.1, 1.7);
-    pd.g.rotation.y = pd.axis === 'x' ? (pd.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : pd.dir > 0 ? 0 : Math.PI;
+    pd.v = r.range(1.05, 1.5);
+    if (standing) {
+      // wait at the corner, near the curb, facing across the street
+      const crossAxis = pd.axis === 'x' ? 'z' : 'x';
+      const period = crossAxis === 'x' ? AX : SZ;
+      const half = (crossAxis === 'x' ? AVE : ST) / 2;
+      const k = Math.round(pd.t / period - 0.5);
+      const c = (k + 0.5) * period;
+      const side = pd.t > c ? 1 : -1;
+      pd.dir = -side;
+      pd.t = c + side * (half + r.range(0.5, 1.6));
+      const lineOff = pd.axis === 'x' ? pd.line - Math.round(pd.line / SZ - 0.5) * SZ : 0;
+      void lineOff;
+      pd.line += r.range(-0.8, 0.8);
+      pd.wait = r.range(6, 30);
+      pd.p.setActivity(r.chance(0.45) ? 'phone' : r.chance(0.3) ? 'talk' : 'idle', r.range(0, 5));
+    } else {
+      pd.wait = 0;
+      pd.p.setActivity('walk', r.range(0, 5));
+      pd.p.setSpeed(pd.v);
+    }
+    pd.p.root.rotation.y = pd.axis === 'x' ? (pd.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : pd.dir > 0 ? 0 : Math.PI;
   }
   update(dt: number, p: THREE.Vector3) {
-    while (this.peds.length < 36) {
-      const pd = this.make();
+    if (!this.assets) return;
+    this.frame++;
+    while (this.peds.length < COUNT) {
+      const person = new Person(this.assets, this.rng);
+      this.group.add(person.root);
+      const pd: Ped = { p: person, axis: 'x', dir: 1, line: 0, t: 0, v: 1.3, off: 0, wait: 0, tick: this.peds.length, acc: 0 };
       this.place(pd, p, true);
       this.peds.push(pd);
     }
     for (const pd of this.peds) {
       const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
       if (Math.abs(pd.t - along) > 80 || Math.abs(pd.line - across) > 80) this.place(pd, p, false);
-      // step around the player
-      const dx = (pd.axis === 'x' ? pd.t : pd.line) - p.x, dz = (pd.axis === 'x' ? pd.line : pd.t) - p.z;
-      const close = Math.hypot(dx, dz) < 1.2;
-      const v = close ? 0 : pd.v;
-      pd.t += pd.dir * v * dt;
-      pd.ph += v * dt * 4.2;
-      const s = Math.sin(pd.ph) * (v > 0 ? 0.5 : 0);
-      pd.legs[0].rotation.x = s;
-      pd.legs[1].rotation.x = -s;
-      (pd.legs[0].userData.knee as THREE.Object3D).rotation.x = Math.max(0, -Math.cos(pd.ph)) * (v > 0 ? 0.9 : 0);
-      (pd.legs[1].userData.knee as THREE.Object3D).rotation.x = Math.max(0, Math.cos(pd.ph)) * (v > 0 ? 0.9 : 0);
-      pd.arms[0].rotation.x = -s * 0.7;
-      pd.arms[1].rotation.x = s * 0.7;
-      (pd.arms[0].userData.elbow as THREE.Object3D).rotation.x = -0.25 - Math.max(0, s) * 0.4;
-      (pd.arms[1].userData.elbow as THREE.Object3D).rotation.x = -0.25 - Math.max(0, -s) * 0.4;
-      pd.g.position.set(pd.axis === 'x' ? pd.t : pd.line, CURB + Math.abs(Math.cos(pd.ph)) * 0.03, pd.axis === 'x' ? pd.line : pd.t);
+      if (pd.wait > 0) {
+        pd.wait -= dt;
+        if (pd.wait <= 0) {
+          pd.p.setActivity('walk', 0);
+          pd.p.setSpeed(pd.v);
+        }
+      } else {
+        // pass the player: step aside if they are just ahead in our lane, slow down if boxed in
+        const ahead = (along - pd.t) * pd.dir;
+        const lat = across - (pd.line + pd.off);
+        let target = 0, v = pd.v;
+        if (ahead > -0.5 && ahead < 3.5 && Math.abs(lat) < 1.0) {
+          target = pd.off + (lat > 0 ? lat - 1.0 : lat + 1.0);
+          if (ahead < 1.0) v *= 0.4;
+        }
+        target = THREE.MathUtils.clamp(target, -1.2, 1.2);
+        pd.off += THREE.MathUtils.clamp(target - pd.off, -1.2 * dt, 1.2 * dt);
+        pd.t += pd.dir * v * dt;
+        pd.p.setSpeed(v);
+        const yaw = pd.axis === 'x' ? (pd.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : pd.dir > 0 ? 0 : Math.PI;
+        const turn = THREE.MathUtils.clamp((target - pd.off) * 0.6, -0.4, 0.4) * (pd.axis === 'x' ? -1 : 1) * pd.dir;
+        pd.p.root.rotation.y = yaw + turn;
+      }
+      const lineNow = pd.line + pd.off;
+      pd.p.root.position.set(pd.axis === 'x' ? pd.t : lineNow, CURB, pd.axis === 'x' ? lineNow : pd.t);
+      // LOD: animate near people every frame, far ones every 2nd / 4th frame; shadows only nearby
+      const d = Math.hypot(pd.p.root.position.x - p.x, pd.p.root.position.z - p.z);
+      const every = d < 25 ? 1 : d < 50 ? 2 : 4;
+      pd.acc += dt;
+      if ((this.frame + pd.tick) % every === 0) {
+        pd.p.update(pd.acc);
+        pd.acc = 0;
+      }
+      pd.p.setShadows(d < 40);
     }
   }
 }
-
