@@ -15,6 +15,7 @@ This machine has **no GPU** (SwiftShader software rendering), 4 CPUs shared by m
 | Does it *look* right? | lab scene screenshot with `--fast` (or `--notex --nopost` at small size) | ~30–60 s under load |
 | Draw calls / triangles of the real world | `node scripts/perf.mjs` (counts only, takes the world lock) | minutes |
 | Why is a page slow to boot / to its first frame? | `node scripts/boot.mjs --url "/?lab=x&fast=1" [--profile] [--programs] [--frames 5] [--steady 30]` | ~10–60 s |
+| Does a player journey still work end to end (street, shop, building, elevator, museum, districts, edges)? | `npm run e2e -- <journey>[,...] --port <port>`: the real game, logic only (no drawing), takes the world lock, ≤ 240 s each, RAM watchdog; see `scripts/e2e/lib.mjs`, `docs/research/e2e-findings.md` | 1–3 min each |
 | Full-world screenshot | last resort, under the lock | minutes, ~2 GB |
 
 ## 0. Never the full city while developing

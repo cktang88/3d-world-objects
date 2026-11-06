@@ -392,7 +392,7 @@ async function enter(p: Portal) {
     currentDesc = target;
     roomsVisited++;
     seamSwitch(s, carried?.pos, carried?.yaw);
-    if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
+    if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : target.shop ? `Welcome to ${target.name}` : target.name);
     transitioning = false;
     return;
   }
@@ -416,7 +416,7 @@ async function enter(p: Portal) {
   seamHint(-1);
   setLevel(built);
   if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
-  else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
+  else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : target.shop ? `Welcome to ${target.name}` : target.name);
   else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} wing — every doorway leads somewhere similar`);
   await precompile();
   await fadeTo(0, shrink ? 700 : quick ? 260 : 350);

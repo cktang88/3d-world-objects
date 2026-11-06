@@ -312,8 +312,9 @@ export async function harness(name, scriptUrl) {
 
   browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
-  // RAM watchdog: the machine is shared (16 GB); kill the browser past --maxmb (default 4000) of RSS
-  const MAXMB = Number(args.maxmb ?? 4000);
+  // RAM watchdog: the machine is shared (16 GB); kill the browser past --maxmb (default 6000) of RSS
+  // (world boots with seamless on peak at 2-4.7 GB here)
+  const MAXMB = Number(args.maxmb ?? 6000);
   const rootPid = process.pid; // playwright's browser processes are children of this one
   const rss = () => {
     if (!rootPid) return 0;
