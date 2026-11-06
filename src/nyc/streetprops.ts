@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { SIG, CURB, BX, BZ, LX, streetName, canvasTex } from './common';
 import { rect, overlaps, type Rect as LRect } from '../level';
-import { addTree, SPECIES, TREE_VARIANTS, type Species } from './streettrees';
+import { addTree, pickSpecies, TREE_VARIANTS, type Species } from './streettrees';
 import { streetLightMarker } from '../lighting';
 import { propAtlas, propAtlasLit, region, signSlot, toRect, wireMesh, type Rect, type Region } from './propatlas';
 
@@ -178,9 +178,9 @@ export function tree(stat: THREE.Object3D, x: number, z: number, rng: Rng, group
   // block-dominant species, the odd one different
   let sp = species;
   if (!sp) {
-    group.userData.treeSpecies ??= rng.pick(['plane', 'plane', 'plane', 'locust', 'locust', 'pear'] as Species[]);
+    group.userData.treeSpecies ??= pickSpecies(rng);
     group.userData.treeVariant ??= rng.int(0, TREE_VARIANTS - 1);
-    sp = rng.chance(0.85) ? group.userData.treeSpecies : rng.pick(SPECIES);
+    sp = rng.chance(0.7) ? group.userData.treeSpecies : pickSpecies(rng);
   }
   addTree(group, sp!, sp === group.userData.treeSpecies ? group.userData.treeVariant ?? 0 : 0, x + (axis === 'x' ? rng.range(-0.3, 0.3) : 0), CURB + 0.01, z + (axis === 'z' ? rng.range(-0.3, 0.3) : 0), rng);
 }

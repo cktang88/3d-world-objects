@@ -28,7 +28,7 @@ const scene: LabScene = {
     const list: [Species, number][] = sp ? [0, 1, 2].map((v) => [sp, v]) : SPECIES.map((s) => [s, Number(params.get('v') ?? 0)]);
     list.forEach(([s, v], i) => {
       const t = treeMesh(s, v, lod);
-      t.position.x = (i - (list.length - 1) / 2) * 12;
+      t.position.x = (i - (list.length - 1) / 2) * 11;
       group.add(t);
     });
   },

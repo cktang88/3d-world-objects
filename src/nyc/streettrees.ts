@@ -13,9 +13,22 @@ import { normalFrom } from '../textures';
  *  - locust: thornless honey locust (Gleditsia triacanthos inermis). Vase-shaped, open airy crown,
  *            dark furrowed bark, fine pinnate leaves that cast dappled shade.
  *  - pear:   Callery pear / small ornamental: short trunk, dense upright oval crown.
+ *  - oak:    pin oak (Quercus palustris): strong central leader, many small limbs along it, the
+ *            lower ones drooping, pyramidal crown; smooth grey bark; deeply lobed bristle-tipped leaves.
+ *  - ginkgo: narrow, irregular upright crown with sparse ascending limbs; fan-shaped leaves.
  */
-export type Species = 'plane' | 'locust' | 'pear';
-export const SPECIES: Species[] = ['plane', 'locust', 'pear'];
+export type Species = 'plane' | 'locust' | 'pear' | 'oak' | 'ginkgo';
+export const SPECIES: Species[] = ['plane', 'locust', 'pear', 'oak', 'ginkgo'];
+/**
+ * Relative frequency among these five in the NYC street-tree census (2015: London planetree 12.9%,
+ * honeylocust 9.9%, Callery pear 9.0%, pin oak 7.6%, ginkgo 3.7% of all street trees).
+ */
+export const SPECIES_WEIGHT: Record<Species, number> = { plane: 12.9, locust: 9.9, pear: 9.0, oak: 7.6, ginkgo: 3.7 };
+export function pickSpecies(r: Rng): Species {
+  let x = r.range(0, SPECIES.reduce((a, s) => a + SPECIES_WEIGHT[s], 0));
+  for (const s of SPECIES) if ((x -= SPECIES_WEIGHT[s]) <= 0) return s;
+  return 'plane';
+}
 
 interface Spec {
   height: number;
@@ -30,15 +43,21 @@ interface Spec {
   upward: number; // tropism
   card: number; // leaf card size (m)
   cardsPerTip: number;
-  bark: 'plane' | 'locust' | 'pear';
-  leaf: 'plane' | 'locust' | 'pear';
+  bark: Species;
+  leaf: Species;
   leader: number; // how far the central leader continues (fraction of height)
+  limbRange?: number; // fraction of the leader along which scaffold limbs start (default 0.3)
+  cone?: number; // higher limbs are this much shorter (pyramidal crowns)
+  droop?: number; // extra tilt for the lowest limbs (radians)
+  limbLen?: number; // scaffold limb length multiplier (default 1)
 }
 
 const SPECS: Record<Species, Spec> = {
   plane: { height: 14, clear: 3.0, r0: 0.27, limbs: [3, 5], limbTilt: [0.55, 0.85], depth: 3, childPer: [4, 5], childAngle: [0.6, 1.05], lenRatio: 0.6, upward: 0.06, card: 1.5, cardsPerTip: 10, bark: 'plane', leaf: 'plane', leader: 0.78 },
   locust: { height: 12, clear: 2.7, r0: 0.21, limbs: [4, 5], limbTilt: [0.55, 0.9], depth: 3, childPer: [3, 5], childAngle: [0.6, 1.0], lenRatio: 0.64, upward: 0.05, card: 1.35, cardsPerTip: 8, bark: 'locust', leaf: 'locust', leader: 0.55 },
   pear: { height: 9, clear: 2.3, r0: 0.19, limbs: [5, 6], limbTilt: [0.3, 0.5], depth: 3, childPer: [3, 4], childAngle: [0.45, 0.8], lenRatio: 0.6, upward: 0.12, card: 1.1, cardsPerTip: 10, bark: 'pear', leaf: 'pear', leader: 0.85 },
+  oak: { height: 15, clear: 3.2, r0: 0.23, limbs: [9, 11], limbTilt: [0.95, 1.2], depth: 3, childPer: [3, 4], childAngle: [0.5, 0.9], lenRatio: 0.6, upward: 0.05, limbLen: 0.55, card: 1.3, cardsPerTip: 8, bark: 'oak', leaf: 'oak', leader: 0.97, limbRange: 0.8, cone: 0.6, droop: 0.22 },
+  ginkgo: { height: 12, clear: 2.4, r0: 0.18, limbs: [5, 7], limbTilt: [0.4, 0.75], depth: 2, childPer: [3, 4], childAngle: [0.5, 0.9], lenRatio: 0.66, upward: 0.1, card: 1.25, cardsPerTip: 13, bark: 'ginkgo', leaf: 'ginkgo', leader: 0.95, limbRange: 0.6, cone: 0.45 },
 };
 
 // ---------------------------------------------------------------- textures
@@ -117,10 +136,39 @@ function drawPalmate(g: CanvasRenderingContext2D, r: Rng, lobes: number) {
   g.fill();
 }
 
+/** pin oak: deep sinuses, bristle-tipped lobes; petiole at origin, leaf along -y, length 1 */
+function drawOak(g: CanvasRenderingContext2D, r: Rng) {
+  const lobes = [[0.1, 0.22, 0.3, 0.3], [0.07, 0.48, 0.42, 0.5], [0.07, 0.72, 0.3, 0.76]];
+  const right: [number, number][] = [[0.04, 0]];
+  for (const [sx, sy, tx, ty] of lobes) {
+    const j = r.range(0.9, 1.1);
+    right.push([sx, -sy], [tx * j * 0.8, -(ty - 0.05)], [tx * j, -ty], [tx * j * 0.75, -(ty + 0.06)]);
+  }
+  right.push([0.05, -0.9], [0, -1.02]);
+  g.beginPath();
+  g.moveTo(0, 0);
+  for (const [x, y] of right) g.lineTo(x, y);
+  for (let i = right.length - 2; i >= 0; i--) g.lineTo(-right[i][0], right[i][1] - 0.02);
+  g.closePath();
+  g.fill();
+}
+/** ginkgo: a fan on a long petiole, notched in the middle */
+function drawGinkgo(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.moveTo(0, 0);
+  g.lineTo(-0.48, -0.62);
+  g.quadraticCurveTo(-0.3, -0.92, -0.04, -0.86);
+  g.lineTo(0, -0.74);
+  g.lineTo(0.04, -0.86);
+  g.quadraticCurveTo(0.3, -0.92, 0.48, -0.62);
+  g.closePath();
+  g.fill();
+}
+
 function leafAtlas(kind: Spec['leaf']) {
   const S = 1024, cell = 512;
   const [c, g] = makeCanvas(S);
-  const r = new Rng(kind === 'plane' ? 11 : kind === 'locust' ? 23 : 37);
+  const r = new Rng(kind === 'plane' ? 11 : kind === 'locust' ? 23 : kind === 'oak' ? 41 : kind === 'ginkgo' ? 53 : 37);
   for (let cy = 0; cy < 2; cy++)
     for (let cx = 0; cx < 2; cx++) {
       g.save();
@@ -175,13 +223,13 @@ function leafAtlas(kind: Spec['leaf']) {
           }
         }
       } else {
-        const n = kind === 'plane' ? 13 : 18;
+        const n = kind === 'plane' ? 13 : kind === 'oak' ? 14 : kind === 'ginkgo' ? 22 : 18;
         for (let i = 0; i < n; i++) {
           const t = 0.18 + (i / n) * 0.82;
           const [bx, by] = twig[Math.round(t * 10)];
           const side = i % 2 ? 1 : -1;
           const ang = side * r.range(0.4, 1.2) - Math.PI / 2;
-          const pet = kind === 'plane' ? r.range(30, 55) : r.range(10, 20);
+          const pet = kind === 'plane' ? r.range(30, 55) : kind === 'ginkgo' ? r.range(25, 45) : r.range(10, 20);
           const lx = bx + Math.cos(ang) * pet, ly = by + Math.sin(ang) * pet;
           g.strokeStyle = '#6d6a2c';
           g.lineWidth = 3;
@@ -189,18 +237,20 @@ function leafAtlas(kind: Spec['leaf']) {
           g.moveTo(bx, by);
           g.lineTo(lx, ly);
           g.stroke();
-          const size = kind === 'plane' ? r.range(95, 135) : r.range(60, 80);
+          const size = kind === 'plane' ? r.range(95, 135) : kind === 'oak' ? r.range(85, 115) : kind === 'ginkgo' ? r.range(55, 75) : r.range(60, 80);
           g.save();
           g.translate(lx, ly);
           g.rotate(ang + Math.PI / 2 + r.range(-0.3, 0.3));
           g.scale(size, size);
-          const hue = kind === 'plane' ? r.range(78, 98) : r.range(95, 115);
-          const light = r.range(24, 38);
+          const hue = kind === 'plane' ? r.range(78, 98) : kind === 'oak' ? r.range(95, 112) : kind === 'ginkgo' ? r.range(70, 84) : r.range(95, 115);
+          const light = kind === 'oak' ? r.range(20, 30) : kind === 'ginkgo' ? r.range(34, 46) : r.range(24, 38);
           const grad = g.createLinearGradient(0, 0, 0, -1);
           grad.addColorStop(0, hsl(hue, 38, light - 4));
           grad.addColorStop(1, hsl(hue - 6, 45, light + 8));
           g.fillStyle = grad;
           if (kind === 'plane') drawPalmate(g, r, r.chance(0.7) ? 5 : 3);
+          else if (kind === 'oak') drawOak(g, r);
+          else if (kind === 'ginkgo') drawGinkgo(g);
           else {
             g.beginPath();
             g.ellipse(0, -0.5, 0.33, 0.52, 0, 0, Math.PI * 2);
@@ -210,7 +260,7 @@ function leafAtlas(kind: Spec['leaf']) {
           g.strokeStyle = hsl(hue, 30, light + 14, 0.55);
           g.lineWidth = 0.02;
           g.beginPath();
-          const vs = kind === 'plane' ? [-1.25, -0.62, 0, 0.62, 1.25] : [0];
+          const vs = kind === 'plane' ? [-1.25, -0.62, 0, 0.62, 1.25] : kind === 'ginkgo' ? [-0.5, -0.25, 0, 0.25, 0.5] : [0];
           for (const a of vs) {
             g.moveTo(0, 0);
             g.lineTo(Math.sin(a) * 0.8, -Math.cos(a) * 0.8);
@@ -227,7 +277,7 @@ function leafAtlas(kind: Spec['leaf']) {
 function barkCanvas(kind: Spec['bark']) {
   const S = 512;
   const [c, g] = makeCanvas(S);
-  const r = new Rng(kind === 'plane' ? 5 : kind === 'locust' ? 6 : 7);
+  const r = new Rng(kind === 'plane' ? 5 : kind === 'locust' ? 6 : kind === 'oak' ? 8 : kind === 'ginkgo' ? 9 : 7);
   const wrapBlob = (x: number, y: number, rx: number, ry: number, rot: number, fill: string) => {
     for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
       g.fillStyle = fill;
@@ -256,7 +306,7 @@ function barkCanvas(kind: Spec['bark']) {
     }
   } else {
     // dark grey-brown with vertical furrows and plates
-    g.fillStyle = kind === 'locust' ? '#3e3730' : '#4f4b46';
+    g.fillStyle = kind === 'locust' ? '#3e3730' : kind === 'oak' ? '#5d5b56' : kind === 'ginkgo' ? '#4a4239' : '#4f4b46';
     g.fillRect(0, 0, S, S);
     for (let i = 0; i < 70; i++) {
       const x = r.range(0, S);
@@ -441,19 +491,27 @@ function skeleton(spec: Spec, seed: number) {
   }
   out.push({ pts: tp, rad: tr, level: 0 });
   const rTop = tr[tr.length - 1];
-  // central leader
+  // central leader first, then scaffold limbs starting along it
   const leaderLen = H * spec.leader - spec.clear;
+  const li = out.length;
+  grow(spec, r, out, tips, trunkTop, lean, leaderLen, rTop * 0.8, 1);
+  const leader = out[li];
   const limbs = r.int(spec.limbs[0], spec.limbs[1]);
+  const range = spec.limbRange ?? 0.3;
   let az = r.range(0, 6.28);
   for (let i = 0; i < limbs; i++) {
-    az += (Math.PI * 2) / limbs + r.range(-0.35, 0.35);
-    const tilt = r.range(spec.limbTilt[0], spec.limbTilt[1]);
+    const f = i / limbs;
+    az += 2.4 + r.range(-0.35, 0.35);
+    const tilt = r.range(spec.limbTilt[0], spec.limbTilt[1]) + (spec.droop ?? 0) * (1 - f);
     const dir = new THREE.Vector3(Math.cos(az) * Math.sin(tilt), Math.cos(tilt), Math.sin(az) * Math.sin(tilt));
-    const y0 = (i / limbs) * leaderLen * 0.3 + r.range(0, 0.4);
-    const start = trunkTop.clone().add(new THREE.Vector3(0, y0, 0));
-    grow(spec, r, out, tips, start, dir, (H - spec.clear) * r.range(0.6, 0.72), rTop * r.range(0.6, 0.75), 1);
+    // point on the leader polyline
+    const u = Math.min(0.999, f * range + r.range(0, 0.06)) * (leader.pts.length - 1);
+    const k = Math.floor(u);
+    const start = leader.pts[k].clone().lerp(leader.pts[k + 1], u - k);
+    const rr = THREE.MathUtils.lerp(leader.rad[k], leader.rad[k + 1], u - k);
+    const len = (H - spec.clear) * r.range(0.6, 0.72) * (spec.limbLen ?? 1) * (1 - (spec.cone ?? 0) * f);
+    grow(spec, r, out, tips, start, dir, len, Math.min(rTop * r.range(0.6, 0.75), rr * 0.85), 1);
   }
-  grow(spec, r, out, tips, trunkTop, lean, leaderLen, rTop * 0.8, 1);
   return { branches: out, tips, H };
 }
 
