@@ -196,3 +196,45 @@ test('atrium: spawn free and all eight wing doorways reachable', async () => {
   none(doors.filter((p) => { const c = p.box.getCenter(new THREE.Vector3()); return !reach(c.x, c.z, 1.6); }), 'unreachable atrium doorways', (p) => p.label);
   a.dispose();
 });
+
+/** objects of one size band, for the display-choice tests */
+function band(seed: number, n: number, lo: number, hi: number, yk: [number, number]): Measured[] {
+  const r = new Rng(seed);
+  return Array.from({ length: n }, (_, i) => {
+    const L = r.range(lo, hi);
+    const real = new THREE.Vector3(L, L * r.range(yk[0], yk[1]), L * r.range(0.4, 1));
+    const entry = { ds: 'objaverse', split: 'train', row: i, id: `qb-${seed}-${i}`, family: 'misc', entry: '', title: `thing ${i}`, author: '', url: '', license: 'CC0', path: '', bytes: 0, f: 0, joints: 0 } as RemoteEntry;
+    return { entry, raw: real.clone(), k: 1, real };
+  });
+}
+
+test('period galleries dress furniture as a room set; study rooms put the tiniest things in drawers', () => {
+  const rooms = [1, 2, 3, 4, 5, 6].flatMap((s) => assemble(band(s, 8, 0.8, 1.6, [0.6, 1.1]), STYLES.period, new Rng(s)).filter((u) => u.type === 'room'));
+  expect(rooms.length >= 2, `only ${rooms.length} period room sets in 6 period galleries`);
+  for (const u of rooms) expect(u.items.length >= 3, `a room set with ${u.items.length} pieces`);
+  const units = assemble(band(9, 30, 0.02, 0.09, [0.2, 0.6]), STYLES.study, new Rng(9));
+  const dr = units.filter((u) => u.type === 'drawers');
+  expect(dr.length >= 1, 'no specimen drawers for 30 tiny objects in a study room');
+  for (const u of dr) for (const m of u.items) expect(m.real.y <= 0.07, `${fmt(m.real.y)} m tall object in a drawer`);
+});
+
+test('rooms of small things only are intimate (low ceiling, small doors)', () => {
+  for (const s of [1, 2, 3]) {
+    const units = assemble(band(s, 20, 0.05, 0.3, [0.4, 1.2]), STYLES.study, new Rng(s));
+    const plan = planRoom(units, STYLES.study, new Rng(s), 3);
+    expect(plan.H <= 4.4, `ceiling ${fmt(plan.H)} m in a cabinet room`);
+    expect(plan.doors.every((d) => d.h <= 2.8), 'big doors in a cabinet room');
+  }
+});
+
+test('every gallery carries the same light rig (no shader recompiles between rooms)', async () => {
+  const counts: number[] = [];
+  for (const k of SI_SAMPLE) {
+    const g = await siGallery(k);
+    let n = 0;
+    g.group.traverse((o) => { if ((o as THREE.Light).isLight) n++; });
+    counts.push(n);
+    g.dispose();
+  }
+  expect(new Set(counts).size === 1, `light counts differ between rooms: ${counts.join(', ')}`);
+});
