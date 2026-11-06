@@ -41,7 +41,7 @@ const AREAS = {
   nyc: ['nyc', 'ground'], ground: ['ground'], streets: ['nyc', 'ground'], buildings: ['nyc', 'buildings'],
   districts: ['districts', 'districts-blocks', 'districts-open', 'districts-scale', 'districts-overlap', 'districts-ground'],
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
-  shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
+  shop: ['shop', 'shopaudit'], shops: ['shop', 'shopaudit'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
   zfight: ['zfight'], flicker: ['zfight'], memory: ['memory', 'memory-city'], mem: ['memory', 'memory-city'], leaks: ['memory', 'memory-city'],
   meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],

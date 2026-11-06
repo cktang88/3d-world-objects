@@ -37,3 +37,8 @@ Minor items:
   - The new realScale rescales 6,111 objects (old: 8,455): 3,370 by a unit factor, 3,059 of them down (old: 3,438 down).
   - Example: "BMW 4" at 0.6 m comes out at 4.28 m (old: 0.6 m).
 - **Hand SIZE values that disagree with the measured label medians by more than 3×** (the label wins for entry labels): tower, console, airplane, reactor, press, bridge, flower, transformer, hoop, carriage, lamp, handbag, clock, candle, warehouse, floodlight, train, crane, turbine, dryer, tugboat. These are worth a look by their owners.
+
+## Shop aisles (tests/shopaudit.test.ts)
+
+- Customer aisles in every shop type are now >= 0.9 m between facing fixtures (deli case queue 0.48 -> 1.23 m, pharmacy counter queue 0.86 -> 1.25 m, electronics demo tables 0.55 -> >= 1 m, sports plinths/bins 0.65-0.8 -> 1.0 m).
+- KNOWN (soft): staff-side gaps under 0.9 m remain in deli (0.68-0.76 m behind the deli case, 0.63 m behind the counter), pharmacy (0.48 m between the checkout counter and its back gondola), lighting (0.75-0.86 m between lamp vignettes) and furniture (0.45 m at one vignette).

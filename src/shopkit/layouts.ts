@@ -143,9 +143,10 @@ const deli: Layout = {
     F.atm(k);
     yield;
     // centre gondolas
-    const x0 = -xi + 0.86 + 1.0, x1 = xi - 0.47 - 0.95;
+    const x0 = -xi + 0.86 + 1.0, x1 = xi - 0.47 - 0.98; // [audit] 0.91 m to the right-wall shelving (was 0.88)
     const nG = Math.max(1, Math.floor((x1 - x0 + 0.9) / 1.9));
-    const gz0 = zb + 3.0, gz1 = zf - 4.1;
+    // [audit] 1.2 m of queue space in front of the deli case (was 0.48 m: the gondolas' back ends crowded it)
+    const gz0 = zb + 3.75, gz1 = zf - 4.1;
     for (let i = 0; i < nG; i++) {
       const x = nG === 1 ? (x0 + x1) / 2 : x0 + 0.47 + (i * (x1 - x0 - 0.94)) / (nG - 1);
       k.at(x, (gz0 + gz1) / 2, Math.PI / 2);
@@ -223,7 +224,7 @@ const pharmacy: Layout = {
     k.at(px, zb + 0.44);
     F.tallWall(k, W * 0.4, 2.2, { color: '#e8e8e6', shelves: 6 });
     yield;
-    k.at(px, zb + 1.7);
+    k.at(px, zb + 1.75); // [audit] 0.91 m for the pharmacist behind the counter (was 0.86)
     F.table(k, W * 0.4, 0.7, 1.05, { color: '#f4f4f2', cloth: '#ffffff', mode: 'shelf' });
     yield;
     k.at(px, zb + 0.01);
@@ -238,7 +239,8 @@ const pharmacy: Layout = {
     }
     // aisles of gondolas with hanging numbered signs
     const nA = Math.max(2, Math.floor((W - 2.6) / 2.25));
-    const gz0 = zb + 2.9, gz1 = zf - 5.0;
+    // [audit] 1.25 m to queue at the pharmacy counter (was 0.86 m)
+    const gz0 = zb + 3.3, gz1 = zf - 5.0;
     const cats = ['VITAMINS\nPAIN RELIEF', 'COLD & FLU\nFIRST AID', 'HAIR CARE\nSKIN CARE', 'BABY\nHOUSEHOLD', 'SNACKS\nCANDY', 'PERSONAL\nCARE', 'SEASONAL\nTOYS'];
     for (let i = 0; i < nA; i++) {
       const x = -((nA - 1) * 2.25) / 2 + i * 2.25;
@@ -367,7 +369,8 @@ const electronics: Layout = {
     k.at(-1, zb + 0.02);
     F.gondola(k, W - 4, { double: false, height: 2.0, shelves: 5, color: '#2a2b2e', strip: '#1565c0' });
     yield;
-    k.at(xi - 2.0, zb + 1.6);
+    // [audit] clear of the right-wall showcases (was 0.41 m between them)
+    k.at(xi - 2.6, zb + 1.6);
     F.showcase(k, 1.8, { frame: '#2a2b2e' });
     yield;
     k.at(0, 0);
@@ -376,7 +379,9 @@ const electronics: Layout = {
     // centre: demo tables
     for (let i = 0; i < 2; i++)
       for (let j = 0; j < 2; j++) {
-        k.at(-1.0 + i * 2.2 - (W > 9.5 ? 0.6 : 0.8), zb + 4.2 + j * 3.4);
+        // [audit] two tables spread evenly between the slatwall and the showcases: aisles >= 1 m (was 0.55 m between them)
+        const a0 = -xi + 0.6, a1 = xi - 1.0, gap = (a1 - a0 - 3.2) / 3;
+        k.at(a0 + gap + 0.8 + i * (1.6 + gap), zb + 4.2 + j * 3.4);
         F.table(k, 1.6, 0.9, 0.9, { color: '#f4f4f4', legs: '#d0d0d0', mode: 'shelf', cloth: '#f4f4f4', messy: 0.05 });
         yield;
       }
@@ -588,7 +593,8 @@ const sports: Layout = {
       F.pegWall(k, D - 4.5, 0.35, 2.6, { slat: true, color: '#e8e8e4' });
       yield;
     }
-    const gz0 = zb + 2.6, gz1 = zf - 5.0;
+    // [audit] gondolas stop 1 m short of the ball bins (was 0.65 m)
+    const gz0 = zb + 2.6, gz1 = zf - 5.35;
     for (let i = 0; i < 2; i++) {
       k.at(-1.6 + i * 3.2, (gz0 + gz1) / 2, Math.PI / 2);
       F.gondola(k, gz1 - gz0, { height: 1.6, shelves: 4, color: '#2a2b2e', strip: c.color, messy: 0.25 });
@@ -602,7 +608,7 @@ const sports: Layout = {
     }
     k.at(0, zb + 0.6);
     for (let i = 0; i < 3; i++) {
-      k.at(-2.6 + i * 2.6, zb + 1.0);
+      k.at(-2.8 + i * 2.8, zb + 1.0); // [audit] 1 m between the plinths (was 0.8 m)
       F.plinth(k, 1.8, 1.2, 0.15, { color: '#2a2b2e' });
       yield;
     }
