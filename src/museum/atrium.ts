@@ -39,7 +39,7 @@ export class AtriumLevel extends MuseumBase {
       { wall: 'S', at: -8, w: 3, h: 4.4 },
       { wall: 'S', at: 8, w: 3, h: 4.4 },
     ];
-    const plan: Plan = { W, D, H, Hw: H, floor: [], wall: [], hang: [], doors, ceiling: 'lantern', floorKind: 'marble', wallColor: '#e6dccb', rows: [] };
+    const plan: Plan = { W, D, H, Hw: H, floor: [], wall: [], hang: [], doors, ceiling: 'lantern', floorKind: 'marble', wallColor: '#e6dccb', rows: [], columns: [], pilasters: [] };
     buildShell(this, plan, st);
     this.env.hemi.intensity = 1.05;
     this.spawn.pos.set(0, 0, -3.5);
@@ -122,6 +122,7 @@ export class AtriumLevel extends MuseumBase {
     const pool = r.shuffle(wings.flatMap((w) => w.preview)) as RemoteEntry[];
     loads.push(this.hero(pool.slice(0, 5), ctx));
     this.flush();
+    this.markBuilt();
     this.ready = Promise.allSettled(loads).then(() => this.settle());
   }
 

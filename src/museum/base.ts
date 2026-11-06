@@ -143,10 +143,14 @@ export abstract class MuseumBase implements Level {
   protected maxSpots = 10;
   /** resolves when the room is built and every exhibit has arrived (for the lab) */
   ready: Promise<void> = Promise.resolve();
+  /** resolves when the room itself is built (exhibit models may still be streaming in); `ready` waits for those too */
+  built: Promise<void>;
+  protected markBuilt: () => void = () => {};
   private pendingLoads: Promise<unknown>[] = [];
 
   constructor() {
     this.rig();
+    this.built = new Promise<void>((r) => (this.markBuilt = r));
   }
 
   colliders() {

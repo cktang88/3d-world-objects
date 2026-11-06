@@ -209,6 +209,9 @@ export interface Plan {
   floorKind: Floor;
   wallColor: string;
   rows: number[];
+  /** free-standing columns in big halls, and pilasters along the walls */
+  columns: { x: number; z: number }[];
+  pilasters: { wall: Wall; at: number }[];
 }
 
 /** a wall's inner face, and the frame for something standing against it at `s` */
@@ -423,5 +426,38 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
       });
     });
   }
-  return { W, D, H, Hw, floor, wall, hang: hangP, doors, ceiling, floorKind, wallColor, rows: rowsZ };
+  // structure: pilasters between the wall displays, a column grid in the aisles of big halls
+  const pilasters: { wall: Wall; at: number }[] = [];
+  const columns: { x: number; z: number }[] = [];
+  const structural = !st.outdoor && ceiling !== 'vault' && ceiling !== 'glass' && st.arch !== 'whitecube' && st.arch !== 'science';
+  if (structural && (W >= 14 || D >= 20)) {
+    const busy = (wall: Wall, at: number) =>
+      doors.some((d) => d.wall === wall && Math.abs(d.at - at) < d.w / 2 + 0.6) ||
+      wall_.some((q) => q.wall === wall && Math.abs(q.at - at) < q.u.w / 2 + 0.4) ||
+      (wall === 'S' && Math.abs(at) < 5);
+    const wall_ = (wall ?? []).map((q) => ({ u: q.u, wall: (Math.abs(q.f.rot - Math.PI / 2) < 0.01 ? 'W' : Math.abs(q.f.rot + Math.PI / 2) < 0.01 ? 'E' : Math.abs(q.f.rot) < 0.01 ? 'N' : 'S') as Wall, at: Math.abs(q.f.rot) < 0.01 || Math.abs(Math.abs(q.f.rot) - Math.PI) < 0.01 ? q.f.x : q.f.z }));
+    const sp = st.arch === 'period' ? 4.5 : 6;
+    for (const wl of ['W', 'E', 'N'] as Wall[]) {
+      const [a0, a1] = wl === 'N' ? [-W / 2, W / 2] : [-D, 0];
+      const n = Math.floor((a1 - a0) / sp);
+      for (let i = 1; i < n; i++) {
+        const at = a0 + ((a1 - a0) * i) / n;
+        if (!busy(wl, at)) pilasters.push({ wall: wl, at });
+      }
+    }
+  }
+  if (structural && W >= 26 && ceiling !== 'lantern' && !hangU.length) {
+    const sp = 9;
+    const nx = Math.floor(W / sp);
+    for (let i = 1; i < nx; i++) {
+      const x = -W / 2 + (W * i) / nx;
+      if (Math.abs(x) < 2.5) continue;
+      for (let k = 0; k + 1 < rowsZ.length; k++) {
+        const z = (rowsZ[k] - rowD[k] / 2 + rowsZ[k + 1] + rowD[k + 1] / 2) / 2;
+        const clear = floor.every((q) => Math.abs(q.f.x - x) > q.u.w / 2 + 0.9 || Math.abs(q.f.z - z) > q.u.d / 2 + 0.9);
+        if (clear && z < -3) columns.push({ x, z });
+      }
+    }
+  }
+  return { W, D, H, Hw, floor, wall, hang: hangP, doors, ceiling, floorKind, wallColor, rows: rowsZ, columns, pilasters };
 }

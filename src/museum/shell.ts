@@ -3,7 +3,7 @@ import { mat } from '../build';
 import { surface } from '../pbr';
 import type { LevelDesc } from '../level';
 import { rect } from '../level';
-import { shade, WORLD, type MuseumBase } from './base';
+import { Frame, shade, WORLD, type MuseumBase } from './base';
 import type { Door, Plan, Wall } from './plan';
 import type { Floor, Style } from './style';
 import { textPlane, SANS, SERIF } from './text';
@@ -126,6 +126,34 @@ export function buildShell(lv: MuseumBase, p: Plan, st: Style) {
   // ceilings
   ceilingOf(lv, p, st);
   if (st.arch === 'openair') parkTrees(lv, p);
+  structure(lv, p, st);
+}
+
+/** pilasters along the walls and columns in the aisles of big halls */
+function structure(lv: MuseumBase, p: Plan, st: Style) {
+  const { W, D, H, Hw } = p;
+  const iron = st.arch === 'machine' || st.arch === 'motor' || st.arch === 'maritime';
+  const m = iron ? mat(st.dark ? '#2e3236' : '#4a5258', { metal: 0.5, rough: 0.5 }) : mat(st.trim, { rough: 0.6 });
+  const cols = (lv as unknown as { cols: ReturnType<typeof rect>[] }).cols;
+  for (const pl of p.pilasters) {
+    const f = pl.wall === 'W' ? new Frame(-W / 2, pl.at, Math.PI / 2) : pl.wall === 'E' ? new Frame(W / 2, pl.at, -Math.PI / 2) : new Frame(pl.at, -D, 0);
+    lv.bx(m, 0.6, Hw, 0.18, 0, 0, 0.09, f);
+    lv.bx(m, 0.78, 0.28, 0.3, 0, 0, 0.15, f);
+    lv.bx(m, 0.8, 0.32, 0.3, 0, Hw - 0.32, 0.15, f);
+    cols.push(f.rect(0, 0.15, 0.8, 0.3));
+  }
+  for (const c of p.columns) {
+    if (iron) {
+      lv.cy(m, 0.22, H, c.x, 0, c.z);
+      lv.bx(m, 0.7, 0.4, 0.7, c.x, 0, c.z);
+      lv.bx(m, 0.9, 0.3, 0.9, c.x, H - 0.3, c.z);
+    } else {
+      lv.cy(m, 0.36, H, c.x, 0, c.z);
+      lv.bx(m, 1.0, 0.35, 1.0, c.x, 0, c.z);
+      lv.bx(m, 1.0, 0.45, 1.0, c.x, H - 0.45, c.z);
+    }
+    cols.push(rect(c.x, c.z, 1.0, 1.0));
+  }
 }
 
 /** trees along the park wall, clear of the gateways */

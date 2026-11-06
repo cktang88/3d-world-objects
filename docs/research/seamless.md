@@ -110,3 +110,6 @@ How a `GalleryLevel` (src/museum/gallery.ts) is built, for prebuilding the room 
   same entrance convention) is shown and replaced when the room is built.
 - **Lights.** Every museum room carries the same rig (10 SpotLights + 3 PointLights, no shadows,
   unused ones at intensity 0), so two galleries in the scene at once have 26 museum lights.
+- **`level.built`** resolves as soon as the room itself (shell, displays, labels, lights) is built,
+  with exhibit models possibly still streaming; **`level.ready`** resolves only when the gallery is
+  fully built and every exhibit has arrived. Wait on `built` to show a room, `ready` for a finished one.

@@ -303,6 +303,7 @@ export class GalleryLevel extends MuseumBase {
     this.lighting(plan, ctx);
     this.texts(plan, measured.length, pages, ink);
     this.flush(!!st.outdoor);
+    this.markBuilt();
   }
 
   private lighting(plan: Plan, c: Ctx) {
