@@ -14,7 +14,7 @@
  *   UnrealBloomPass, ShaderPass, OutputPass, ...
  *
  * `window.__world.perf()` returns the last frame's counts (plus a scene census); `perf({ top: 20 })`
- * also lists the in-frustum meshes with the most triangles.
+ * also lists the in-frustum meshes with the most triangles. `?perf=1` shows a small overlay.
  *
  * Installed from a tiny delimited hook at the end of main.ts. Costs a few closures per frame.
  */
@@ -107,7 +107,7 @@ export function installPerf(ctx: PerfCtx): PerfApi {
     if (parent) { parent.childC += dc; parent.childT += dt; }
   };
 
-  const gpu = null as { begin(): void; end(): void; poll(): number | null } | null;
+  const gpu = new URLSearchParams(location.search).get('perf') === '1' ? gpuTimer(renderer) : null;
 
   const begin = (root: string) => {
     inFrame = true;
@@ -185,6 +185,7 @@ export function installPerf(ctx: PerfCtx): PerfApi {
 
   const w = (window as unknown as { __world?: Record<string, unknown> });
   if (w.__world) w.__world.perf = api;
+  if (gpu || new URLSearchParams(location.search).has('perf')) overlay(api);
   return api;
 }
 
@@ -255,3 +256,54 @@ function census(scene: THREE.Scene, camera: THREE.Camera, level: unknown, top: n
   return { census: c, top: topList };
 }
 
+// ---------------------------------------------------------------- GPU timer (real GPUs only)
+
+function gpuTimer(renderer: THREE.WebGLRenderer) {
+  const gl = renderer.getContext() as WebGL2RenderingContext;
+  const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2') as { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
+  if (!ext || !(gl instanceof WebGL2RenderingContext)) return null;
+  const pending: WebGLQuery[] = [];
+  let active: WebGLQuery | null = null;
+  return {
+    begin() {
+      if (active || pending.length > 3) return;
+      active = gl.createQuery();
+      if (active) gl.beginQuery(ext.TIME_ELAPSED_EXT, active);
+    },
+    end() {
+      if (!active) return;
+      gl.endQuery(ext.TIME_ELAPSED_EXT);
+      pending.push(active);
+      active = null;
+    },
+    poll(): number | null {
+      let out: number | null = null;
+      while (pending.length && gl.getQueryParameter(pending[0], gl.QUERY_RESULT_AVAILABLE)) {
+        const q = pending.shift()!;
+        const ns = gl.getQueryParameter(q, gl.QUERY_RESULT) as number;
+        if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) out = ns / 1e6;
+        gl.deleteQuery(q);
+      }
+      return out;
+    },
+  };
+}
+
+// ---------------------------------------------------------------- ?perf=1 overlay
+
+function overlay(api: PerfApi) {
+  const el = document.createElement('pre');
+  el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:9999;margin:0;padding:6px 8px;font:11px/1.35 ui-monospace,monospace;color:#e8f0e8;background:rgba(0,0,0,0.62);border-radius:4px;pointer-events:none;white-space:pre';
+  document.body.appendChild(el);
+  const k = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+  setInterval(() => {
+    const f = api.last;
+    const fps = f.frameMsAvg ? 1000 / f.frameMsAvg : 0;
+    const lines = [
+      `${fps.toFixed(0)} fps  frame ${f.frameMsAvg.toFixed(1)} ms  cpu ${f.cpuMs.toFixed(1)} ms  gpu ${f.gpuMs == null ? 'n/a' : f.gpuMs.toFixed(1) + ' ms'}`,
+      `calls ${f.calls}  tris ${k(f.tris)}  programs ${f.programs}  geo ${f.geometries}  tex ${f.textures}`,
+      ...Object.entries(f.perPass).sort((a, b) => b[1].calls - a[1].calls).map(([p, v]) => `  ${p.padEnd(22)} ${String(v.calls).padStart(5)}  ${k(v.tris).padStart(7)}${v.n > 1 ? `  x${v.n}` : ''}`),
+    ];
+    el.textContent = lines.join('\n');
+  }, 250);
+}
