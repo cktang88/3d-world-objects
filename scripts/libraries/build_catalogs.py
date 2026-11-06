@@ -204,6 +204,19 @@ def qrot(q, v):
     return (vx + 2 * (w * cx + cx2), vy + 2 * (w * cy + cy2), vz + 2 * (w * cz + cz2))
 
 
+def si_uri(pid, uri):
+    """A Voyager asset uri as a path relative to SI_BASE. Most are relative to the package, but some
+    documents list absolute cdn.3d-api.si.edu URLs: that host's TLS chain fails outside browsers, and the
+    same file is served (with CORS) under the package path, so keep only the file name."""
+    if re.match(r'^https?://', uri):
+        if uri.startswith(SI_BASE):
+            return uri[len(SI_BASE):]
+        if re.match(r'^https?://cdn\.3d-api\.si\.edu/', uri):
+            return f'{pid}/{uri.rsplit("/", 1)[-1]}'
+        return uri  # other absolute URL: kept absolute (the loader leaves absolute URLs alone)
+    return f'{pid}/{uri.removeprefix("./")}'
+
+
 def si_package(pid, title, max_bytes=15e6):
     """Entry for one 3D package from its Voyager document (units, orientation, parts, record id)."""
     try:
@@ -237,10 +250,10 @@ def si_package(pid, title, max_bytes=15e6):
                     lo[k] = min(lo[k], (r[k] + t[k]) * f)
                     hi[k] = max(hi[k], (r[k] + t[k]) * f)
         kb += pick.get('byteSize', 0) // 1024
-        part = {'u': f'{pid}/{pick["uri"]}', 'f': f}
+        part = {'u': si_uri(pid, pick['uri']), 'f': f}
         th = ders.get(('Web3D', 'Thumb'))
         if th and th['assets'] and th['assets'][0]['uri'].endswith('.glb') and th['assets'][0]['uri'] != pick['uri']:
-            part['lo'] = f'{pid}/{th["assets"][0]["uri"]}'  # ~20k-face 512px version for distance / overviews
+            part['lo'] = si_uri(pid, th['assets'][0]['uri'])  # ~20k-face 512px version for distance / overviews
         if any(abs(a - b) > 1e-4 for a, b in zip(q, [0, 0, 0, 1])):
             part['q'] = [round(x, 5) for x in q]
         if any(t):
@@ -254,7 +267,7 @@ def si_package(pid, title, max_bytes=15e6):
         edan = edan or meta.get('collection', {}).get('edanRecordId', '')
         for im in meta.get('images', []):
             if im.get('quality') == 'Thumb':
-                thumb = f'{pid}/{im["uri"]}'
+                thumb = si_uri(pid, im['uri'])
         title = title or meta.get('collection', {}).get('title', '')
     title = re.sub(r'<[^>]+>', '', title).strip()
     if not title:
@@ -270,7 +283,15 @@ def si_package(pid, title, max_bytes=15e6):
     else:
         e['parts'] = parts
     if lo[0] < hi[0] and max(hi[k] - lo[k] for k in range(3)) > 0.005:
-        e['s'] = r3([hi[k] - lo[k] for k in range(3)])
+        size = [hi[k] - lo[k] for k in range(3)]
+        # a few documents say "m" for millimetre scans (a 640 m tusk): objects over 150 m are millimetres
+        if max(size) > 150:
+            size = [v / 1000 for v in size]
+            for p in parts:
+                p['f'] = p['f'] / 1000
+            if 'f' in e:
+                e['f'] = parts[0]['f']
+        e['s'] = r3(size)
     return {k: v for k, v in e.items() if v is not None}
 
 

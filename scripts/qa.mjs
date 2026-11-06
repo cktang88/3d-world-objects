@@ -43,7 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
-  museum: ['museum'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
+  museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
 /** changed file -> areas (first match wins; '*' = every test file). Add a line when you add a test file. */
 const SRC_MAP = [
@@ -60,6 +60,7 @@ const SRC_MAP = [
   [/^src\/(nyc\.ts|nyc\/)/, ['nyc']],
   [/^src\/(shop\.ts|shopkit\/)/, ['shop']],
   [/^src\/(interior\.ts|rooms\/)/, ['interior']],
+  [/^src\/libraries(\.ts|\/)|^public\/libraries\/|^scripts\/libraries\//, ['libraries', 'museum']],
   [/^src\/(museum\.ts|museumData\.ts|museum\/|libraries\.ts)/, ['museum']],
   [/^src\/(seamless|lazy)\.ts$/, ['seamless', 'lazy']],
   [/^src\/(realscale|realsize-labels)\.ts$|^scripts\/build_realsize/, ['realscale']],
