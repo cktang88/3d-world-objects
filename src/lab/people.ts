@@ -41,7 +41,7 @@ const scene: LabScene = {
       crowd = new Pedestrians(group, Number(params.get('seed') ?? 1));
       await new Promise((r) => setTimeout(r, 50));
       crowd.update(0.016, origin);
-      for (let i = 0; i < Number(params.get('t') ?? 0) * 10; i++) crowd.update(0.1, origin);
+      for (let i = 0; i < Math.max(12, Number(params.get('t') ?? 0) * 10); i++) crowd.update(0.1, origin);
       // perf readout for shot.mjs --eval "__peopleStats()": meshes and triangles of the crowd
       (window as unknown as { __peopleStats: () => string }).__peopleStats = () => {
         let meshes = 0, tris = 0, shadow = 0;
