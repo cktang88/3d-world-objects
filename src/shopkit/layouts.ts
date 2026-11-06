@@ -51,7 +51,7 @@ export interface Layout {
 const vct = (a: string, b: string): Surface => ({ m: surfMat(vctTile(a, b), { rough: 0.35 }), tile: [0.61, 0.61] });
 // varnished wood reads as a mirror in the renderer's reflections unless kept fairly rough
 const pbrS = (key: string, opts: { color?: string; rough?: number } = {}): Surface => ({
-  m: surface(key, [1, 1], { color: opts.color, roughness: /parquet|laminate|oak/.test(key) ? Math.max(0.85, opts.rough ?? 0.8) : opts.rough ?? 0.8 }),
+  m: surface(key, [1, 1], { color: opts.color, roughness: /parquet|laminate|oak/.test(key) ? 1.0 : opts.rough ?? 0.8 }),
   tile: [1, 1],
 });
 const paint = (c: string): Surface => ({ m: mat(c, { rough: 0.92 }) });

@@ -14,7 +14,7 @@ export interface Kind {
   w: number;
   h: number;
   d: number;
-  geo: 'box' | 'can' | 'bottle' | 'jar' | 'pot' | 'bag' | 'guitar';
+  geo: 'box' | 'can' | 'bottle' | 'jar' | 'pot' | 'bag' | 'guitar' | 'peg';
   colors: string[];
   metal?: number;
   rough?: number;
@@ -38,6 +38,8 @@ export const KINDS: Record<string, Kind> = {
   toybox: { name: 'toybox', w: 0.3, h: 0.24, d: 0.1, geo: 'box', colors: ['#e53935', '#fdd835', '#1e88e5', '#43a047', '#ec407a', '#ff7043', '#7e57c2'] },
   book: { name: 'book', w: 0.16, h: 0.23, d: 0.03, geo: 'box', colors: ['#7a1d1d', '#1d3b5c', '#2e5c2e', '#c9b07a', '#3b2a1d', '#f5f0e6', '#212121'] },
   pot: { name: 'pot', w: 0.18, h: 0.3, d: 0.18, geo: 'pot', colors: ['#ffffff', '#f2fff0', '#fff2ea', '#e8f4e0'] },
+  /** pegboard / slatwall hook: a thin rod out of the board (scaled per use) */
+  peg: { name: 'peg', w: 0.007, h: 0.007, d: 1, geo: 'peg', colors: ['#c8ccd0'], metal: 0.9, rough: 0.3 },
   guitar: { name: 'guitar', w: 0.38, h: 1.0, d: 0.1, geo: 'guitar', colors: ['#e8c48a', '#c8823a', '#8a3a1a', '#1a1a1a', '#f2f0ea', '#a01e1e', '#2a4a8a', '#d89a4a'], rough: 0.25 },
   carton6: { name: 'carton6', w: 0.2, h: 0.13, d: 0.13, geo: 'box', colors: ['#1565c0', '#c62828', '#2e7d32', '#212121', '#f9a825'] },
 };
@@ -54,7 +56,7 @@ export const SHOP_KINDS: Record<string, string[]> = {
   lighting: ['smallbox', 'electro'],
   sports: ['smallbox', 'toybox', 'blister', 'bottle'],
   furniture: ['book', 'jar'],
-  antiques: [],
+  antiques: ['book', 'jar', 'bottle', 'smallbox', 'pot'],
   stationery: ['book', 'smallbox', 'blister', 'pillbox'],
   garden: ['pot', 'pot', 'smallbox'],
   models: ['toybox', 'smallbox'],
@@ -182,6 +184,12 @@ function geometry(k: Kind['geo']) {
   } else if (k === 'bottle') {
     const pts = [[0, 0], [0.5, 0], [0.5, 0.03], [0.5, 0.55], [0.42, 0.68], [0.2, 0.82], [0.16, 0.92], [0.18, 0.93], [0.18, 1], [0, 1]].map(([x, y]) => new THREE.Vector2(x, y - 0.5));
     g = new THREE.LatheGeometry(pts, 8);
+  } else if (k === 'peg') {
+    g = new THREE.CylinderGeometry(0.5, 0.5, 1, 6, 1);
+    g.rotateX(Math.PI / 2);
+    g.translate(0, 0, 0.5);
+    geos.set(k, g);
+    return g;
   } else if (k === 'guitar') {
     g = guitarGeo();
     geos.set(k, g);
@@ -252,6 +260,14 @@ export class Filler {
     c.multiplyScalar(0.94 + Math.random() * 0.08);
     list.push({ m, c });
     this.count++;
+  }
+  /** a hook out of a pegboard at p (on the board), pointing along rot, `len` long */
+  peg(p: THREE.Vector3, rot: number, len: number) {
+    const k = KINDS.peg;
+    let list = this.slots.get(k.name);
+    if (!list) this.slots.set(k.name, (list = []));
+    const m = new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot), new THREE.Vector3(k.w, k.h, len));
+    list.push({ m, c: new THREE.Color(k.colors[0]) });
   }
   build(group: THREE.Group) {
     const out: THREE.InstancedMesh[] = [];

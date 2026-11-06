@@ -113,3 +113,28 @@ How a `GalleryLevel` (src/museum/gallery.ts) is built, for prebuilding the room 
 - **`level.built`** resolves as soon as the room itself (shell, displays, labels, lights) is built,
   with exhibit models possibly still streaming; **`level.ready`** resolves only when the gallery is
   fully built and every exhibit has arrived. Wait on `built` to show a room, `ready` for a finished one.
+
+## Shops (src/shop.ts, src/shopkit/)
+
+- **Geometry.** The room spans x ∈ [−W/2, W/2], z ∈ [−D/2, D/2], floor at y = 0; the shop front
+  is the plane z = +D/2. `shop.room = { W, D, H }` and `shop.door = { pos, yaw: 0, width: 1.6,
+  height: 2.6 }` (threshold centre on the front plane, level coordinates) are set in the
+  constructor, before anything is built; `doorway` is the same point, with `hide: [front]` (the
+  baked shop front wall, filled in during the build). Spawn is 1.1 m inside the door, yaw 0.
+- **Staged build.** `new ShopLevel(desc, { staged: true })` builds nothing; `staging.next()` does
+  one slice: the shell in five parts (floor, walls, ceiling texture, ceiling, front, signs), then
+  one fixture per slice (layouts are generators), then the static merge in batches of ~120 meshes
+  and one bucket per slice (`shopkit/bake.ts`). Typical slices are 1–10 ms; a deli is ~120 ms in
+  total (software GL, lab). `shop.step(ms)` drains it within a budget and returns true when done;
+  `shop.ready` resolves then; `shop.progress` is 0..1; `shop.stats` has `buildMs`,
+  `buildSlices`, `longestStepMs`, `longestStep`. Canvas textures are cached per kind and CPU-backed
+  (`willReadFrequently`), which made the first shell ~30× cheaper.
+- **Stock streams in after.** When the build ends, the products load (sand3d, libraries) and are
+  instanced asynchronously (`shop.stocked`), so there is no product work inside the slices.
+- **Containers.** Glass cases (coolers, showcases, curios, deli cases) register with
+  `registerContainer(..., { closedOpaque: false })` and are stocked when near and looked at.
+  Drawers (hardware parts cabinet, antique dresser), the armoire and the stockroom (a door in a
+  side wall of bodegas, pharmacies, hardware and toy shops; the whole back room is the contents,
+  built in slices) are opaque and generate only when opened with E. `shop.cases` lists them.
+- **Lights.** Every shop has exactly 4 PointLights (unused ones at intensity 0), no shadow-casting
+  lights, so walking from one shop to another doesn't recompile shaders.

@@ -4,7 +4,8 @@ import { finishBuilding } from './level';
 import { registerContainer, type LazyContainer } from './lazy';
 import { mat } from './build';
 import { realScale } from './realscale';
-import { Rng, hashN } from './rng';
+import { enhance } from './materials';
+import { Rng, hashN, hashStr } from './rng';
 import { loadPools } from './museumData';
 import { loadRemote, isRebuilt, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { SHOPS } from './nyc';
@@ -72,6 +73,9 @@ const LIB_NAME: Record<string, string> = { gso: 'Google Scanned Objects', polyha
 
 /** default per-call budget of ShopLevel.step() */
 export const SHOP_BUILD = { budgetMs: 4 };
+
+/** point lights in every shop */
+export const SHOP_LIGHTS = 4;
 
 export const SHOP_BUDGET = { tris: 2_500_000 };
 
@@ -212,6 +216,13 @@ export class ShopLevel implements Level {
     }
     this.cols.push(...kit.cols);
     this.progress = 0.5;
+    // the same light rig in every shop (unused lights dark) so moving between shops never recompiles shaders
+    let nl = kit.lights.filter((l) => (l as THREE.PointLight).isPointLight).length;
+    for (; nl < SHOP_LIGHTS; nl++) {
+      const l = new THREE.PointLight('#ffffff', 0, 1, 2);
+      l.position.set(0, -10, 0);
+      kit.live.add(l);
+    }
     // merge static fixtures into a handful of meshes, a slice at a time
     const baked = new THREE.Group();
     this.phase = 'bake';
@@ -468,6 +479,7 @@ export class ShopLevel implements Level {
         return [];
       }
       this.models.push(m);
+      dressBlank(m.object, picks[i]);
       const e = picks[i];
       const k = realScale(e.title, e.entry, e.family, Math.max(m.size.x, m.size.y, m.size.z), e.ds);
       return [{ e, title: `${e.title} ${e.entry}`, obj: m.object, size: m.size, tris: m.tris, k, dim: m.size.clone().multiplyScalar(k), chunks: 0 }];
@@ -518,7 +530,7 @@ export class ShopLevel implements Level {
   private stockSet(set: Map<Loaded | 'filler', Seg[]>, kinds: Kind[], r: Rng, into: THREE.Group) {
     const filler = new Filler();
     const rest: Seg[] = [...(set.get('filler') ?? [])];
-    for (const [p, list] of set) if (p !== 'filler') rest.push(...this.place(p, list, r, this.prio++, into));
+    for (const [p, list] of set) if (p !== 'filler') rest.push(...this.place(p, list, r, this.prio++, into, filler));
     for (const sg of rest) this.fill(filler, sg, kinds, r);
     filler.build(into);
     this.stats.filler += filler.count;
@@ -583,17 +595,20 @@ export class ShopLevel implements Level {
         const c = next();
         for (let j = 0; j < rowsY; j++) {
           if (r.chance(0.08)) continue;
-          for (let q = 0; q < (s.pitch ? 1 : 3); q++) {
+          const qn = s.pitch ? 1 : 3;
+          for (let q = 0; q < qn; q++) {
             const pos = s.p.clone()
               .addScaledVector(right, -s.len / 2 + stepX * (i + 0.5))
               .addScaledVector(n, d / 2 + 0.03 + q * (d + 0.006));
             pos.y += j * stepY + (stepY - h) * 0.75;
             f.add(kind, pos, s.rot, c);
           }
+          // the hook they hang on, through the top of the card
+          if (!s.pitch) f.peg(s.p.clone().addScaledVector(right, -s.len / 2 + stepX * (i + 0.5)).setY(s.p.y + j * stepY + (stepY - h) * 0.75 + h * 0.85), s.rot, Math.min(0.3, qn * (d + 0.006) + 0.05));
         }
       }
     } else if (s.mode === 'pile') {
-      const count = Math.max(1, Math.min(60, Math.round(((s.len * s.depth) / (w * d)) * 0.9)));
+      const count = Math.max(1, Math.min(60, Math.round(((s.len * s.depth) / Math.max(w * d, s.pitch ? s.pitch * s.pitch * 0.5 : 0)) * 0.9)));
       const layers = h * 2.2 < s.h ? 2 : 1;
       for (let i = 0; i < count; i++)
         for (let l = 0; l < layers; l++) {
@@ -702,7 +717,7 @@ export class ShopLevel implements Level {
 
   /** pack one product into its segments and instance it */
   /** returns the segments it could not fill within the triangle budget (they get packaging) */
-  private place(p: Loaded, segs: Seg[], r: Rng, prio: number, into: THREE.Group): Seg[] {
+  private place(p: Loaded, segs: Seg[], r: Rng, prio: number, into: THREE.Group, pegs: Filler): Seg[] {
     const slots: Slot[] = [];
     const boxes: THREE.Box3[] = [];
     const cords: THREE.Vector3[][] = [];
@@ -744,7 +759,7 @@ export class ShopLevel implements Level {
         const deep = s.pitch ? 1 : d < 0.06 ? 3 : d < 0.12 ? 2 : 1;
         const stepX = s.len / cols, stepY = s.h / rowsY;
         for (let i = 0; i < cols; i++)
-          for (let j = 0; j < rowsY; j++)
+          for (let j = 0; j < rowsY; j++) {
             for (let q = 0; q < deep; q++) {
               const pos = s.p.clone()
                 .addScaledVector(right, -s.len / 2 + stepX * (i + 0.5))
@@ -752,6 +767,8 @@ export class ShopLevel implements Level {
               pos.y += j * stepY + (stepY - h) * 0.7;
               put(pos, s.rot + r.range(-1, 1) * messy * 0.1);
             }
+            if (!s.pitch) pegs.peg(s.p.clone().addScaledVector(right, -s.len / 2 + stepX * (i + 0.5)).setY(s.p.y + j * stepY + (stepY - h) * 0.7 + h * 0.9), s.rot, Math.min(0.3, deep * (d + 0.01) + 0.05));
+          }
       } else if (s.mode === 'pile') {
         const area = s.len * s.depth;
         const count = Math.max(1, Math.min(36, Math.round((area / Math.max(w * d, s.pitch ? s.pitch * s.pitch : 0, 1e-4)) * 0.75)));
@@ -826,8 +843,12 @@ export class ShopLevel implements Level {
       this.triBudget -= extra;
       this.stats.tris += extra;
       this.stats.originals++;
-      for (const im of sand) im.removeFromParent();
-      this.instance(orig, use, into);
+      // near: the original; far: the lighter sand3d version (update() swaps them)
+      const lo = this.instance(orig, use, into);
+      const b = new THREE.Box3();
+      for (const sl of use) b.expandByPoint(sl.p);
+      this.lods.push({ c: b.getCenter(new THREE.Vector3()), r: b.getSize(new THREE.Vector3()).length() / 2, far: sand, near: lo, isNear: true });
+      for (const im of sand) im.visible = false;
     });
     return rejected;
   }
@@ -884,7 +905,19 @@ export class ShopLevel implements Level {
   portals() {
     return this.ports;
   }
-  update() {}
+  /** products swapped to their originals: original within ~9 m, sand3d version further out */
+  private lods: { c: THREE.Vector3; r: number; far: THREE.Object3D[]; near: THREE.Object3D[]; isNear: boolean }[] = [];
+  private lodTick = 0;
+  update(_dt: number, player: THREE.Vector3) {
+    if (this.lodTick++ % 10) return;
+    for (const l of this.lods) {
+      const near = l.c.distanceTo(player) - l.r < 9;
+      if (near === l.isNear) continue;
+      l.isNear = near;
+      for (const o of l.near) o.visible = near;
+      for (const o of l.far) o.visible = !near;
+    }
+  }
   /** generate every container's contents now (lab, screenshots); `open` also opens opaque ones */
   generateAll(open = false) {
     for (const c of this.cases) {
@@ -910,3 +943,55 @@ export class ShopLevel implements Level {
   }
 }
 
+
+// ---------------------------------------------------------------- blank models
+
+/** what an all-white, untextured model is probably made of, from its title */
+const BLANK: [RegExp, string, string][] = [
+  [/wood|oak|timber|crate|barrel|chest|table|chair|bench|shelf|cabinet|stool|desk|frame|drawer|bowl|spoon|board/i, 'oak', '#9a6a3a'],
+  [/steel|metal|iron|wrench|hammer|tool|knife|pan|saw|bolt|nut|screw|gear|pipe|spanner|plier|drill|axe|sword|blade|helmet|armou?r|shield|lock|key|chain|hinge|clamp/i, 'steel', '#8a9096'],
+  [/brass|bell|trumpet|horn|trombone|tuba|candlestick|compass|telescope|clock|sextant|lantern/i, 'brass', '#b8903a'],
+  [/leather|saddle|boot|belt|holster|bridle|harness|collar|leash/i, 'leather', '#6a4026'],
+  [/vase|mug|cup|plate|teapot|jar|ceramic|porcelain|urn/i, 'ceramic', '#e8e0d0'],
+  [/cloth|pillow|cushion|shirt|hat|blanket|fabric|towel|sock|bag/i, 'fabric', '#7a6a5a'],
+  [/tire|tyre|rubber|ball/i, 'rubber', '#2a2a2a'],
+  [/stone|statue|bust|marble|sculpture/i, 'marble', '#d8d2c6'],
+];
+const PLASTIC = ['#c62828', '#1565c0', '#2e7d32', '#f9a825', '#6a1b9a', '#ef6c00', '#00838f', '#455a64'];
+const dressed = new Map<string, THREE.Material>();
+
+/**
+ * Some sand3d objects come with no materials worth the name: one plain white-grey everywhere.
+ * On a shelf they read as white blobs. Give them the material their title suggests, or a
+ * packaging-plastic colour (per product, so a row is one colour).
+ */
+function dressBlank(root: THREE.Object3D, e: RemoteEntry) {
+  const meshes: THREE.Mesh[] = [];
+  let blank = true;
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    meshes.push(m);
+    for (const mt of Array.isArray(m.material) ? m.material : [m.material]) {
+      const sm = mt as THREE.MeshStandardMaterial;
+      const c = sm.color;
+      if (!sm.isMeshStandardMaterial || sm.map || sm.userData.enhanced || sm.transparent || !c || c.r + c.g + c.b < 2.3) blank = false;
+    }
+  });
+  if (!blank || !meshes.length) return;
+  const text = `${e.title} ${e.entry}`;
+  const hit = BLANK.find(([re]) => re.test(text));
+  const kind = hit ? hit[1] : 'glossy_plastic';
+  const color = hit ? hit[2] : PLASTIC[hashStr(e.id) % PLASTIC.length];
+  for (const m of meshes) {
+    const hasUv = !!m.geometry.getAttribute('uv');
+    const key = `${kind}|${color}|${hasUv}`;
+    let mt = dressed.get(key);
+    if (!mt) {
+      const base = new THREE.MeshStandardMaterial({ color, roughness: kind === 'glossy_plastic' ? 0.35 : 0.6, metalness: kind === 'steel' || kind === 'brass' ? 0.9 : 0 });
+      mt = enhance(base, kind, hasUv);
+      dressed.set(key, mt);
+    }
+    m.material = mt;
+  }
+}
