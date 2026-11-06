@@ -218,7 +218,12 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
         float pr = pedRegion(vBody);
         float cloth = pr > 0.5 ? 1.0 : 0.0;
         float clothRough = 0.88;
-        if (pr < 0.5) diffuseColor.rgb *= uSkin;
+        if (pr < 0.5) {
+          // skin: the tint, a little blotchy variation, warmer cheeks / nose / ears
+          diffuseColor.rgb *= uSkin * (0.95 + 0.1 * pedNoise(vBody * 28.0));
+          float face = smoothstep(0.03, 0.09, vBody.z) * smoothstep(uSlimC.y + 0.06, uSlimC.y + 0.12, vBody.y) * (1.0 - smoothstep(uSlimC.y + 0.19, uSlimC.y + 0.25, vBody.y));
+          diffuseColor.rgb *= mix(vec3(1.0), vec3(1.06, 0.95, 0.92), face * 0.7);
+        }
         else {
           vec3 c = pr == 1.0 ? uTop : pr == 2.0 ? uBottom : uShoe;
           float st = uBody.w;
@@ -260,7 +265,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nvec3 pedGeoNormal = normal;')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, pedGeoNormal, cloth));');
   };
-  m.customProgramCacheKey = () => 'ped-body-v4';
+  m.customProgramCacheKey = () => 'ped-body-v5';
   return m;
 }
 
@@ -535,6 +540,21 @@ function propMat(color: string, rough = 0.8) {
   if (!m) propMats.set(k, (m = new THREE.MeshStandardMaterial({ color, roughness: rough })));
   return m;
 }
+/** iris tints (multiplying the brown eye texture): the stock eyes read as glowing pale discs */
+const EYES = ['#8a7468', '#6e5a50', '#5a4a44', '#8a7468', '#7a8494', '#7a8a72'];
+const eyeMats = new Map<string, THREE.MeshStandardMaterial>();
+function eyeMat(base: THREE.MeshStandardMaterial, i: number) {
+  const k = `${base.uuid}|${i}`;
+  let m = eyeMats.get(k);
+  if (!m) {
+    m = base.clone();
+    m.color.set(EYES[i]);
+    m.roughness = 0.3;
+    m.envMapIntensity = 0.5;
+    eyeMats.set(k, m);
+  }
+  return m;
+}
 const hairMats = new Map<string, THREE.MeshStandardMaterial>();
 function hairMat(base: THREE.MeshStandardMaterial, color: string) {
   const k = `${base.uuid}|${color}`;
@@ -591,6 +611,7 @@ export class Person {
       const name = (m.material as THREE.Material).name;
       if (/Superhero/i.test(name)) m.material = bm;
       else if (/Hair/i.test(name)) m.material = hm;
+      else if (/Eye/i.test(name)) m.material = eyeMat(m.material as THREE.MeshStandardMaterial, r.int(0, EYES.length - 1));
       if (/Body_LOD/.test(m.name)) {
         this.lodMesh = m;
         m.visible = false;
