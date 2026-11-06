@@ -23,7 +23,7 @@ const scene: LabScene = {
     group.add(lv.group);
     const s = lv.spawn.pos;
     group.userData.cam = new THREE.Vector3(s.x + 0.8, 1.65, s.z + 1.5);
-    group.userData.look = new THREE.Vector3(0, 4, 0);
+    group.userData.look = new THREE.Vector3(0, params.get('role') === 'plant' || !params.get('role') ? 14 : 4, 0);
     group.userData.env = lv.env;
     group.userData.place = 'studio';
     console.info('[lab macro]', e.title, p.label, '—', p.sub);

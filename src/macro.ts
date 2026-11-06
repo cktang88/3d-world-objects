@@ -91,6 +91,14 @@ function ownColour(e: ModelEntry | undefined, fallback: string) {
 
 // ---------------------------------------------------------------- shared bits
 
+/** the inside face of an open cylinder (pot rim, a jar's wall): seen from within */
+const innerMats = new Map<string, THREE.MeshStandardMaterial>();
+function inner(color: string, rough: number) {
+  let m = innerMats.get(color + rough);
+  if (!m) innerMats.set(color + rough, (m = new THREE.MeshStandardMaterial({ color, roughness: rough, side: THREE.BackSide })));
+  return m;
+}
+
 const unitIco = new THREE.IcosahedronGeometry(1, 0);
 const unitSphere = new THREE.SphereGeometry(1, 8, 6);
 const unitCyl = new THREE.CylinderGeometry(1, 1, 1, 10);
@@ -151,6 +159,12 @@ export class MacroLevel implements Level {
     this.mode = (desc.mode as MacroMode) in SPAN ? (desc.mode as MacroMode) : 'surface';
     this.k = SPAN[this.mode] / Math.max(0.02, desc.sourceScale);
     this.radius = this.mode === 'circuit' ? 70 : this.mode === 'surface' ? 90 : this.mode === 'food' ? 60 : this.mode === 'vessel' ? 17 : 26;
+    // a plant model usually stands in its own pot: the walkable soil is inside the pot (its footprint)
+    const e = desc.source;
+    if (this.mode === 'garden' && e) {
+      const foot = (Math.min(e.size[0], e.size[2]) / Math.max(...e.size)) * desc.sourceScale * this.k;
+      this.radius = Math.max(8, Math.min(26, foot * 0.4));
+    }
     this.name = desc.name;
     this.r = new Rng(hashN(desc.seed, 3301));
     const dark = this.mode === 'vessel' || this.mode === 'circuit';
@@ -218,18 +232,46 @@ export class MacroLevel implements Level {
     const kit = new Kit();
     kit.cyl(soil, R + 3, R + 3, 0.2, 0, -0.2, 0, 48);
     // the pot's rim around the soil, terracotta, rising past your head
-    kit.cyl(mat('#b5643f', { rough: 0.85 }), R + 3.2, R + 2.6, 6 + r.range(0, 4), 0, -0.2, 0, 48, true);
+    kit.cyl(inner(ownColour(this.desc.source, '#b5643f'), 0.85), R + 3.2, R + 2.6, Math.max(4, 0.03 * k), 0, -0.2, 0, 48, true);
     kit.finish(g);
     yield;
-    // the plant itself, its stems as trunks: the model sits a third deep (in its pot) at the centre
-    const H = this.desc.sourceScale * k;
-    this.model(-H * 0.28);
-    this.cols.push({ minX: -H * 0.05, maxX: H * 0.05, minZ: -H * 0.05, maxZ: H * 0.05 });
+    // (most 'plant' models are the planter itself: its rim is the wall above, in its own colour; the
+    // model is not placed — its own soil or handles would be a ceiling over your head at this scale)
+    const e = this.desc.source;
+    // what grows in it: seedlings 3-9 cm tall, their stems as trunks, their leaves as canopies
+    const pk = new Kit();
+    const green = new THREE.Color(ownColour(e, '#4f7a3a'));
+    if (green.g < green.r || green.g < 0.25) green.set('#4f7a3a');
+    const stemM = mat('#6f8a3a', { rough: 0.7 });
+    const leafM = mat('#' + green.getHexString(), { rough: 0.55 });
+    const n = r.int(3, 6);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r.range(-0.3, 0.3), d = r.range(0.15, 0.55) * R;
+      const x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if (Math.hypot(x, z - R * 0.55) < 3) continue;
+      const h = r.range(0.03, 0.09) * k, rr = r.range(0.0008, 0.0015) * k;
+      // a stem leaning a little, in three segments, a canopy of leaves at the top
+      let px = x, pz = z, py = 0;
+      const lean = r.range(0, Math.PI * 2), tilt = r.range(0.05, 0.25);
+      for (let sgm = 0; sgm < 3; sgm++) {
+        const len = h / 3;
+        const dx = Math.cos(lean) * Math.sin(tilt * (sgm + 1)) * len, dz = Math.sin(lean) * Math.sin(tilt * (sgm + 1)) * len;
+        const mx = px + dx / 2, mz = pz + dz / 2;
+        pk.boxM(stemM, rr * 2, len * 1.05, rr * 2, mx, py + len / 2, mz, new THREE.Euler(Math.atan2(dz, len) , 0, -Math.atan2(dx, len)));
+        px += dx; pz += dz; py += len * Math.cos(tilt * (sgm + 1));
+      }
+      for (let l = 0; l < 5; l++) {
+        const la = (l / 5) * Math.PI * 2 + r.range(0, 1), lr = h * r.range(0.18, 0.3);
+        pk.at(px + Math.cos(la) * lr * 0.7, py - lr * 0.15, pz + Math.sin(la) * lr * 0.7, -la, () => pk.sphere(leafM, lr * 0.55, 0, 0, 0, 0.12));
+      }
+      this.cols.push({ minX: x - rr * 2, maxX: x + rr * 2, minZ: z - rr * 2, maxZ: z + rr * 2 });
+    }
+    pk.finish(g);
     yield;
     // soil grains (0.2-1 mm), perlite (white, 2-4 mm), pebbles (5-12 mm), moss cushions
     const inDisc = () => { const a = r.range(0, Math.PI * 2), d = Math.sqrt(r.next()) * R; return [Math.cos(a) * d, Math.sin(a) * d]; };
     scatter(g, unitIco, mat('#4a3423', { rough: 1 }), 2500, () => { const [x, z] = inDisc(); const s = r.range(0.0002, 0.001) * k; return [x, 0, z, s, s * 0.7, s, r.range(0, 6)]; }, () => new THREE.Color().setHSL(0.07, 0.35, r.range(0.08, 0.2)));
-    scatter(g, unitIco, mat('#e8e4dc', { rough: 0.9 }), 160, () => { const [x, z] = inDisc(); const s = r.range(0.002, 0.004) * k; return [x, s * 0.3, z, s, s * 0.8, s, r.range(0, 6)]; });
+    scatter(g, unitIco, mat('#e2d8c8', { rough: 0.9 }), 40, () => { const [x, z] = inDisc(); const s = r.range(0.002, 0.004) * k; return [x, s * 0.3, z, s, s * 0.8, s, r.range(0, 6)]; });
     yield;
     const peb = mat('#8a8076', { rough: 0.7 });
     scatter(g, unitIco, peb, 26, (i) => {
@@ -254,7 +296,7 @@ export class MacroLevel implements Level {
     for (let i = 0; i < 5; i++) {
       const o = antG.clone();
       g.add(o);
-      this.ants.push({ o, a: r.range(0, 6.28), r: r.range(H * 0.12, R * 0.85), v: r.range(0.008, 0.02) * k * (r.chance(0.5) ? 1 : -1) });
+      this.ants.push({ o, a: r.range(0, 6.28), r: r.range(R * 0.2, R * 0.85), v: r.range(0.008, 0.02) * k * (r.chance(0.5) ? 1 : -1) });
     }
   }
 
@@ -266,7 +308,7 @@ export class MacroLevel implements Level {
     const col = ownColour(e, r.pick(['#d8d2c4', '#8a6a4a', '#5a7a9a', '#c9c4bc']));
     const round = e ? Math.abs(e.size[0] - e.size[2]) / Math.max(e.size[0], e.size[2]) < 0.2 : true;
     const H = Math.max(8, (e ? e.size[1] / Math.max(...e.size) : 1) * this.desc.sourceScale * k);
-    const wall = mat(col, { rough: 0.45, metal: 0.05 });
+    const wall = round ? inner(col, 0.45) : mat(col, { rough: 0.45, metal: 0.05 });
     const floorM = mat(new THREE.Color(col).multiplyScalar(0.8).getStyle(), { rough: 0.6 });
     const kit = new Kit();
     if (round) {
