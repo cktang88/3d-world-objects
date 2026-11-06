@@ -228,7 +228,7 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
     rim.userData.owned = true;
     c.stat.add(rim);
     c.colliders.push(rect(x, z, 18, 18));
-    slot({ kind: ['parkdecor', 'arch'], x, y: G + 0.3, z, rot: 0, w: 8, d: 8, h: 12, min: 2.0, radius: 140, maxTris: 400_000 }, false);
+    slot({ kind: ['statue', 'parkdecor'], x, y: G + 0.3, z, rot: 0, w: 8, d: 8, h: 12, min: 2.0, radius: 140, maxTris: 400_000 }, false);
     // statues on plinths at the corners of the terrace
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
       const px = x + sx * (W / 2 - 4), pz = z + sz * (D / 2 - 4);
@@ -238,7 +238,7 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
       plinth.userData.owned = true;
       c.stat.add(plinth);
       c.colliders.push(rect(px, pz, 2.6, 2.6));
-      slot({ kind: ['arch', 'parkdecor', 'armour'], x: px, y: G + 1.2, z: pz, rot: Math.atan2(-sx, -sz), w: 2.2, d: 2.2, h: 3.2, min: 0.9, radius: 90, maxTris: 200_000 }, false);
+      slot({ kind: 'statue', x: px, y: G + 1.2, z: pz, rot: Math.atan2(-sx, -sz), w: 2.2, d: 2.2, h: 3.2, min: 0.9, radius: 90, maxTris: 200_000 }, false);
     }
     benchRing(c, x, z, 14, 10, 8, slot, 3);
     void r;
