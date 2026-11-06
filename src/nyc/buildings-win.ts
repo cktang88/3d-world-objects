@@ -504,9 +504,9 @@ export class WindowBatch {
     };
     const L = this.list;
     make(revealGeo(), M.reveal, L, (s) => s.revealColor, false);
-    for (const k of ['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]) make(trimGeo(k), M.trim, L.filter((s) => s.trim === k), (s) => s.trimColor, true, undefined, fine);
+    for (const k of ['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]) make(trimGeo(k), M.trim, L.filter((s) => s.trim === k), (s) => s.trimColor, false, undefined, fine);
     for (const k of ['dh', 'case', 'store'] as SashKind[]) make(sashGeo(k), M.sash, L.filter((s) => s.sash === k), (s) => s.sashColor, false, undefined, fine);
-    for (const k of ['window', 'big', 'sleeve'] as AcKind[]) make(acGeo(k), M.ac, L.filter((s) => s.ac && (s.acKind ?? 'window') === k), (s) => s.ac!, true, undefined, fine);
+    for (const k of ['window', 'big', 'sleeve'] as AcKind[]) make(acGeo(k), M.ac, L.filter((s) => s.ac && (s.acKind ?? 'window') === k), (s) => s.ac!, false, undefined, fine);
     make(stainGeo(), stainMat(), L.filter((s) => s.ac && s.acKind !== 'sleeve' && s.stain), () => null, false, undefined, fine);
     const gl = L.filter((s) => !s.noGlass);
     make(glassGeo(), M.glass, gl, () => null, false, (im, items) => {

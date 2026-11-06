@@ -87,7 +87,7 @@ function openBar(axis: 'x' | 'y' | 'z') {
   return (bars[axis] = g);
 }
 function instanceUnits(roots: THREE.Object3D[], parent: THREE.Object3D, shadow: boolean) {
-  const buckets = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial; m: THREE.Matrix4[]; c: THREE.Color[] }>();
+  const buckets = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial; m: THREE.Matrix4[]; c: THREE.Color[]; cast: boolean }>();
   const dead: THREE.Mesh[] = [];
   for (const root of roots) {
     root.updateMatrixWorld(true);
@@ -103,12 +103,15 @@ function instanceUnits(roots: THREE.Object3D[], parent: THREE.Object3D, shadow: 
         const thin = [sc.x < 0.06, sc.y < 0.06, sc.z < 0.06].filter(Boolean).length >= 2;
         if (thin) gk = sc.x >= sc.y && sc.x >= sc.z ? 'bx' : sc.y >= sc.z ? 'by' : 'bz';
       }
-      const key = `${gk}|${rough}|${metal}`;
+      // caster hygiene: only big parts (cornice bands, platforms, piers) cast shadows
+      const sc = mesh.scale;
+      const cast = shadow && mesh.castShadow && Math.max(sc.x, sc.y, sc.z) > 0.8 && Math.min(sc.x, sc.y, sc.z) > 0.05;
+      const key = `${gk}|${rough}|${metal}|${cast}`;
       let b = buckets.get(key);
       if (!b) {
         let mm = instMats.get(`${rough}|${metal}`);
         if (!mm) instMats.set(`${rough}|${metal}`, (mm = new THREE.MeshStandardMaterial({ roughness: rough, metalness: metal })));
-        buckets.set(key, (b = { geo: gk.length === 2 ? openBar(gk[1] as 'x' | 'y' | 'z') : mesh.geometry, mat: mm, m: [], c: [] }));
+        buckets.set(key, (b = { geo: gk.length === 2 ? openBar(gk[1] as 'x' | 'y' | 'z') : mesh.geometry, mat: mm, m: [], c: [], cast }));
       }
       b.m.push(mesh.matrixWorld.clone());
       b.c.push(sm.color.clone());
@@ -122,7 +125,7 @@ function instanceUnits(roots: THREE.Object3D[], parent: THREE.Object3D, shadow: 
       im.setMatrixAt(i, m);
       im.setColorAt(i, b.c[i]);
     });
-    im.castShadow = shadow;
+    im.castShadow = b.cast;
     im.receiveShadow = true;
     im.computeBoundingSphere();
     parent.add(im);

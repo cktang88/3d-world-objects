@@ -47,6 +47,7 @@ export function vcMat(rough: number, metal: number) {
  */
 export function bake(src: THREE.Object3D): THREE.Group {
   src.updateMatrixWorld(true);
+  (globalThis as { __bakeCensus?: (o: THREE.Object3D) => void }).__bakeCensus?.(src); // tests/census.test.ts
   const buckets = new Map<string, { m: THREE.Material; shadow: boolean; geos: THREE.BufferGeometry[]; vc: boolean }>();
   const col = new THREE.Color();
   src.traverse((o) => {
@@ -58,7 +59,13 @@ export function bake(src: THREE.Object3D): THREE.Group {
     const keepColor = !!(sm.vertexColors && mesh.geometry.getAttribute('color'));
     let g = mesh.geometry.clone();
     g.applyMatrix4(mesh.matrixWorld);
-    if (g.index) g = g.toNonIndexed();
+    // keep shared vertices (indexed merge): non-indexed inputs get a trivial index
+    if (!g.index) {
+      const n0 = g.getAttribute('position').count;
+      const idx = new (n0 > 65535 ? Uint32Array : Uint16Array)(n0);
+      for (let i = 0; i < n0; i++) idx[i] = i;
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+    }
     for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k) && !(keepColor && k === 'color')) g.deleteAttribute(k);
     const n = g.getAttribute('position').count;
     if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
@@ -101,6 +108,7 @@ export function bake(src: THREE.Object3D): THREE.Group {
     mesh.castShadow = b.shadow;
     mesh.receiveShadow = true;
     mesh.userData.owned = true;
+    mesh.userData.baked = true;
     out.add(mesh);
   }
   return out;
