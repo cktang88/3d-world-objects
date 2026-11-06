@@ -246,6 +246,8 @@ interface Hdri {
 }
 
 const hdriCache = new Map<string, Promise<Hdri | null>>();
+/** ?notex=1 (fast testing): no HDRI downloads; outdoor uses the physical sky, indoor the RoomEnvironment */
+const NO_HDRI = typeof location !== 'undefined' && /[?&](notex|nohdri)=?1?(&|$)/.test(location.search);
 
 function dirFromPixel(c: number, r: number, W: number, H: number, out: THREE.Vector3) {
   const a = ((c + 0.5) / W - 0.5) * Math.PI * 2;
@@ -673,7 +675,8 @@ export class Lighting {
     this.applyWeather();
   }
 
-  private hdri(name: string, res: string, clampMul: number, sat = 1) {
+  private hdri(name: string, res: string, clampMul: number, sat = 1): Promise<Hdri | null> {
+    if (NO_HDRI) return Promise.resolve(null);
     const key = `${name}@${res}`;
     let pr = hdriCache.get(key);
     if (!pr) {
