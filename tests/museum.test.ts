@@ -304,3 +304,30 @@ test('see-through doorways: the next gallery is prebuilt, shown behind its doorw
   expect(builds === before, `crossing the doorway built ${builds - before} levels`);
   seam.clear();
 });
+
+test('atrium spawn: looking in from the entrance, the two north wings show through their doorways', async () => {
+  await loadMuseum();
+  const camera = new THREE.PerspectiveCamera();
+  const seam = new Seamless({
+    scene: new THREE.Scene(), camera, capacity: 4,
+    renderer: { toneMappingExposure: 1, compileAsync: () => Promise.resolve() } as unknown as THREE.WebGLRenderer,
+    build: (d) => (d.kind === 'atrium' ? new AtriumLevel() : new GalleryLevel(d as Extract<LevelDesc, { kind: 'gallery' }>)),
+  });
+  const here = seam.take({ kind: 'atrium' });
+  seam.setActive(here);
+  const a = here.level as AtriumLevel;
+  // the real spawn pose
+  const player = a.spawn.pos.clone();
+  camera.position.set(player.x, 1.6, player.z);
+  camera.lookAt(player.x - Math.sin(a.spawn.yaw) * 10, 1.6, player.z - Math.cos(a.spawn.yaw) * 10);
+  camera.updateMatrixWorld(true);
+  const north = a.portals().filter((p) => p.door?.see && p.door.pos.z < -30);
+  expect(north.length === 2, `${north.length} see-through doors on the north wall`);
+  const shown = () => north.filter((p) => seam.slots.get(descKey(p.target as LevelDesc))?.shown);
+  for (let i = 0; i < 600 && shown().length < 2; i++) {
+    seam.update(1 / 60, a, player);
+    await settle(10);
+  }
+  expect(shown().length === 2, `only ${shown().length} of the north wings show through their doorways from the spawn (shown: ${[...seam.slots.values()].filter((s) => s.shown).map((s) => s.key.slice(0, 60)).join('; ')})`);
+  seam.clear();
+});

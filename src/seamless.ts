@@ -48,6 +48,15 @@ export function doorOf(p: Portal): (Doorway & { see?: boolean; hole?: THREE.Box3
   return null;
 }
 
+/** how squarely the camera looks at a point (dot of its flat view direction with the direction to it) */
+function viewDot(camera: THREE.Camera, at: THREE.Vector3) {
+  const f = camera.getWorldDirection(V());
+  f.y = 0;
+  const d = V().copy(at).sub(camera.position);
+  d.y = 0;
+  return f.normalize().dot(d.normalize());
+}
+
 /** a level's own entry doorway (Level.entry, or its 'back' portal) */
 export function entryOf(lv: Level): Level['doorway'] | null {
   if (lv.doorway) return lv.doorway;
@@ -485,7 +494,7 @@ export class Seamless {
     const kind = this.active?.level === level ? this.active.desc.kind : '';
     const pol = kind === 'floor' || kind === 'interior' ? this.policy.inside : kind === 'gallery' || kind === 'atrium' ? this.policy.museum : this.policy.street;
     const c = V();
-    const cands: { p: Portal; d: number }[] = [];
+    const cands: { p: Portal; d: number; dot: number }[] = [];
     for (const p of level.portals()) {
       if (typeof p.target !== 'object' || !PREBUILD_KINDS.has(p.target.kind)) continue;
       p.box.getCenter(c);
@@ -493,9 +502,13 @@ export class Seamless {
       const d = c.distanceTo(player);
       if (d > pol.range) continue;
       const dir = c.sub(player).normalize();
-      if (d < pol.near || dir.dot(fwd) > pol.dot) cands.push({ p, d });
+      const dot = dir.dot(fwd);
+      if (d < pol.near || dot > pol.dot) cands.push({ p, d, dot });
     }
-    cands.sort((a, b) => a.d - b.d);
+    // museum halls: the doorways you look at most squarely first (from the atrium's entrance the
+    // north wings, 31 m away, matter more than side doors 26 m away); elsewhere the nearest
+    if (pol === this.policy.museum) cands.sort((a, b) => b.dot - a.dot);
+    else cands.sort((a, b) => a.d - b.d);
     this.wanted.clear();
     const now = this.clock * 1000; // game time: dwell counts frames, not wall clock
     const seen = new Map<string, number>();
@@ -534,8 +547,9 @@ export class Seamless {
       const s = this.slots.get(descKey(p.target));
       if (!s || !s.ready || s.waiting || s === this.active) continue;
       const d = p.door.pos.distanceTo(player);
-      if (d < (p.door.range ?? 11)) show.push({ s, p, d });
+      if (d < (p.door.range ?? 11)) show.push({ s, p, d: p.door.range ? -viewDot(this.camera, p.door.pos) : d });
     }
+    // nearest first; doors with a long range (museum doorways) by how squarely you look at them
     show.sort((a, b) => a.d - b.d);
     const keep = new Set(show.slice(0, 2).map((x) => x.s));
     for (const s of this.slots.values()) if (s.shown && !keep.has(s)) this.hidePreview(s);
