@@ -425,3 +425,29 @@ test('no z-fighting: coplanar overlapping faces of different meshes in the atriu
   }
   none(bad, 'z-fighting faces');
 });
+
+test('shader programs: after the atrium and one gallery, four more room types add at most 2 program signatures', async () => {
+  await loadMuseum();
+  const { signatures } = await import('../src/museum/looks');
+  const seen = new Set<string>();
+  const log: string[] = [];
+  const a = new AtriumLevel();
+  await settle(300);
+  signatures(a.group, seen);
+  log.push(`atrium ${seen.size}`);
+  a.dispose();
+  let after2 = 0;
+  const themes = [3302, 2453, 811, 3766, 2383];
+  for (const [i, t] of themes.entries()) {
+    const g = new GalleryLevel({ kind: 'gallery', theme: t, page: 0 });
+    await Promise.race([g.built, settle(8000)]);
+    const before = new Set(seen);
+    signatures(g.group, seen);
+    const fresh = [...seen].filter((k) => !before.has(k));
+    log.push(`${t} +${fresh.length}${fresh.length ? ' ' + fresh.join(' ; ') : ''}`);
+    if (i >= 1) after2 += fresh.length;
+    g.dispose();
+  }
+  console.log('     ' + log.join('\n     '));
+  expect(after2 <= 2, `rooms after the first two added ${after2} programs`);
+});

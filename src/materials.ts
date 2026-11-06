@@ -439,6 +439,11 @@ if (uDbg > 0.5) {
 `;
 
 /** "oak__6e4a32" (USD) or "oak #6e4a32 roughness=0.4" (GLB from sand3d 1.6) -> "oak" */
+/** [museum] every material kind enhance() knows (museum/looks.ts precompiles their shader variants) */
+export function materialKinds(): string[] {
+  return Object.keys(KINDS);
+}
+
 export function kindOf(name: string | undefined): string | null {
   if (!name) return null;
   const k = name.split(/__| |#/)[0].toLowerCase();

@@ -12,6 +12,7 @@ import { siEntries, siMeasured, SI_BASE, SI_ROOMS } from './smithsonian';
 import { STYLES, type Style } from './style';
 import { descKeyOf, markVisited, registerRoom } from './map';
 import { textPlane, SANS, SERIF } from './text';
+import { prewarm } from './looks';
 
 const PALETTE = ['#7d2e2e', '#2e4d7d', '#2e6b55', '#6b4a2e', '#4d2e6b', '#7d6a2e', '#2e6b7d', '#5b5b5b', '#8a3d5c', '#3d5c2e'];
 export function collectionColor(c: string) {
@@ -37,6 +38,8 @@ export class AtriumLevel extends MuseumBase {
   private seeing = new Set<number>();
   constructor() {
     super();
+    // the museum's exhibit shader variants, compiled with the atrium on entering museum mode (looks.ts)
+    this.group.add(prewarm());
     const m = museum();
     const wings = m.wings.slice(0, 6);
     const st: Style = { ...STYLES.period, walls: ['#e8dcc6'], trim: '#f1e8d6', plinth: ['#2b2b2e', '#e8e0d0'], dark: false };

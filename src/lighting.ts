@@ -974,7 +974,8 @@ export class Lighting {
     this.reflect();
     if (this.csm) {
       // ?shadows=0 / ?fast=1: no CSM shader patch (a much smaller program per material); one plain sun light
-      this.setupCsmMaterials(FLAGS.shadows);
+      // [museum] no sun there (cascades out of the scene): its materials keep one program each, unwrapped
+      this.setupCsmMaterials(FLAGS.shadows && !PLACE_BUDGET[this.place]);
       this.frame++;
       if (this.sunOn) {
         this.camera.updateMatrixWorld();

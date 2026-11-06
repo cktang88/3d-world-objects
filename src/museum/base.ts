@@ -8,6 +8,7 @@ import type { Measured } from './sizes';
 import { fmtDims } from './text';
 import { fixZFight } from './zfight';
 import { fixOffThread } from './zoff';
+import { normalizeExhibit } from './looks';
 
 // ---------------------------------------------------------------- frames & batching
 
@@ -172,6 +173,7 @@ export function mergeStatic(root: THREE.Object3D, moving: Set<THREE.Object3D> = 
       for (const g of e.geos) g.dispose();
       return; // leave the model as it was
     }
+    merged.userData.museumOwned = true;
     if (e.geos.length > 1) for (const g of e.geos) g.dispose();
     const mm = new THREE.Mesh(merged, e.mat);
     mm.castShadow = e.meshes[0].castShadow;
@@ -645,6 +647,9 @@ export abstract class MuseumBase implements Level {
     const at = f.point(lx, ly, lz);
     const holder = new THREE.Group();
     holder.userData.exhibit = true;
+    // whatever is shown here (the model, a detail swap, an original) gets the museum's material flags
+    // before it is drawn: no new shader programs room after room (looks.ts)
+    holder.addEventListener('childadded', (ev) => normalizeExhibit((ev as unknown as { child: THREE.Object3D }).child));
     holder.position.copy(at);
     holder.rotation.y = f.rot + rot;
     // heroes (progressive) get a stand-in of their real size while they stream; others a small spinner
@@ -712,7 +717,8 @@ export abstract class MuseumBase implements Level {
         }
         // one mesh per material: a sand3d piano is ~90 parts. Objects with many joints (88 piano keys)
         // stop moving; a few joints (a lid, a door) keep their moving parts separate.
-        if (!m.library) {
+        if (m.library) normalizeExhibit(mod.object);
+        else {
           if (mod.animator && mod.animator.joints.length > 6) mod.animator = null;
           const cached = !mod.animator && fixedParts.get(e.id);
           if (cached) {
@@ -725,6 +731,8 @@ export abstract class MuseumBase implements Level {
             }
           } else {
             mergeStatic(mod.object, new Set(mod.animator?.joints.map((j) => j.node) ?? []));
+            // consistent material flags: no new shader programs room after room (looks.ts)
+            normalizeExhibit(mod.object);
             // the flicker fix in idle time, one exhibit at a time; kept for the next visit
             const obj = mod.object, lift = 0.002 / Math.max(1e-3, m.k), anim = !!mod.animator;
             // on a worker (zoff.ts); without one, in idle time on the main thread
