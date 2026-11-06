@@ -101,6 +101,22 @@ function drawWalker(g: CanvasRenderingContext2D, cx: number, cy: number, s: numb
   g.restore();
 }
 
+/** seven-segment digits (each w × h) starting at x, y */
+function sevenSeg(g: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, h: number, color: string) {
+  const SEG: Record<string, string> = { '0': 'abcdef', '1': 'bc', '2': 'abged', '3': 'abgcd', '4': 'fgbc', '5': 'afgcd', '6': 'afgedc', '7': 'abc', '8': 'abcdefg', '9': 'abcfgd' };
+  const t = w * 0.18;
+  g.fillStyle = color;
+  [...text].forEach((ch, i) => {
+    const ox = x + i * w * 1.25;
+    const segs: Record<string, [number, number, number, number]> = {
+      a: [ox + t, y, w - 2 * t, t], d: [ox + t, y + h - t, w - 2 * t, t], g: [ox + t, y + h / 2 - t / 2, w - 2 * t, t],
+      f: [ox, y + t, t, h / 2 - 1.5 * t], b: [ox + w - t, y + t, t, h / 2 - 1.5 * t],
+      e: [ox, y + h / 2 + t / 2, t, h / 2 - 1.5 * t], c: [ox + w - t, y + h / 2 + t / 2, t, h / 2 - 1.5 * t],
+    };
+    for (const sg of SEG[ch] ?? '') g.fillRect(...segs[sg]);
+  });
+}
+
 function noise(g: CanvasRenderingContext2D, w: number, h: number, n: number, a: number, seed: number) {
   const r = new Rng(seed);
   for (let i = 0; i < n; i++) {
@@ -123,16 +139,19 @@ function buildAtlas() {
   paint(g, 'white', (w, h) => { g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); });
 
   // pedestrian signal: black face, lit orange hand, unlit white walker (NYC countdown style)
+  // pedestrian countdown signal: hand / walker overlay on the left, countdown digits on the right
   paint(g, 'ped', (w, h) => {
     g.fillStyle = '#0c0c0c';
     g.fillRect(0, 0, w, h);
-    // LED dot texture
+    g.fillStyle = 'rgba(200,200,200,0.16)';
+    drawWalker(g, w * 0.27, h * 0.54, 80);
     g.fillStyle = '#ff8a1a';
-    drawHand(g, w * 0.3, h * 0.55, 90);
-    g.fillStyle = 'rgba(200,200,200,0.22)';
-    drawWalker(g, w * 0.72, h * 0.55, 95);
+    drawHand(g, w * 0.27, h * 0.56, 78);
+    // dim "88" ghost segments, then the lit count
+    sevenSeg(g, '88', w * 0.56, h * 0.26, w * 0.17, h * 0.48, 'rgba(255,138,26,0.07)');
+    sevenSeg(g, '12', w * 0.56, h * 0.26, w * 0.17, h * 0.48, '#ff8a1a');
     g.fillStyle = 'rgba(0,0,0,0.35)';
-    for (let y = 0; y < h; y += 6) for (let x = 0; x < w; x += 6) g.fillRect(x, y, 2, 6), g.fillRect(x, y, 6, 2);
+    for (let y = 0; y < h; y += 5) for (let x = 0; x < w; x += 5) g.fillRect(x, y, 1.5, 5), g.fillRect(x, y, 5, 1.5);
   });
   paint(g, 'pushSign', (w, h) => {
     g.fillStyle = '#f4f4f0'; g.fillRect(0, 0, w, h);

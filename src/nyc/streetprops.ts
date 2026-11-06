@@ -3,7 +3,7 @@ import { Rng } from '../rng';
 import { mat, glow } from '../build';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { SIG, CURB, BX, BZ, LX, streetName, canvasTex } from './common';
+import { SIG, CURB, BX, BZ, LX, LZ, streetName, canvasTex } from './common';
 import { rect, overlaps, type Rect as LRect } from '../level';
 import { addTree, pickSpecies, TREE_VARIANTS, type Species } from './streettrees';
 import { streetLightMarker } from '../lighting';
@@ -735,7 +735,7 @@ export function trashBags(parent: THREE.Object3D, x: number, z: number, rng: Rng
       const m = clear ? mat('#5d7f9e', { rough: 0.2, metal: 0.1 }) : mat('#0e0e10', { rough: 0.25 });
       k.add(g, m, 0, 0.42 * 0.8, 0, 0, 0, 0, [0.72, 0.8, 0.66]);
       // knot
-      k.add(new THREE.ConeGeometry(0.07, 0.2, 7), m, 0.02, 0.8, 0, 0.2, 0, 0.3);
+      k.add(new THREE.ConeGeometry(0.06, 0.12, 7), m, 0.0, 0.76, 0, 0.1, 0, 0.1);
     });
     const a = rng.range(0, 6.28), d = rng.range(0, 0.6);
     const s = rng.range(0.7, 1.05);
@@ -891,6 +891,40 @@ export function sidewalkShed(parent: THREE.Object3D, x: number, z: number, ry: n
 // ---------------------------------------------------------------- vehicles
 
 
+// ---------------------------------------------------------------- bollards and standpipes
+
+/** steel pipe bollard: black paint, domed cap, reflective band; 'steel' = stainless security bollard */
+export function bollard(parent: THREE.Object3D, x: number, z: number, kind: 'black' | 'steel' = 'black') {
+  const parts = kit(`bollard|${kind}`, (k) => {
+    const m = kind === 'black' ? mat('#1b1c1e', { rough: 0.45, metal: 0.5 }) : mat('#b9bcbd', { rough: 0.28, metal: 0.95 });
+    const r = kind === 'black' ? 0.11 : 0.14;
+    const H = kind === 'black' ? 0.9 : 0.95;
+    k.add(new THREE.LatheGeometry([[0, 0], [r + 0.02, 0], [r + 0.02, 0.02], [r, 0.04], [r, H - 0.06], [r + 0.012, H - 0.04], [r * 0.8, H], [r * 0.45, H + 0.04], [0, H + 0.05]].map(([a, b]) => new THREE.Vector2(a, b)), 16), m);
+    k.add(new THREE.CylinderGeometry(r + 0.003, r + 0.003, 0.05, 16, 1, true), mat(kind === 'black' ? '#e8d24a' : '#2a2a2a', { rough: 0.35 }), 0, H - 0.2, 0, 0, 0, 0, 1, false);
+  });
+  place(parent, parts, x, CURB, z);
+}
+
+/** sidewalk Siamese standpipe connection by a building: a pipe rising to a Y with two capped inlets */
+export function standpipe(parent: THREE.Object3D, x: number, z: number, ry: number, red = false) {
+  const parts = kit(`standpipe|${red}`, (k) => {
+    const m = red ? mat('#a8191b', { rough: 0.4, metal: 0.3 }) : mat('#c7c2b0', { rough: 0.3, metal: 0.9 });
+    const cap = mat('#b8a26a', { rough: 0.35, metal: 0.9 });
+    k.add(new THREE.CylinderGeometry(0.11, 0.12, 0.04, 16), m, 0, 0.02, 0);
+    k.add(new THREE.CylinderGeometry(0.06, 0.065, 0.5, 14), m, 0, 0.29, 0);
+    k.add(new THREE.SphereGeometry(0.085, 14, 10), m, 0, 0.58, 0);
+    for (const s of [-1, 1]) {
+      const a = s * 0.75;
+      const dx = Math.sin(a) * 0.12, dy = Math.cos(a) * 0.12;
+      k.add(new THREE.CylinderGeometry(0.045, 0.05, 0.16, 14), m, dx, 0.58 + dy * 0.6, 0.03, 0.5, 0, -a);
+      k.add(new THREE.CylinderGeometry(0.06, 0.06, 0.045, 14), cap, dx * 1.7, 0.58 + dy * 1.2, 0.07, 0.5, 0, -a);
+      k.add(new THREE.CylinderGeometry(0.022, 0.022, 0.05, 6), cap, dx * 2.0, 0.58 + dy * 1.42, 0.09, 0.5, 0, -a);
+      k.add(new THREE.TorusGeometry(0.05, 0.004, 4, 10, Math.PI), mat('#4a4a48', { rough: 0.5, metal: 0.8 }), dx * 1.3, 0.5, 0.08, 0, 0, Math.PI);
+    }
+  });
+  place(parent, parts, x, CURB, z, ry);
+}
+
 // ---------------------------------------------------------------- block furnishing
 
 /**
@@ -950,6 +984,28 @@ export function streetExtras(o: { stat: THREE.Object3D; rng: Rng; colliders: LRe
       const len = rng.range(10, 22), z = rng.range(-BZ + 4 + len / 2, BZ - 4 - len / 2);
       sidewalkShed(stat, sx * (LX + 0.02), z, sx > 0 ? Math.PI / 2 : -Math.PI / 2, len);
     }
+  }
+  // pipe bollards guarding some corners; stainless security bollards in front of a few avenue buildings
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    if (!rng.chance(0.25)) continue;
+    for (let k = 0; k < 3; k++) {
+      const x = sx * (BX - 2.2 - k * 1.3), z = sz * (BZ - 0.35);
+      if (free(x, z, 0.3, 0.3, 0.15)) { bollard(stat, x, z); claim(x, z, 0.26, 0.26); }
+    }
+  }
+  for (const sx of [-1, 1]) {
+    if (!rng.chance(0.12)) continue;
+    const z0 = rng.range(-BZ + 5, BZ - 11);
+    for (let k = 0; k < 6; k++) {
+      const x = sx * (LX + 0.8), z = z0 + k * 1.3;
+      if (free(x, z, 0.32, 0.32, 0.1)) { bollard(stat, x, z, 'steel'); claim(x, z, 0.3, 0.3); }
+    }
+  }
+  // a standpipe or two against the building fronts
+  for (let k = rng.int(1, 2); k > 0; k--) {
+    const sz = rng.chance(0.5) ? 1 : -1;
+    const x = rng.range(-LX + 4, LX - 4), z = sz * (LZ + 0.22);
+    if (free(x, z, 0.4, 0.4, 0.1)) { standpipe(stat, x, z, sz > 0 ? 0 : Math.PI, rng.chance(0.3)); claim(x, z, 0.35, 0.35); }
   }
   // manhole covers in the roadway (this chunk's half of each road)
   for (let k = rng.int(2, 5); k > 0; k--) {

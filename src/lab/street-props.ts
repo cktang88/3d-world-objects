@@ -33,6 +33,10 @@ const scene: LabScene = {
       P.trashBags(stat, 5, -0.5, r);
       P.manhole(stat, -1, 2.2, 0);
       P.manhole(stat, 1, 2.2, 1);
+      P.bollard(stat, 6.5, 0.5);
+      P.bollard(stat, 7.3, 0.5, 'steel');
+      P.standpipe(stat, 8.3, -0.5, 0);
+      P.standpipe(stat, 9.1, -0.5, 0, true);
     } else if (set === 'lights') {
       P.lampPost(stat, group, -3, 1, 'x', 1, 'cobra');
       P.lampPost(stat, group, 3, 1, 'x', 1, 'crook');
