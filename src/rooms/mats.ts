@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mat } from '../build';
 import { surface, pbr } from '../pbr';
 import { wallpaperTex } from '../textures';
-import { subwayTex, hexTex, checkerTex, dropCeilingTex, carpetTileTex, spinesTex, leafTex } from './tex';
+import { marbleTex, subwayTex, hexTex, checkerTex, dropCeilingTex, carpetTileTex, spinesTex, leafTex } from './tex';
 
 /** Interior materials. Tiled ones expect world-metre UVs (see Kit). */
 
@@ -59,7 +59,11 @@ export const M = {
   oak: (color = '#ffffff') => surface('oak', [1, 1], { color, roughness: 0.55 }),
   walnut: (color = '#ffffff') => surface('walnut', [1, 1], { color, roughness: 0.5 }),
   pine: (color = '#ffffff') => surface('pine', [1, 1], { color, roughness: 0.6 }),
-  marble: (color = '#ffffff') => surface('marble', [1, 1], { color, roughness: 0.25 }),
+  /** veined marble (procedural, so it never reads as flat white); a dark tint gives Nero Marquina */
+  marble: (color = '#ffffff') => {
+    const dark = new THREE.Color(color).getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
+    return tiled(`marble${dark}`, marbleTex(dark), 1.2, { rough: 0.18 });
+  },
   fabric: (color: string) => surface('fabric', [1, 1], { color, roughness: 0.95 }),
   drape: (color: string) => memo(`drape${color}`, () => new THREE.MeshStandardMaterial({ color, roughness: 0.92, side: THREE.DoubleSide })),
   velvet: (color: string) => surface('velvet', [1, 1], { color, roughness: 0.85 }),

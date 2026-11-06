@@ -389,3 +389,49 @@ export function photoTex(seed: number) {
     return tex(c, false);
   });
 }
+
+/** Calacatta/Carrara-style marble: warm white with soft grey and gold veins (or Nero Marquina). One repeat = 1.2 m. */
+export function marbleTex(dark = false) {
+  return cached(`marble:${dark}`, () => {
+    const S = 512;
+    const rng = new Rng(dark ? 23 : 21);
+    const [c, g] = canvas(S);
+    g.fillStyle = dark ? '#3a3a3c' : '#f2efe9';
+    g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 40; i++) {
+      const x = rng.next() * S, y = rng.next() * S, r = 40 + rng.next() * 120;
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, dark ? 'rgba(80,80,84,0.25)' : 'rgba(225,220,212,0.35)');
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, S, S);
+    }
+    const veins: [number, number][][] = [];
+    for (let v = 0; v < 9; v++) {
+      const pts: [number, number][] = [];
+      let x = rng.next() * S, y = rng.next() * S;
+      const ang = rng.range(-0.6, 0.6) + Math.PI / 4;
+      for (let i = 0; i < 60; i++) {
+        pts.push([x, y]);
+        x += Math.cos(ang) * 12 + rng.range(-6, 6);
+        y += Math.sin(ang) * 12 + rng.range(-6, 6);
+      }
+      veins.push(pts);
+    }
+    // drawn at offsets so the veins wrap and the texture tiles
+    for (const [dx, dy] of [[0, 0], [-S, 0], [0, -S], [-S, -S], [S, 0], [0, S]]) {
+      veins.forEach((pts, i) => {
+        g.strokeStyle = dark ? 'rgba(235,235,235,0.55)' : i % 4 === 0 ? 'rgba(176,150,105,0.55)' : 'rgba(120,118,118,0.5)';
+        g.lineWidth = i % 3 === 0 ? 2.6 : 1.2;
+        g.beginPath();
+        pts.forEach(([x, y], k) => (k ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy)));
+        g.stroke();
+        g.lineWidth *= 4;
+        g.strokeStyle = dark ? 'rgba(235,235,235,0.06)' : 'rgba(120,118,118,0.06)';
+        g.stroke();
+      });
+    }
+    noise(g, S, S, 4, rng);
+    return tex(c);
+  });
+}
