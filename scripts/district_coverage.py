@@ -2,7 +2,7 @@
 """
 How much of each object family a player can meet in the NYC world (not the museum):
 
-  - district showcases: public/districts/pools.json kinds that src/nyc/district-*.ts / districts.ts use
+  - district showcases: public/districts/p/<kind>.json pools that src/nyc/district-*.ts / districts.ts use
   - shops: the museum pools (public/museum/pools.json) each SHOPS type stocks (src/nyc/buildings-shop.ts)
   - street props and apartment interiors: the bundled manifest (public/models/manifest.json)
 
@@ -27,7 +27,7 @@ def src(path_glob):
 
 
 # ---- district showcase kinds actually referenced by the district code
-dpools = json.load(open(os.path.join(ROOT, "public/districts/pools.json")))
+dpools = {k: json.load(open(os.path.join(ROOT, f"public/districts/p/{k}.json"))) for k in json.load(open(os.path.join(ROOT, "public/districts/index.json")))}
 dsrc = src("src/nyc/district*.ts") + src("src/nyc/districts.ts")
 used_kinds = {k for k in dpools if re.search(r"['\"]%s['\"]" % re.escape(k), dsrc)}
 seen = collections.defaultdict(set)  # family -> ids

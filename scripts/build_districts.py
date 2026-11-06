@@ -20,7 +20,7 @@ import re
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 IDX = os.path.join(HERE, ".cache", "index.jsonl")
-OUT = os.path.join(ROOT, "public", "districts", "pools.json")
+OUT = os.path.join(ROOT, "public", "districts")  # index.json {kind: count} + p/<kind>.json shards
 
 # kind: (families, include regex, exclude regex, max entries)
 EX_PART = r"part|piece|wheel|tyre|tire|rim|seat|door|interior|engine|spoiler|bumper|key|track|rail|lightbar|light bar|steering|mirror|hood|chassis|frame|axle|logo|icon|sign|badge|toy|lego|rc |model kit|keychain|button|panel|gear|kit\b"
@@ -54,6 +54,10 @@ KINDS = {
     # floor machines for the tool & equipment yard: by title over the whole machine family
     "workshop": (["machine or industrial", "power tool"], r"\b(lathe|drill|mill|milling|grinder|welder|welding|saw|press|compressor|generator|pump|engine|motor|vise|vice|workbench|machine|cnc|router|sander|forge|anvil|winch|hoist|jack|crane|mixer|boiler|tank|cabinet|toolbox|tool chest|cart|trolley|valve|gearbox|conveyor|fan|blower|heater|transformer|turbine|robot arm|robotic arm|3d printer|printer|cutter|bender|shear|kiln|furnace)\b", r"icon|logo|toy|lego|miniature|keychain|sci-?fi|game|part\b", 600),
     "folly": (["building"], r".", r"icon|logo|toy|lego|miniature|interior|room\b|kit\b|ruin|castle|cathedral|skyscraper|tower|palace|fortress", 500),
+    # the armory courtyard: armour and historic arms only (no modern firearms)
+    "armory": (["weapon or armour"], r"\b(armor|armour|helmet|helm|shield|sword|knight|suit|breastplate|cuirass|gauntlet|greave|halberd|lance|mace|axe|spear|pike|crossbow|bow|cannon|catapult|trebuchet|ballista|chainmail|mail|plate|samurai|kabuto|katana|scimitar|saber|sabre|rapier|claymore|dagger|flail|morning star|glaive|poleaxe|warhammer|viking|roman|gladius|centurion|spartan|templar|crusader)\b", r"gun|rifle|pistol|revolver|shotgun|\bak\b|m4|m16|sniper|grenade|bullet|ammo|magazine|tank|missile|rocket|bazooka|nerf|sci-?fi|laser|blaster|plasma|futur|cyber|toy|lego|cosplay|game|fortnite|minecraft|anime|fantasy|power sword|lightsaber", 500),
+    # Bowery appliance row: fridges, ranges, washers on the sidewalk
+    "applianceRow": (["home appliance", "kitchen appliance"], r"\b(fridge|refrigerator|freezer|washer|washing machine|dryer|dishwasher|stove|oven|range|cooker|microwave|air conditioner|ac unit|heater|radiator|fan|vacuum|water heater|boiler|dehumidifier|humidifier|sewing machine|mixer|blender|toaster|coffee|espresso|kettle|fryer|grill|ice maker|ice machine|cooler|vending|jukebox|television|tv|iron|appliance)\b", r"icon|logo|toy|lego|miniature|remote|knob|part\b", 500),
     "garden": (["garden or outdoor"], r".", r"toy|lego|miniature|icon|logo", 200),
     "sport": (["sports equipment"], r"\b(hoop|basketball|goal|net|soccer|football|baseball|tennis|ball|bike|bicycle|skateboard|scooter|ski|surfboard|kayak|golf|bat|racket|racquet|dumbbell|kettlebell|weights|bench|treadmill|punching|boxing|hockey|helmet|glove|cone|hurdle|trophy|frisbee|kite|volleyball|ping ?pong|table tennis|pool table|bowling|rowing|exercise|gym|pull-?up|barbell|stationary)\b", r"stadium|arena|court\b|field\b|gym\b|room|scene|diorama|building|house|icon|logo|card|pin\b", 160),
     "toy": (["toy or game"], r"\b(kite|ball|hoop|wagon|scooter|teddy|bear|doll|rocking|horse|robot|car|truck|train|plane|boat|dinosaur|blocks|puzzle|game|chess|board|dice|top|yoyo|yo-yo|drum|duck|bucket|spade|castle|figure|action|plush|puppet|toy)\b", r"stadium|arena|court\b|field\b|gym\b|room|scene|diorama|building|house|icon|logo|lego piece|token|card\b", 160),
@@ -173,9 +177,21 @@ def main():
         for k in os.environ["REVIEW"].split(","):
             for row in out[k]:
                 print(f"  {k}: {row[3]}  {row[6]!r}  [{row[5]}]")
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    json.dump(out, open(OUT, "w"), separators=(",", ":"), ensure_ascii=False)
-    print("wrote", OUT, os.path.getsize(OUT) // 1024, "KB")
+    # one shard per pool, fetched when a district first needs it; a small index of what exists
+    shard_dir = os.path.join(OUT, "p")
+    os.makedirs(shard_dir, exist_ok=True)
+    for f in os.listdir(shard_dir):
+        os.remove(os.path.join(shard_dir, f))
+    total = 0
+    for k, rows in out.items():
+        path = os.path.join(shard_dir, f"{k}.json")
+        json.dump(rows, open(path, "w"), separators=(",", ":"), ensure_ascii=False)
+        total += os.path.getsize(path)
+    json.dump({k: len(v) for k, v in out.items()}, open(os.path.join(OUT, "index.json"), "w"), separators=(",", ":"))
+    old = os.path.join(OUT, "pools.json")
+    if os.path.exists(old):
+        os.remove(old)
+    print("wrote", len(out), "shards,", total // 1024, "KB in all; index", os.path.getsize(os.path.join(OUT, "index.json")), "bytes")
 
 
 if __name__ == "__main__":

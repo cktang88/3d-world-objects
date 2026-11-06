@@ -4,7 +4,7 @@ import { test, expect, none, fmt } from './qa';
 import { realScale } from '../src/realscale';
 import { RANGES, plausible } from '../src/nyc/district-showcase';
 
-const pools = JSON.parse(readFileSync('public/districts/pools.json', 'utf8')) as Record<string, unknown[][]>;
+const pools = Object.fromEntries(Object.keys(JSON.parse(readFileSync('public/districts/index.json', 'utf8'))).map((k) => [k, JSON.parse(readFileSync(`public/districts/p/${k}.json`, 'utf8'))])) as Record<string, unknown[][]>;
 /** typical proportions (length, height, width) of each pool's objects */
 const SHAPE: Record<string, [number, number, number]> = {
   car: [4.6, 1.5, 1.9], carShow: [4.6, 1.5, 1.9], truck: [7, 3, 2.5], bike: [1.9, 1.1, 0.7], train: [18, 4.2, 3],

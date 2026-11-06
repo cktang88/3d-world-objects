@@ -11,7 +11,7 @@ import { trackForDetail } from '../detail';
  * Outdoor showcase objects: the cars on the auto row lots, aircraft on the apron, boats in the
  * marina, benches and playground pieces in the park, crates in the rail yard, produce on market
  * stalls. Each district builder registers *slots* (a place, a footprint and a pool of candidates,
- * public/districts/pools.json from scripts/build_districts.py); the manager streams the sand3d
+ * public/districts/p/<kind>.json shards from scripts/build_districts.py); the manager streams the sand3d
  * objects in when the player comes near (UV-mapped Blender rebuilds where there are any, the
  * Objaverse original swapped in close up by detail.ts), at real size, and drops them again when
  * the player walks away. A candidate that does not fit its slot at real size is skipped.
@@ -19,7 +19,7 @@ import { trackForDetail } from '../detail';
  */
 
 export interface SlotSpec {
-  /** pool kind(s) in public/districts/pools.json */
+  /** pool kind(s): public/districts/p/<kind>.json */
   kind: string | string[];
   x: number;
   y?: number;
@@ -62,24 +62,32 @@ interface Slot {
 }
 
 const slots: Slot[] = [];
-let pools: Record<string, RemoteEntry[]> | null = null;
-let poolsP: Promise<void> | null = null;
-function loadPools() {
-  poolsP ??= fetch(`${import.meta.env.BASE_URL}districts/pools.json`)
-    .then((r) => r.json())
-    .then((raw: Record<string, unknown[][]>) => {
-      pools = {};
-      for (const k of Object.keys(raw)) {
-        // UV-mapped rebuilds first within each pool: they take real materials best
-        const list = raw[k].map(toEntry);
-        pools[k] = list;
-      }
-    })
-    .catch((e) => {
-      console.warn('district pools failed', e);
-      pools = {};
-    });
-  return poolsP;
+/**
+ * Pools load lazily, one shard per kind (public/districts/p/<kind>.json), the first time a slot
+ * that uses the kind is near the player: nothing is fetched or parsed at boot.
+ */
+const pools: Record<string, RemoteEntry[]> = {};
+const poolReq = new Map<string, Promise<void>>();
+function needPool(k: string) {
+  let p = poolReq.get(k);
+  if (!p) {
+    p = fetch(`${import.meta.env.BASE_URL}districts/p/${k}.json`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((raw: unknown[][]) => void (pools[k] = raw.map(toEntry)))
+      .catch((e) => {
+        console.warn('district pool failed', k, e);
+        pools[k] = [];
+      });
+    poolReq.set(k, p);
+  }
+  return p;
+}
+const kindsOf = (s: Slot) => (Array.isArray(s.spec.kind) ? s.spec.kind : [s.spec.kind]);
+/** true once all of a slot's pools are in (asks for the missing ones) */
+function poolsReady(s: Slot) {
+  let ok = true;
+  for (const k of kindsOf(s)) if (!pools[k]) { void needPool(k); ok = false; }
+  return ok;
 }
 
 /** budgets (the lab lowers them for software rendering) */
@@ -102,12 +110,10 @@ export function addSlot(parent: THREE.Object3D, portals: Portal[], spec: SlotSpe
   const portal: Portal = { box: new THREE.Box3(), label: '', target: 'inspect' };
   portals.push(portal);
   slots.push({ spec, holder, portal, state: 'idle', tries: 0, tris: 0, wp: new THREE.Vector3(NaN, 0, 0), dist: Infinity });
-  void loadPools();
   return holder;
 }
 
 function candidates(s: Slot): RemoteEntry[] {
-  if (!pools) return [];
   const kinds = Array.isArray(s.spec.kind) ? s.spec.kind : [s.spec.kind];
   const list: RemoteEntry[] = [];
   for (const k of kinds) list.push(...(pools[k] ?? []));
@@ -117,7 +123,7 @@ function candidates(s: Slot): RemoteEntry[] {
 function pickNext(s: Slot): RemoteEntry | null {
   // the first kind is the curated pool: try it first, then any of the kinds
   const kinds = Array.isArray(s.spec.kind) ? s.spec.kind : [s.spec.kind];
-  const first = pools?.[kinds[0]] ?? [];
+  const first = pools[kinds[0]] ?? [];
   const list = s.tries < 3 && first.length ? first : candidates(s);
   if (!list.length) return null;
   const r = new Rng(hashN(s.spec.seed, s.tries, 71));
@@ -165,7 +171,7 @@ export function plausible(pool: string | null, x: number, y: number, z: number):
 /** which of the slot's pools an entry came from */
 function poolOf(s: Slot, e: RemoteEntry): string | null {
   const kinds = Array.isArray(s.spec.kind) ? s.spec.kind : [s.spec.kind];
-  for (const k of kinds) if (pools?.[k]?.some((x) => x.id === e.id)) return k;
+  for (const k of kinds) if (pools[k]?.some((x) => x.id === e.id)) return k;
   return null;
 }
 
@@ -343,7 +349,6 @@ export function updateShowcases(p: THREE.Vector3) {
     if (s.state === 'loading') s.abort?.();
     slots.splice(i, 1);
   }
-  if (!pools) return;
   const want: { s: Slot; d: number }[] = [];
   for (const s of slots) {
     if (Number.isNaN(s.wp.x)) {
@@ -358,7 +363,7 @@ export function updateShowcases(p: THREE.Vector3) {
     const R = Math.min(SHOWCASE.cap, s.spec.radius ?? SHOWCASE.radius);
     if (s.state === 'shown' && d > R + 40) unload(s);
     else if (s.state === 'loading' && d > R + 40) s.abort?.();
-    else if (s.state === 'idle' && d < R) want.push({ s, d });
+    else if (s.state === 'idle' && d < R && poolsReady(s)) want.push({ s, d });
   }
   want.sort((a, b) => a.d - b.d);
   for (const { s } of want) {
@@ -386,9 +391,9 @@ export function slotDebug(root: THREE.Object3D) {
     return o === root;
   }).map((s) => ({ state: s.state, x: s.wp.x, z: s.wp.z, dist: s.dist }));
 }
-/** resolves once the pools are loaded (qa) */
-export function showcaseReady() {
-  return loadPools();
+/** resolves once the given pools are loaded (qa) */
+export function showcaseReady(kinds: string[] = []) {
+  return Promise.all(kinds.map(needPool));
 }
 
 /** stats for the labs */

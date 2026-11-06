@@ -30,7 +30,7 @@ test('special blocks build in Node within budgets', () => {
 });
 
 test('showcase slots: inside the block, pools exist, not inside buildings', () => {
-  const pools = JSON.parse(readFileSync('public/districts/pools.json', 'utf8')) as Record<string, unknown[]>;
+  const pools = Object.fromEntries(Object.keys(JSON.parse(readFileSync('public/districts/index.json', 'utf8'))).map((k) => [k, JSON.parse(readFileSync(`public/districts/p/${k}.json`, 'utf8'))])) as Record<string, unknown[]>;
   const bad: string[] = [];
   let total = 0;
   const kinds = new Set<string>();
