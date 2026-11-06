@@ -115,3 +115,5 @@ a { color: var(--accent); }
 #info .close { position: absolute; top: 8px; right: 12px; background: none; border: 0; color: #fff; font-size: 26px; cursor: pointer; }
 #info .hint { font-size: 12px; opacity: .5; }
 @media (max-width: 640px) { .modes { grid-template-columns: 1fr; } }
+
+body.lab #help, body.lab #depth, body.lab #crosshair { display: none; }

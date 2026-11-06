@@ -13,6 +13,8 @@ import { DATASET_LABEL, loadRebuiltIndex, type RemoteEntry } from './remote';
 import type { Env, Level, LevelDesc, Portal } from './level';
 import { skyTex } from './textures';
 import { hashStr } from './rng';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { labScenes, LabLevel, vec } from './lab';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -585,9 +587,23 @@ function setupTouch() {
 const clock = new THREE.Clock();
 let time = 0;
 
+let lab: { controls: OrbitControls; level: LabLevel } | null = null;
+
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   time += dt;
+  if (lab) {
+    lab.controls.update();
+    lab.level.update(dt, camera.position, time);
+    if (sun.visible) {
+      sun.position.copy(lab.controls.target).addScaledVector(sunDir, 150);
+      sun.target.position.copy(lab.controls.target);
+    }
+    updateDetail(camera.position, 60);
+    draw();
+    requestAnimationFrame(frame);
+    return;
+  }
   if (level && !transitioning) {
     const active = started || coarse;
     player.update(dt, level.colliders(player.pos), !active || infoOpen);
@@ -645,6 +661,27 @@ async function startMode(m: Mode) {
   toast(m === 'museum' ? 'Six wings. Walk through any doorway — each leads to rooms of similar objects, forever.' : 'Walk into any shop or door. Look at anything and press E.');
 }
 
+/** ?lab=<scene>: one model or a small scene with an orbit camera, for fast iteration */
+async function startLab(name: string) {
+  const sc = labScenes().find((x) => x.name === name) ?? labScenes().find((x) => x.name === 'index')!;
+  hud.start.classList.add('hidden');
+  document.body.classList.add('lab');
+  const lv = new LabLevel(sc);
+  if (params.get('env')) lv.env = (await import('./lab')).LAB_ENVS[params.get('env')!] ?? lv.env;
+  level = lv;
+  scene.add(lv.group);
+  applyEnv(lv.env);
+  camera.position.copy(vec(params.get('cam'), sc.cam ?? [3, 2, 4]));
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.copy(vec(params.get('look'), sc.look ?? [0, 0.6, 0]));
+  controls.enableDamping = true;
+  controls.autoRotate = params.has('spin');
+  lab = { controls, level: lv };
+  hud.crumbs.textContent = `lab · ${sc.name}`;
+  const done = Promise.resolve(sc.build({ params, group: lv.group, renderer, camera })).then(() => new Promise((r) => setTimeout(r, Number(params.get('settle') ?? 1500))));
+  (window as unknown as { __labReady: Promise<unknown> }).__labReady = done;
+}
+
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
   b.addEventListener('click', () => {
     const m = b.dataset.mode as Mode | 'resume';
@@ -663,7 +700,8 @@ ready.then(() => {
   $('museum-count').textContent = museum().total.toLocaleString();
   setupTouch();
   const pm = params.get('mode');
-  if (pm === 'museum' || pm === 'world') startMode(pm);
+  if (params.has('lab')) startLab(params.get('lab')!);
+  else if (pm === 'museum' || pm === 'world') startMode(pm);
   frame();
 });
 
