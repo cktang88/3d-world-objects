@@ -11,6 +11,7 @@ import { M } from './rooms/mats';
 import { rugTex, windowViewTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
+import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
 
 /**
  * Generated building interiors: a BSP floorplan of real rooms (living rooms, bedrooms, galley
@@ -60,6 +61,26 @@ interface Side {
   open: Opening[];
   /** intervals along the wall already taken (openings, door leaves, furniture) and how tall */
   used: { a: number; b: number; h: number }[];
+}
+/** a room as a visibility cell: everything in it lives under `group`; doors lead to other cells */
+export interface Cell {
+  room: Room;
+  group: THREE.Group;
+  kit: Kit;
+  bounds: Rect;
+  doors: { x: number; z: number; width: number; height: number; axis: 'x' | 'z'; to: Room | 'exit' }[];
+}
+/**
+ * Something with a door or drawers. Its contents do not exist until `generate()` is called
+ * (when it is opened); `obj` is an empty group at the container's front-centre base,
+ * rotated so local +z points out of its front, and `size` is its outer w/h/d.
+ */
+export interface Container {
+  kind: 'dresser' | 'nightstand' | 'cabinet' | 'upper' | 'fridge' | 'closet';
+  obj: THREE.Group;
+  size: THREE.Vector3;
+  room: Room;
+  generate: () => THREE.Object3D;
 }
 interface Frame {
   x: number;
@@ -162,7 +183,20 @@ export class InteriorLevel implements Level {
   private rng: Rng;
   private lights: { light: THREE.PointLight; room: Room }[] = [];
   private shadowLight: THREE.PointLight | null = null;
-  private kit = new Kit();
+  /** one cell per room: its own group and geometry batch, so unseen rooms can be skipped */
+  cells: Cell[] = [];
+  /** the entry (exit) door in level coordinates: centre of the doorway on the inner wall face; yaw faces into the building */
+  entry = { x: 0, z: 0, width: DOOR, height: DOOR_H, yaw: Math.PI };
+  /** openable containers whose contents are generated only when needed (see Container) */
+  containers: Container[] = [];
+  private cellMap = new Map<Room, Cell>();
+  private cur!: Cell;
+  private get kit() {
+    return this.cur.kit;
+  }
+  private use(rm: Room) {
+    this.cur = this.cellMap.get(rm)!;
+  }
   private sides = new Map<Room, Side[]>();
   private H: number;
   private style: string;
@@ -342,10 +376,33 @@ export class InteriorLevel implements Level {
     doorZones.push(rect(exitX, bounds.z1 - 0.9, DOOR + 0.6, 2.0));
 
     // architecture
-    for (const rm of leaves) for (const sd of this.sides.get(rm)!) this.wall(sd, leaves);
+    for (const rm of leaves) {
+      const cell: Cell = { room: rm, group: new THREE.Group(), kit: new Kit(), bounds: { minX: rm.x0, minZ: rm.z0, maxX: rm.x1, maxZ: rm.z1 }, doors: [] };
+      cell.group.name = `room:${rm.type}`;
+      this.group.add(cell.group);
+      this.cells.push(cell);
+      this.cellMap.set(rm, cell);
+    }
+    for (const rm of leaves) {
+      this.use(rm);
+      for (const sd of this.sides.get(rm)!) {
+        this.wall(sd, leaves);
+        for (const o of sd.open) {
+          if (o.kind === 'window') continue;
+          const [x, z] = this.at(sd, o.t, -T / 2);
+          const other = o.kind === 'exit' ? 'exit' : leaves.find((q) => q !== rm && x >= q.x0 - 0.01 && x <= q.x1 + 0.01 && z >= q.z0 - 0.01 && z <= q.z1 + 0.01 && this.sides.get(q)!.some((s2) => s2.axis === sd.axis && Math.abs(s2.c - sd.c) < 0.01));
+          if (other) this.cellMap.get(rm)!.doors.push({ x, z, width: o.w, height: o.y1, axis: sd.axis, to: other });
+        }
+      }
+    }
     this.doorLeaves(splits, leaves);
+    this.use(leaves.find((q) => exitX > q.x0 && exitX < q.x1 && Math.abs(q.z1 - bounds.z1) < 0.01) ?? leaves[0]);
     this.exitDoor(exitX, bounds);
-    for (const rm of leaves) this.floorAndCeiling(rm);
+    this.entry = { x: exitX, z: bounds.z1 - T / 2, width: DOOR, height: DOOR_H, yaw: Math.PI };
+    for (const rm of leaves) {
+      this.use(rm);
+      this.floorAndCeiling(rm);
+    }
 
     // lights: one warm ceiling light per room, plus one shadow-casting light that follows you
     sorted.forEach((rm, i) => {
@@ -371,9 +428,12 @@ export class InteriorLevel implements Level {
       this.update(0, this.spawn.pos, 0);
     }
 
-    sorted.forEach((rm) => this.furnish(rm, doorZones, rm === stairRoom));
+    sorted.forEach((rm) => {
+      this.use(rm);
+      this.furnish(rm, doorZones, rm === stairRoom);
+    });
 
-    this.kit.finish(this.group);
+    for (const c of this.cells) c.kit.finish(c.group);
     this.group.traverse((o) => {
       const m = (o as THREE.Mesh).material;
       if (m === M.ceiling() || m === M.dropCeiling()) o.userData.ceiling = true;
@@ -753,6 +813,7 @@ export class InteriorLevel implements Level {
       const rank = (t: string) => ({ bathroom: 0, bedroom: 1, kids: 1, study: 2, office: 2, meeting: 2 } as Record<string, number>)[t] ?? 5;
       cands.sort((p, q) => rank(p.sd.room.type) - rank(q.sd.room.type) || area(p.sd.room) - area(q.sd.room));
       const { sd, dir } = cands[0];
+      this.use(sd.room);
       if (sd.room.type === 'meeting' && this.style === 'office') continue;
       const hinge = s.door + (dir * DOOR) / 2;
       const [hx, hz] = this.at(sd, hinge, 0.05);
@@ -786,9 +847,9 @@ export class InteriorLevel implements Level {
     sign.userData.owned = true;
     sign.position.set(exitX, DOOR_H + 0.28, z - T / 2 - 0.06);
     sign.rotation.y = Math.PI;
-    this.group.add(sign);
-    this.group.add(box(mat('#d8d8d8', { rough: 0.6 }), 0.46, 0.19, 0.05, exitX, DOOR_H + 0.185, z - T / 2 - 0.02, false));
-    this.group.add(glow('#ff5040', 0.7, exitX, DOOR_H + 0.28, z - T / 2 - 0.15, 0.35));
+    this.cur.group.add(sign);
+    this.cur.group.add(box(mat('#d8d8d8', { rough: 0.6 }), 0.46, 0.19, 0.05, exitX, DOOR_H + 0.185, z - T / 2 - 0.02, false));
+    this.cur.group.add(glow('#ff5040', 0.7, exitX, DOOR_H + 0.28, z - T / 2 - 0.15, 0.35));
     this.ports.push({
       box: new THREE.Box3(new THREE.Vector3(exitX - 0.7, 0, z - 0.6), new THREE.Vector3(exitX + 0.7, 2.4, z + 0.3)),
       label: this.desc.floor > 0 ? 'Go back downstairs' : 'Leave the building',
@@ -963,7 +1024,7 @@ export class InteriorLevel implements Level {
     const holder = new THREE.Group();
     holder.position.set(f.x, y, f.z);
     holder.rotation.y = f.rot;
-    this.group.add(holder);
+    this.cur.group.add(holder);
     const fk = new Kit();
     const out = fallback(fk);
     fk.finish(holder);
@@ -972,12 +1033,40 @@ export class InteriorLevel implements Level {
     this.libPortal(id, f, s, y);
     return out;
   }
+  /** register a closed compartment of a placed piece; its contents are generated on demand */
+  private container(kind: Container['kind'], f: Frame, b: { x: number; y: number; z: number; w: number; h: number; d: number }) {
+    const c = Math.cos(f.rot), s = Math.sin(f.rot);
+    const obj = new THREE.Group();
+    obj.position.set(f.x + b.x * c + b.z * s, b.y, f.z - b.x * s + b.z * c);
+    obj.rotation.y = f.rot;
+    obj.name = `container:${kind}`;
+    this.cur.group.add(obj);
+    const seed = hashN(this.desc.seed, Math.round(obj.position.x * 100), Math.round(obj.position.z * 100), Math.round(b.y * 100));
+    const gen = () => {
+      switch (kind) {
+        case 'fridge':
+          return fridgeContents(seed, b.w, b.h, b.d);
+        case 'cabinet':
+          return cabinetContents(seed, b.w, b.h, b.d);
+        case 'upper':
+          return upperContents(seed, b.w, b.h, b.d);
+        case 'closet':
+          return closetContents(seed, b.w, b.h, b.d);
+        case 'nightstand':
+          return drawerContents(seed, b.w, b.h, b.d, 1, 0.3);
+        default:
+          return drawerContents(seed, b.w, b.h, b.d, 3);
+      }
+    };
+    this.containers.push({ kind, obj, size: new THREE.Vector3(b.w, b.h, b.d), room: this.cur.room, generate: gen });
+  }
+
   /** a small library object (no stand-in) */
   private libDecor(id: string, x: number, y: number, z: number, rot: number) {
     const holder = new THREE.Group();
     holder.position.set(x, y, z);
     holder.rotation.y = rot;
-    this.group.add(holder);
+    this.cur.group.add(holder);
     void fillHolder(holder, id);
     this.libPortal(id, { x, z, rot }, LIB[id], y);
   }
@@ -1141,7 +1230,7 @@ export class InteriorLevel implements Level {
       const ph = stId ? LIB[stId][1] : p.h;
       this.kit.at(f.x, 0, f.z, 0, () => F.tableLamp(k, r, 0, ph, 0));
       p.h = ph;
-      this.group.add(glow('#ffd59a', 0.55, f.x, p.h + 0.4, f.z, 0.3));
+      this.cur.group.add(glow('#ffd59a', 0.55, f.x, p.h + 0.4, f.z, 0.3));
     }
     // a painting over the sofa (if it stands against a wall)
     const sofaSide = c.sides.find((s) => Math.abs((s.axis === 'z' ? sf!.z : sf!.x) - (s.face + s.inward * 0.49)) < 0.1 && s.axis === opp.axis);
@@ -1196,13 +1285,24 @@ export class InteriorLevel implements Level {
       const nsId = r.chance(0.5) ? pickLib('nightstand', r) : null;
       const p = this.libPiece(f, nsId, (kk) => F.nightstand(kk, this.pal.wood)) as F.Piece;
       if (nsId) p.h = LIB[nsId][1];
+      this.container('nightstand', f, { x: 0, y: 0.12, z: 0, w: 0.44, h: p.h - 0.16, d: 0.34 });
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -0.08, p.h, -0.04);
         if (r.chance(0.6)) F.bookStack(k, r, 0.12, p.h, 0.05);
       });
-      this.group.add(glow('#ffd59a', 0.5, f.x, p.h + 0.4, f.z, 0.3));
+      this.cur.group.add(glow('#ffd59a', 0.5, f.x, p.h + 0.4, f.z, 0.3));
     }
     this.painting(r, bside, bf.t, 1.15 + 0.35 + 0.4, Math.min(1.2, bw * 0.75));
+    // a built-in closet
+    for (const s of this.sidesByFreeLength(c, 1.3)) {
+      if (s.sd === bside) continue;
+      const cw = Math.min(1.6, freeRun(s.sd) - 0.1);
+      const f = this.onWall(c, s.sd, cw, 0.62, 2.3, r.chance(0.5) ? s.sd.e0 + cw / 2 + 0.02 : s.sd.e1 - cw / 2 - 0.02, 0.0, 0.02);
+      if (!f) continue;
+      const p = this.draw(f, () => F.closet(k, cw, Math.min(2.3, this.H - 0.3), M.trim())) as F.Piece;
+      for (const b of p.boxes ?? []) this.container('closet', f, b);
+      break;
+    }
     // dresser on another wall, a picture or mirror over it
     for (const s of this.sidesByFreeLength(c, 1.2)) {
       if (s.sd === bside) continue;
@@ -1212,6 +1312,7 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, drId, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const dtop = drId ? { x: 0, z: 0, y: ds[1], w: ds[0] - 0.1, d: ds[2] - 0.12 } : p.tops[0];
+      this.container('dresser', f, { x: 0, y: 0.08, z: 0, w: ds[0] - 0.08, h: dtop.y - 0.12, d: ds[2] - 0.08 });
       this.decorateTop(r, f, { ...dtop, x: -dtop.w / 4, w: dtop.w / 2 }, ['lamp', 'tableware', 'toy', 'plant', 'electronics'], [1, 1], 0.45);
       this.libTop(r, f, { ...dtop, x: dtop.w / 4, w: dtop.w / 2 }, 'table', 2, 0.45);
       if (r.chance(0.6)) {
@@ -1239,7 +1340,11 @@ export class InteriorLevel implements Level {
     cand.sort((a, b) => a.wins - b.wins || b.len - a.len);
     if (!cand.length) return this.generic(c);
     const runs = narrow < 3.3 && narrow > 2.3 ? 2 : 1;
+    // marble counters (and often a marble slab backsplash) in apartments and brownstones
+    const kcounter = this.style === 'office' ? this.pal.counter : r.chance(0.8) ? M.marble('#ffffff') : M.marble('#6a6a6a');
+    const ksplash = this.style !== 'office' && r.chance(0.4) ? kcounter : M.subway(r.pick(['#f4f2ec', '#f4f2ec', '#e3ebe6', '#1f2a33']));
     const used: Side[] = [];
+    const runFrames: Frame[] = [];
     for (const s of cand) {
       if (used.length >= runs) break;
       if (used.length && !(s.sd.axis === used[0].axis && s.sd.inward === -used[0].inward)) continue;
@@ -1254,8 +1359,8 @@ export class InteriorLevel implements Level {
         F.kitchenRun(k, r, {
           len,
           cab: this.pal.cab,
-          counter: this.pal.counter,
-          splash: M.subway(r.pick(['#f4f2ec', '#f4f2ec', '#e3ebe6', '#1f2a33'])),
+          counter: kcounter,
+          splash: ksplash,
           fridgeAt: used.length ? 0 : r.chance(0.5) ? -1 : 1,
           rangeAt: used.length ? 0.5 : r.range(0.3, 0.7),
           sinkAt: r.range(0.2, 0.8),
@@ -1268,12 +1373,61 @@ export class InteriorLevel implements Level {
         this.libTop(r, f, { ...tp, w: tp.w / 2, x: tp.x + tp.w / 4 }, 'kitchen', 2, 0.4);
       }
       for (const tp of p.tops) if (r.chance(0.5)) this.kit.at(f.x, 0, f.z, f.rot, () => F.bowl(k, r, tp.x + tp.w * 0.3, tp.y, tp.z));
+      for (const b of p.boxes ?? []) this.container(b.kind as Container['kind'], f, b);
       used.push(s.sd);
+      runFrames.push(f);
     }
-    // a small table with chairs if there is floor left
-    this.diningGroup(c, 2);
+    // an island with stools when the kitchen is wide enough, else a small table
+    if (!(used.length === 1 && narrow >= 3.6 && this.island(c, used[0], runFrames[0], kcounter))) this.diningGroup(c, 2);
     this.corners(c, 'plant', r.int(0, 1));
     this.paintings(c, r.int(0, 1));
+  }
+
+  private island(c: RoomCtx, run: Side, rf: Frame, counter: THREE.Material): boolean {
+    const r = c.r, k = this.kit;
+    const [lo, hi] = [run.e0, run.e1];
+    const iw = Math.min(2.2, hi - lo - 1.4), idp = 0.95;
+    if (iw < 1.2) return false;
+    const t = (run.axis === 'z' ? rf.x : rf.z);
+    const [x, z] = this.at(run, t, 0.64 + 1.05 + idp / 2);
+    const f = this.freeAt(c, run.axis === 'z' ? iw : idp, run.axis === 'z' ? idp : iw, x, z, 0, true, 0.02);
+    if (!f) return false;
+    // stools on the far side need room
+    const [sx, sz] = this.at(run, t, 0.64 + 1.05 + idp + 0.35);
+    if (!c.free(rect(sx, sz, run.axis === 'z' ? iw : 0.6, run.axis === 'z' ? 0.6 : iw), 0.0)) return false;
+    c.occ.push(rect(sx, sz, run.axis === 'z' ? iw : 0.6, run.axis === 'z' ? 0.6 : iw));
+    const rot = this.rotOf(run) + Math.PI; // island cabinets face the run
+    const fr = { x, z, rot };
+    this.kit.at(x, 0, z, rot, () => {
+      k.box(M.matte('#2a2724'), iw - 0.1, 0.1, idp - 0.38, 0, 0, 0.1);
+      k.box(this.pal.cab, iw - 0.04, 0.785, idp - 0.3, 0, 0.1, 0.13);
+      k.box(counter, iw + 0.04, 0.04, idp, 0, 0.885, 0);
+      const n = Math.max(2, Math.round(iw / 0.5));
+      for (let i = 0; i < n; i++) {
+        const xx = -iw / 2 + 0.02 + ((iw - 0.04) * (i + 0.5)) / n;
+        k.box(this.pal.cab, (iw - 0.04) / n - 0.006, 0.16, 0.02, xx, 0.69, idp / 2 - 0.02 + 0.13 - 0.15 + 0.15);
+        k.box(M.brass(), 0.12, 0.012, 0.02, xx, 0.77, idp / 2 + 0.01);
+      }
+    });
+    this.container('cabinet', fr, { x: 0, y: 0.1, z: 0.13, w: iw - 0.04, h: 0.6, d: idp - 0.34 });
+    this.cols.push(shrink(footprint(iw, idp, rot, x, z), 0.05));
+    // stools
+    const n = Math.max(2, Math.floor(iw / 0.6));
+    const c0 = Math.cos(rot), s0 = Math.sin(rot);
+    for (let i = 0; i < n; i++) {
+      const lx = -iw / 2 + (iw * (i + 0.5)) / n;
+      const lz = -idp / 2 - 0.3;
+      const px = x + lx * c0 + lz * s0, pz = z - lx * s0 + lz * c0;
+      const id = pickLib('stool', r);
+      this.libPiece({ x: px, z: pz, rot: rot + Math.PI + r.range(-0.15, 0.15) }, id, (kk) => {
+        kk.cyl(M.black(), 0.02, 0.02, 0.62, 0, 0, 0, 8);
+        kk.cyl(M.black(), 0.2, 0.22, 0.02, 0, 0, 0, 16);
+        kk.cyl(this.pal.wood, 0.19, 0.19, 0.05, 0, 0.62, 0, 18);
+      });
+    }
+    this.libTop(r, fr, { x: 0, z: 0, y: 0.925, w: iw - 0.3, d: idp - 0.3 }, 'kitchen', 2, 0.4);
+    if (r.chance(0.5)) this.kit.at(x, 0.925, z, 0, () => F.vase(k, r, 0, 0, 0));
+    return true;
   }
 
   private dining(c: RoomCtx) {
@@ -1320,10 +1474,14 @@ export class InteriorLevel implements Level {
       }
       if (seats >= 6) spots.push([tw / 2 + 0.12, 0, -Math.PI / 2], [-tw / 2 - 0.12, 0, Math.PI / 2]);
       const seat = r.chance(0.5) ? r.pick(this.pal.accent) : null;
-      this.kit.at(x, 0, z, long ? 0 : Math.PI / 2, () => {
-        for (const [lx, lz, rot] of spots.slice(0, Math.max(seats, 2))) this.kit.at(lx + r.range(-0.03, 0.03), 0, lz + r.range(0, 0.08) * Math.sign(lz || 1), rot + r.range(-0.08, 0.08), () => F.diningChair(k, wood, seat));
-        F.vase(k, r, 0, p.h, 0);
-      });
+      const trot = long ? 0 : Math.PI / 2;
+      const c0 = Math.cos(trot), s0 = Math.sin(trot);
+      const chairId = r.chance(0.6) ? pickLib('diningchair', r) : null;
+      for (const [lx0, lz0, rot] of spots.slice(0, Math.max(seats, 2))) {
+        const lx = lx0 + r.range(-0.03, 0.03), lz = lz0 + r.range(0, 0.08) * Math.sign(lz0 || 1);
+        this.libPiece({ x: x + lx * c0 + lz * s0, z: z - lx * s0 + lz * c0, rot: trot + rot + r.range(-0.08, 0.08) }, chairId, (kk) => F.diningChair(kk, wood, seat));
+      }
+      this.kit.at(x, 0, z, trot, () => F.vase(k, r, 0, p.h, 0));
       this.decorateTop(r, { x, z, rot: long ? 0 : Math.PI / 2 }, { ...p.tops[0], x: tw * 0.25, w: tw * 0.3 }, ['tableware', 'food'], [1, 2], 0.3);
       return;
     }
@@ -1397,7 +1555,7 @@ export class InteriorLevel implements Level {
         F.tableLamp(k, r, top.w / 2 - 0.15, top.y, -0.18);
         if (r.chance(0.6)) F.mug(k, r, -top.w / 2 + 0.2, top.y, 0.1);
       });
-      this.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.3));
+      this.cur.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.3));
       this.decorateTop(r, f, { ...top, x: -top.w / 2 + 0.2, w: 0.3, d: 0.3, z: -0.12 }, ['stationery', 'electronics', 'plant', 'toy'], [1, 1], 0.3);
       // chair pulled up to the desk (front side)
       const c0 = Math.cos(f.rot), s0 = Math.sin(f.rot);
@@ -1564,7 +1722,7 @@ export class InteriorLevel implements Level {
         F.tableLamp(k, r, -top.w / 2 + 0.18, top.y, 0);
         F.bookStack(k, r, 0.05, top.y, 0.02);
       });
-      this.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.25));
+      this.cur.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.25));
       this.libTop(r, f, { ...top, x: top.w / 4, w: top.w / 2 }, 'table', 1, 0.5);
       this.painting(r, cand.sd, f.t, top.y + 1.0, Math.min(1.1, s[0] * 0.8));
       return;
@@ -1623,7 +1781,7 @@ export class InteriorLevel implements Level {
         }
       } else if (what === 'floorlamp') {
         this.kit.at(x, 0, z, 0, () => F.floorLamp(k, r));
-        this.group.add(glow('#ffd59a', 0.6, x, 1.5, z, 0.3));
+        this.cur.group.add(glow('#ffd59a', 0.6, x, 1.5, z, 0.3));
       } else if (what === 'armchair') {
         this.kit.at(x, 0, z, rot, () => F.armchair(k, r.chance(0.5) ? this.pal.accent[0] : M.leather('#6a4028'), M.walnut()));
       } else {
@@ -1719,11 +1877,11 @@ export class InteriorLevel implements Level {
     const sp = spawn(e, scale);
     sp.obj.position.set(x, y, z);
     sp.obj.rotation.y = rot;
-    this.group.add(sp.obj);
+    this.cur.group.add(sp.obj);
     const fp = footprint(sp.size.x, sp.size.z, rot, x, z);
     if (y < 0.05) {
       this.cols.push(shrink(fp, 0.06));
-      this.group.add(blob(fp.maxX - fp.minX, fp.maxZ - fp.minZ, x, z));
+      this.cur.group.add(blob(fp.maxX - fp.minX, fp.maxZ - fp.minZ, x, z));
     }
     if (!NOT_PORTAL.has(role)) {
       const bx = rectBox3(fp, y, y + sp.size.y, 0.04);
@@ -1793,8 +1951,8 @@ export class InteriorLevel implements Level {
     const sp = spawn(e, scale);
     sp.obj.position.set(p.x, ph + 0.06, p.z);
     sp.obj.rotation.y = rot;
-    this.group.add(sp.obj);
-    this.group.add(glow('#fff2d6', 1.6, p.x, ph + 0.06 + sp.size.y + 0.3, p.z, 0.35));
+    this.cur.group.add(sp.obj);
+    this.cur.group.add(glow('#fff2d6', 1.6, p.x, ph + 0.06 + sp.size.y + 0.3, p.z, 0.35));
     const rng = new Rng(hashN(this.desc.seed, p.x * 999, p.z * 999));
     const biome = rng.pick(ROLE_BIOMES[e.role] ?? Object.keys(BIOMES));
     const bx = new THREE.Box3(new THREE.Vector3(p.x - pw / 2, 0, p.z - pw / 2), new THREE.Vector3(p.x + pw / 2, ph + sp.size.y + 0.1, p.z + pw / 2));
@@ -1827,7 +1985,7 @@ export class InteriorLevel implements Level {
     const [x, z] = this.at(sd, t, 0.005);
     grp.position.set(x, y, z);
     grp.rotation.y = this.rotOf(sd);
-    this.group.add(grp);
+    this.cur.group.add(grp);
     const name = paintingName(new Rng(seed));
     const bx = new THREE.Box3().setFromObject(grp).expandByScalar(0.08);
     this.ports.push({
