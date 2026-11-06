@@ -82,6 +82,8 @@ export interface Container {
   size: THREE.Vector3;
   room: Room;
   generate: () => THREE.Object3D;
+  door?: THREE.Object3D;
+  open?: (t: number) => void;
 }
 interface Frame {
   x: number;
@@ -1053,15 +1055,17 @@ export class InteriorLevel implements Level {
     return out;
   }
   /** register a closed compartment of a placed piece; its contents are generated on demand */
-  private container(kind: Container['kind'], f: Frame, b: { x: number; y: number; z: number; w: number; h: number; d: number }) {
+  private container(kind: Container['kind'], f: Frame, b: { x: number; y: number; z: number; w: number; h: number; d: number; doors?: 'left' | 'right' | 'pair' }) {
     const c = Math.cos(f.rot), s = Math.sin(f.rot);
     const obj = new THREE.Group();
-    obj.position.set(f.x + b.x * c + b.z * s, b.y, f.z - b.x * s + b.z * c);
+    // anchor at the front-centre of the base, +z out of the front (lazy.ts convention)
+    const fz = b.z + b.d / 2;
+    obj.position.set(f.x + b.x * c + fz * s, b.y, f.z - b.x * s + fz * c);
     obj.rotation.y = f.rot;
     obj.name = `container:${kind}`;
     this.cur.group.add(obj);
     const seed = hashN(this.desc.seed, Math.round(obj.position.x * 100), Math.round(obj.position.z * 100), Math.round(b.y * 100));
-    const gen = () => {
+    const make = () => {
       switch (kind) {
         case 'fridge':
           return fridgeContents(seed, b.w, b.h, b.d);
@@ -1077,7 +1081,48 @@ export class InteriorLevel implements Level {
           return drawerContents(seed, b.w, b.h, b.d, 3);
       }
     };
-    this.containers.push({ kind, obj, size: new THREE.Vector3(b.w, b.h, b.d), room: this.cur.room, generate: gen });
+    // contents are built about the compartment's centre: shift them back by half the depth
+    const gen = () => {
+      const g = new THREE.Group();
+      const inner = make();
+      inner.position.z = -b.d / 2;
+      g.add(inner);
+      return g;
+    };
+    // real doors that swing (fridge, closet): separate meshes hinged at their edge
+    const entry: Container = { kind, obj, size: new THREE.Vector3(b.w, b.h, b.d), room: this.cur.room, generate: gen };
+    if (b.doors) {
+      const leaf = (hingeX: number, w: number, sign: 1 | -1) => {
+        const g = new THREE.Group();
+        g.position.set(hingeX, 0, 0.012);
+        const k = new Kit();
+        if (kind === 'fridge') {
+          k.box(M.steel(), w, b.h, 0.04, (sign * w) / 2, 0, 0);
+          k.box(M.chrome(), 0.025, 0.55, 0.03, sign * (w - 0.06), b.h * 0.45, 0.04);
+        } else {
+          k.box(M.trim(), w, b.h, 0.022, (sign * w) / 2, 0, 0);
+          const fw = 0.065;
+          for (const [x, y, ww, hh] of [[w / 2, 0, w, fw], [w / 2, b.h - fw, w, fw], [fw / 2, fw, fw, b.h - 2 * fw], [w - fw / 2, fw, fw, b.h - 2 * fw]] as const) k.box(M.trim(), ww, hh, 0.012, sign * x, y, 0.016);
+          k.sphere(M.brass(), 0.025, sign * (w - 0.06), Math.min(1.05, b.h * 0.5), 0.045);
+        }
+        k.finish(g, true);
+        obj.add(g);
+        return g;
+      };
+      if (b.doors === 'pair') {
+        const l = leaf(-b.w / 2, b.w / 2 - 0.005, 1), r = leaf(b.w / 2, b.w / 2 - 0.005, -1);
+        entry.open = (t: number) => {
+          const e = t * t * (3 - 2 * t);
+          l.rotation.y = -1.85 * e;
+          r.rotation.y = 1.85 * e;
+        };
+      } else if (b.doors === 'left') entry.door = leaf(-b.w / 2, b.w, 1);
+      else {
+        const r = leaf(b.w / 2, b.w, -1);
+        entry.open = (t: number) => (r.rotation.y = 1.85 * t * t * (3 - 2 * t));
+      }
+    }
+    this.containers.push(entry);
   }
 
   /** a small library object (no stand-in) */

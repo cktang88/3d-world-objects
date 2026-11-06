@@ -24,7 +24,7 @@ export interface Piece {
   /** local positions of glowing lamp shades (for glow sprites / lights) */
   lamps?: THREE.Vector3[];
   /** closed compartments (centre of base, local; front toward +z) */
-  boxes?: { kind: 'cabinet' | 'upper' | 'fridge' | 'dresser' | 'closet'; x: number; y: number; z: number; w: number; h: number; d: number }[];
+  boxes?: { kind: 'cabinet' | 'upper' | 'fridge' | 'dresser' | 'closet'; x: number; y: number; z: number; w: number; h: number; d: number; doors?: 'left' | 'right' | 'pair' }[];
 }
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -440,8 +440,14 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
   const boxes: NonNullable<Piece['boxes']> = [];
   if (o.fridgeAt !== 0 && L > 2.2) {
     const fx = o.fridgeAt < 0 ? -L / 2 + fridgeW / 2 : L / 2 - fridgeW / 2;
-    k.box(steel, fridgeW - 0.02, 1.78, 0.72, fx, 0, -d / 2 + 0.36 + 0.02);
-    boxes.push({ kind: 'fridge', x: fx, y: 0, z: -d / 2 + 0.38, w: fridgeW - 0.02, h: 1.78, d: 0.72 });
+    // a hollow cabinet: the door is a separate leaf (Container) so it can swing open
+    const fw = fridgeW - 0.02, fz = -d / 2 + 0.02;
+    k.box(steel, fw, 1.78, 0.03, fx, 0, fz + 0.015);
+    for (const sx of [-1, 1]) k.box(steel, 0.03, 1.78, 0.68, fx + sx * (fw / 2 - 0.015), 0, fz + 0.34);
+    k.box(steel, fw, 0.05, 0.68, fx, 0, fz + 0.34);
+    k.box(steel, fw, 0.05, 0.68, fx, 1.73, fz + 0.34);
+    k.box(M.enamel('#f3f5f6'), fw - 0.06, 1.68, 0.01, fx, 0.05, fz + 0.035);
+    boxes.push({ kind: 'fridge', x: fx, y: 0, z: fz + 0.34, w: fw, h: 1.78, d: 0.68, doors: o.fridgeAt < 0 ? 'left' : 'right' });
     k.box(M.black(), fridgeW - 0.03, 0.006, 0.01, fx, 1.18, -d / 2 + 0.74);
     for (const yy of [0.5, 1.35]) k.box(M.chrome(), 0.025, yy === 0.5 ? 0.5 : 0.35, 0.03, fx + (o.fridgeAt < 0 ? 0.32 : -0.32), yy, -d / 2 + 0.76);
     // cabinet over the fridge
@@ -555,15 +561,13 @@ function shaker(k: Kit, m: THREE.Material, w: number, h: number, x: number, y: n
 /** a built-in closet: two panelled doors with knobs in a painted casing */
 export function closet(k: Kit, w: number, h: number, paint: THREE.Material): Piece {
   const d = 0.62;
-  k.box(paint, w, h, d, 0, 0, 0);
-  const dw = (w - 0.12) / 2;
-  for (const sx of [-1, 1]) {
-    const x = sx * (dw / 2 + 0.01);
-    shaker(k, paint, dw, h - 0.14, x, 0.08, d / 2);
-    k.sphere(M.brass(), 0.025, x - sx * (dw / 2 - 0.06), 1.05, d / 2 + 0.045);
-  }
+  // hollow carcass; the two doors are separate leaves (Container) so they swing open
+  k.box(paint, w, h, 0.02, 0, 0, -d / 2 + 0.01);
+  for (const sx of [-1, 1]) k.box(paint, 0.03, h, d, sx * (w / 2 - 0.015), 0, 0);
+  k.box(paint, w, 0.06, d, 0, 0, 0);
+  k.box(paint, w, 0.04, d, 0, h - 0.14, 0);
   k.box(paint, w + 0.1, 0.1, d + 0.04, 0, h - 0.1, 0.02);
-  return { w, d, h, tops: [], boxes: [{ kind: 'closet', x: 0, y: 0.02, z: 0, w: w - 0.04, h: h - 0.1, d: d - 0.04 }] };
+  return { w, d, h, tops: [], boxes: [{ kind: 'closet', x: 0, y: 0.06, z: -0.012, w: w - 0.06, h: h - 0.2, d: d - 0.024, doors: 'pair' }] };
 }
 
 // ------------------------------------------------------------------ bathroom
