@@ -1568,6 +1568,11 @@ const _m4 = new THREE.Matrix4();
 
 export class Pedestrians {
   peds: Ped[] = [];
+  /**
+   * the cars' footprints this frame (NycLevel sets Traffic.rects()): people wait at the kerb while one
+   * is in or near their crossing, stop in the road for one ahead, and are never left inside one
+   */
+  cars: Rect[] = [];
   private rng: Rng;
   private assets: PeopleAssets | null = null;
   private frame = 0;
@@ -1725,6 +1730,7 @@ export class Pedestrians {
           pd.p.setActivity('walk', 0);
         }
       } else this.walk(pd, dt, along, across);
+      if (this.cars.length) this.clearOfCars(pd);
       const lineNow = pd.line + pd.off;
       pd.pos.set(pd.axis === 'x' ? pd.t : lineNow, this.groundAt(pd), pd.axis === 'x' ? lineNow : pd.t);
       pd.rot = pd.yaw;
@@ -1925,6 +1931,46 @@ export class Pedestrians {
     const ramp = e <= 0 ? THREE.MathUtils.lerp(0, GROUND.RLIP, THREE.MathUtils.smoothstep(e, -0.1, 0)) : GROUND.RLIP + (CURB - GROUND.RLIP) * Math.min(1, e / GROUND.RL);
     return THREE.MathUtils.lerp(step, ramp, w);
   }
+  /** world rect of a stretch of this person's walking line: along [a0, a1], across line+off ± half */
+  /** where the people in a roadway stand (for Traffic.people) */
+  inRoad(): THREE.Vector3[] {
+    const out: THREE.Vector3[] = [];
+    for (const pd of this.peds) {
+      const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+      if (Math.abs(pd.t - (Math.round(pd.t / CP - 0.5) + 0.5) * CP) < ch + 0.3) out.push(pd.pos);
+    }
+    return out;
+  }
+  private lineRect(pd: Ped, a0: number, a1: number, half: number, spread = 0): Rect {
+    const c = pd.line + pd.off, lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+    // spread: how far the crossing road's traffic is looked along (the cars' stopping envelope)
+    return pd.axis === 'x'
+      ? { minX: lo, maxX: hi, minZ: c - half - spread, maxZ: c + half + spread }
+      : { minX: c - half - spread, maxX: c + half + spread, minZ: lo, maxZ: hi };
+  }
+  private hitsCar(r: Rect) {
+    for (const c of this.cars) if (c.minX < r.maxX && c.maxX > r.minX && c.minZ < r.maxZ && c.maxZ > r.minZ) return true;
+    return false;
+  }
+  /** a car in the crosswalk ahead, or within ~8 m of it on the road being crossed */
+  private carCrossing(pd: Ped, kerb: number, width: number) {
+    return this.hitsCar(this.lineRect(pd, kerb, kerb + pd.dir * width, 1.0, 8));
+  }
+  /** a car within `reach` metres ahead on this person's line */
+  private carAhead(pd: Ped, reach: number) {
+    return this.hitsCar(this.lineRect(pd, pd.t, pd.t + pd.dir * reach, 0.45));
+  }
+  /** never inside a car: step back out along the walking line (to the side it came from) */
+  private clearOfCars(pd: Ped) {
+    const r = 0.3;
+    for (const c of this.cars) {
+      const x = pd.axis === 'x' ? pd.t : pd.line + pd.off, z = pd.axis === 'x' ? pd.line + pd.off : pd.t;
+      if (x <= c.minX - r || x >= c.maxX + r || z <= c.minZ - r || z >= c.maxZ + r) continue;
+      const lo = pd.axis === 'x' ? c.minX - r : c.minZ - r, hi = pd.axis === 'x' ? c.maxX + r : c.maxZ + r;
+      pd.t = pd.dir > 0 ? lo : hi;
+      pd.v0 = 0;
+    }
+  }
   private walk(pd: Ped, dt: number, along: number, across: number) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
     const u = pd.t / CP - 0.5;
@@ -1939,6 +1985,8 @@ export class Pedestrians {
       const dist = (kerb - pd.t) * pd.dir;
       const go = walkSignal(pd.axis, this.clock, (2 * ch) / crossSpeed(pd.v) + 1.5);
       if (pd.state === 'kerb') {
+        // WALK, but a car is in (or about to cross) the crosswalk: wait
+        if (go && this.carCrossing(pd, kerb, 2 * ch)) pd.wait = Math.max(pd.wait, 0.3);
         if (go) {
           pd.wait -= dt;
           if (pd.wait <= 0) {
@@ -1962,6 +2010,11 @@ export class Pedestrians {
           return;
         }
       }
+    }
+    // in the road with a car just ahead in the crosswalk (it should have yielded): stop and let it go
+    if (inRoad && this.carAhead(pd, 1.4)) {
+      pd.v0 = 0;
+      return;
     }
     // pass the player and oncoming people (keep right), go around street furniture
     let target = 0;

@@ -411,6 +411,8 @@ export class Traffic {
     this.rng = new Rng(hashN(seed, 404));
     group.add(fleetInstances.root); // mid/far LODs of every fleet car (parked and moving) in this level
   }
+  /** people in a roadway this frame (NycLevel sets Pedestrians.inRoad()): cars yield to them */
+  people: THREE.Vector3[] = [];
   rects() {
     return this.cars.map((c) => c.rect);
   }
@@ -575,6 +577,12 @@ export class Traffic {
       // don't run the player over
       const pg = (along - c.t) * c.dir - c.len / 2;
       if (Math.abs(across - c.line) < c.wid && pg > -1 && pg < 12) target = 0;
+      // yield to people in the crosswalk ahead: stop short of them (within the stopping distance + 2 m)
+      for (const q of this.people) {
+        const qa = c.axis === 'x' ? q.x : q.z, qc = c.axis === 'x' ? q.z : q.x;
+        const gap = (qa - c.t) * c.dir - c.len / 2;
+        if (Math.abs(qc - c.line) < c.wid / 2 + 0.8 && gap > -0.5 && gap < (c.v * c.v) / 8 + 6) target = Math.min(target, Math.max(0, (gap - 2) * 1.2));
+      }
       const brake = c.obj.userData.brake as THREE.Object3D | undefined;
       const braking = target < c.v - 0.3 || c.v < 0.5;
       c.obj.userData.braking = braking; // brake-light glow cards (FleetInstances)

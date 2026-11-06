@@ -135,7 +135,9 @@ export class NycLevel implements Level {
       y.emissiveIntensity = l === 'y' ? 3 : 0.05;
       g.emissiveIntensity = l === 'g' ? 3 : 0.05;
     }
+    this.traffic.people = this.peds.inRoad(); // cars yield to people in the crosswalk
     this.traffic.update(dt, p, time);
+    this.peds.cars = this.traffic.rects(); // people wait for cars and never stand inside one
     this.peds.update(dt, p, time, this.nearCols);
     updateDistricts(p, time); // [districts] stream showcase objects near the player
     for (const s of this.steam) {
