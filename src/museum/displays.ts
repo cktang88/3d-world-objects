@@ -99,23 +99,24 @@ export function along(m: Measured) {
 function itemLines(c: Ctx, m: Measured, big: boolean): Line[] {
   const e = m.entry;
   return [
-    { text: e.title, size: big ? 0.07 : 0.05, color: c.labelInk, weight: 700, font: SERIF },
-    { text: e.author ? `by ${e.author}` : (DATASET_LABEL[e.ds] ?? e.ds), size: 0.034, color: c.labelSub, weight: 400, font: SANS },
-    { text: fmtDims(m.real), size: 0.034, color: c.labelSub, weight: 500, font: SANS },
-    { text: Math.abs(m.k - 1) > 0.01 ? 'actual size (corrected from the source)' : 'actual size', size: 0.028, color: c.labelSub, weight: 400, font: SANS },
+    // sized to be read at ~1.5 m (museum labels: a title of ~2 cm, body text of ~1.2 cm)
+    { text: e.title, size: big ? 0.08 : 0.06, color: c.labelInk, weight: 700, font: SERIF },
+    { text: e.author ? `by ${e.author}` : (DATASET_LABEL[e.ds] ?? e.ds), size: 0.042, color: c.labelSub, weight: 400, font: SANS },
+    { text: fmtDims(m.real), size: 0.042, color: c.labelSub, weight: 500, font: SANS },
+    { text: Math.abs(m.k - 1) > 0.01 ? 'actual size (corrected from the source)' : 'actual size', size: 0.034, color: c.labelSub, weight: 400, font: SANS },
   ];
 }
 
 /** a label panel: one object (full tombstone) or a numbered list */
-export function labelPanel(c: Ctx, items: Measured[], w = 0.42, big = false, header?: string) {
+export function labelPanel(c: Ctx, items: Measured[], w = 0.6, big = false, header?: string) {
   if (items.length === 1 && !header) {
-    const h = big ? 0.34 : 0.25;
+    const h = big ? 0.4 : 0.3;
     return textPlane(itemLines(c, items[0], big), w, h, c.labelBg, 1100, 'left');
   }
-  const lines: Line[] = header ? [{ text: `${header} · ${items.length}`, size: 0.04, color: c.labelInk, weight: 700, font: SERIF }] : [];
-  lines.push(...items.slice(0, 14).map((m, i) => ({ text: `${i + 1}. ${m.entry.title} — ${fmtDims(m.real)}`, size: 0.03, color: c.labelInk, weight: 500, font: SANS })));
-  if (items.length > 14) lines.push({ text: `and ${items.length - 14} more`, size: 0.03, color: c.labelSub, weight: 400, font: SANS });
-  return textPlane(lines, w, 0.06 + lines.length * 0.0385, c.labelBg, 1100, 'left');
+  const lines: Line[] = header ? [{ text: `${header} · ${items.length}`, size: 0.048, color: c.labelInk, weight: 700, font: SERIF }] : [];
+  lines.push(...items.slice(0, 14).map((m, i) => ({ text: `${i + 1}. ${m.entry.title} — ${fmtDims(m.real)}`, size: 0.036, color: c.labelInk, weight: 500, font: SANS })));
+  if (items.length > 14) lines.push({ text: `and ${items.length - 14} more`, size: 0.036, color: c.labelSub, weight: 400, font: SANS });
+  return textPlane(lines, w, 0.07 + lines.length * 0.046, c.labelBg, 1100, 'left');
 }
 
 function put(c: Ctx, o: THREE.Object3D, f: Frame, lx: number, ly: number, lz: number, rotY = 0, tilt = 0) {
@@ -127,7 +128,7 @@ function put(c: Ctx, o: THREE.Object3D, f: Frame, lx: number, ly: number, lz: nu
 
 /** a free-standing reading desk with the label, at the front of a display */
 function lectern(c: Ctx, f: Frame, lx: number, lz: number, items: Measured[], big = false) {
-  const p = labelPanel(c, items, big ? 0.56 : 0.44, big);
+  const p = labelPanel(c, items, big ? 0.72 : 0.6, big);
   const h = (p.geometry as THREE.PlaneGeometry).parameters.height;
   c.lv.bx(c.m.fixture, 0.05, 0.86, 0.05, lx, 0, lz, f);
   c.lv.bx(c.m.fixture, 0.3, 0.02, 0.22, lx, 0, lz, f);
@@ -259,7 +260,7 @@ export function plinth(m: Measured, hood: boolean, hero: boolean, spin = 0): Uni
       lv.col(f, 0, 0, W + 0.12, D + 0.12);
       // label on the plinth front, or a lectern for very low plinths
       if (ph >= 0.5) {
-        const p = labelPanel(c, [m], Math.min(0.42, W - 0.06), hero);
+        const p = labelPanel(c, [m], Math.min(0.6, W - 0.06), hero);
         put(c, p, f, 0, ph - 0.24, D / 2 + 0.003);
       } else lectern(c, f, W / 2 + 0.05, D / 2 + 0.25, [m], hero);
     },
