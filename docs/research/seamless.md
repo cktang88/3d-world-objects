@@ -59,6 +59,11 @@ placed behind it). Turn the game behaviour off with `?seamless=0` to compare.
    into the next. (No preview through the doorway: each gallery's corridor ends in a wall.)
    Auto portals you are standing in after a switch are disarmed until you step out of them.
 
+Check the logic without the full world: `scripts/seamless-roundtrip.eval.js` (header says how to
+run it on `?lab=index`): prebuild + preview of a real ShopLevel behind a fake street door, the
+collider corridor, walking in, out and back in. Last run: shown after 17 frames (built in 478 ms),
+corridor clear, enter/exit true, re-enter with 0 new builds.
+
 `window.__world.seam.stats` has the counters: `builds` (constructions), `hits` (cache reuse),
 `prebuilds`, `seamless` (no-fade switches), `fades`, `evicted`, `maxSliceMs`, and a `log`.
 
