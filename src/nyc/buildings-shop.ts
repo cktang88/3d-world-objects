@@ -456,7 +456,7 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
   // ---- sign band
   const sb0 = top - 0.95;
   B(G, frameM, W, 0.95, 0.16, uc, sb0, 0.08);
-  B(G, mat(shade(frameC, 1.3), { rough: 0.5 }), W + 0.06, 0.07, 0.24, uc, top - 0.05, 0.12, false);
+  B(G, mat(shade(frameC, 1.3), { rough: 0.5 }), W + 0.06, 0.07, 0.24, uc, top - 0.05, 0.125, false); // [zfix] back 5 mm off the sign band's
   const signW = W - 0.6;
   if (signKind === 'lightbox') {
     // internally lit box sign, white face with coloured letters

@@ -51,6 +51,9 @@ export interface ZPairInfo {
   b: string;
   objA: THREE.Object3D;
   objB: THREE.Object3D;
+  /** instance ids (-1 for plain meshes) */
+  instA: number;
+  instB: number;
   /** normal of the shared plane */
   n: [number, number, number];
   at: [number, number, number];
@@ -332,7 +335,7 @@ export function scanZFight(root: THREE.Object3D | THREE.Object3D[], opts: ZOptio
     e.pairs++;
     e.area += ar;
     byName.set(k, e);
-    const info: ZPairInfo = { a: na, b: nb, objA: soup.owners[soup.owner[i]].obj, objB: soup.owners[soup.owner[j]].obj, n: [F[j * 14 + 9], F[j * 14 + 10], F[j * 14 + 11]], at: [F[j * 14], F[j * 14 + 1], F[j * 14 + 2]], area: ar };
+    const info: ZPairInfo = { a: na, b: nb, objA: soup.owners[soup.owner[i]].obj, objB: soup.owners[soup.owner[j]].obj, instA: soup.owners[soup.owner[i]].inst, instB: soup.owners[soup.owner[j]].inst, n: [F[j * 14 + 9], F[j * 14 + 10], F[j * 14 + 11]], at: [F[j * 14], F[j * 14 + 1], F[j * 14 + 2]], area: ar };
     samples.push(info);
   });
   const list = opts.keepPairs ? samples.slice() : [];

@@ -714,8 +714,11 @@ function curbGeometry() {
       idx.push(a, c, a + 1, a + 1, c, c + 1);
     }
   };
-  strip((p) => [[-CW, p.h, 0, 0], [-0.012, p.h, CW - 0.012, 0]]);
-  strip((p) => [[-0.012, p.h, CW - 0.012, 0], [0, p.h - 0.012, CW + 0.005, 0]]);
+  // [zfix] the granite top sits 5 mm above the sidewalk plane, which runs under it to the kerb line
+  // (coplanar, they z-fought along every kerb)
+  const up = (h: number) => h + (h > 0.02 ? 0.005 : 0);
+  strip((p) => [[-CW, up(p.h), 0, 0], [-0.012, up(p.h), CW - 0.012, 0]]);
+  strip((p) => [[-0.012, up(p.h), CW - 0.012, 0], [0, p.h - 0.012, CW + 0.005, 0]]);
   strip((p) => [[0, p.h - 0.012, CW + 0.005, 0], [0, -0.01, CW + 0.017 + p.h, 0]]);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

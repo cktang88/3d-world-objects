@@ -101,6 +101,7 @@ function openBar(axis: 'x' | 'y' | 'z') {
   return (bars[axis] = g);
 }
 function instanceUnits(roots: THREE.Object3D[], parent: THREE.Object3D, shadow: boolean) {
+  if ((globalThis as { __keepUnits?: boolean }).__keepUnits) return; // tests: leave unit boxes as meshes (z-fight call-site scans)
   const buckets = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial; m: THREE.Matrix4[]; c: THREE.Color[]; cast: boolean }>();
   const dead: THREE.Mesh[] = [];
   for (const root of roots) {
@@ -332,7 +333,7 @@ export class Face {
           // a rusticated course: the block sits proud, the joint below it is recessed
           const j = Math.min(0.035, (s1 - s0) * 0.3);
           quad(a, b, s0, s0 + j, 0);
-          PB(this.g, m, b - a, s1 - s0 - j, 0.05, (a + b) / 2, s0 + j, 0.025, tint, false);
+          PB(this.g, m, b - a, s1 - s0 - j, 0.05, (a + b) / 2, s0 + j, 0.026, tint, false); // [zfix] back 1 mm off the wall plane (bands and sills sit there)
         } else quad(a, b, s0, s1, 0);
       }
     }
@@ -356,9 +357,10 @@ export class Face {
     // [zfix] bands (cornices, belt courses) of neighbouring faces meet at the corners: on the side faces (E/W)
     // they sit 4 mm higher and 4 mm prouder, so their top/bottom faces and the front/back faces' end caps
     // never share a plane with them (they z-fought in a square at every corner)
-    const k = this.side === 'E' || this.side === 'W' ? 0.004 : 0;
-    if (m.userData.pbr) return PB(fine ? this.f : this.g, m, this.len + extra * 2, h, out + k, 0, y + k, (out + k) / 2, tint, !fine);
-    return B(fine ? this.f : this.g, m, this.len + extra * 2, h, out + k, 0, y + k, (out + k) / 2, !fine);
+    // and every band's back stands 5 mm off the wall plane, where rusticated blocks, piers and sills put theirs
+    const k = this.side === 'E' || this.side === 'W' ? 0.004 : 0, b = 0.005, d = Math.max(0.01, out + k - b);
+    if (m.userData.pbr) return PB(fine ? this.f : this.g, m, this.len + extra * 2, h, d, 0, y + k, b + d / 2, tint, !fine);
+    return B(fine ? this.f : this.g, m, this.len + extra * 2, h, d, 0, y + k, b + d / 2, !fine);
   }
 }
 
@@ -387,7 +389,7 @@ function cornice(F: Face, kind: CorniceKind, y: number, color: string, scale = 1
   if (kind === 'deco') {
     // stepped Art Deco crown: three shallow setbacks of stone
     F.band(cm, y - 0.6, 0.6, 0.06);
-    F.band(cm, y - 0.3, 0.3, 0.12, -0.2);
+    F.band(cm, y - 0.3, 0.304, 0.12, -0.2); // [zfix] top 4 mm over the lower step's
     return;
   }
   const fh = (kind === 'bracket' ? 1.0 : 1.2) * s; // total height
@@ -981,7 +983,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       F.band(sc, ground - 0.58, 0.22, 0.22, 0.05);
       F.band(sc, ground - 0.36, 0.08, 0.3, 0.08);
       // piers at the ends of the shopfronts
-      for (const s2 of [-1, 1]) PB(F.g, type === 'castiron' ? fm : stoneMat(), pier + 0.04, ground, 0.14, s2 * (L / 2 - pier / 2), 0, 0.07, type === 'castiron' ? tint : '#cfc6b3');
+      for (const s2 of [-1, 1]) PB(F.g, type === 'castiron' ? fm : stoneMat(), pier + 0.04, ground, 0.14, s2 * (L / 2 - pier / 2), 0, 0.071, type === 'castiron' ? tint : '#cfc6b3'); // [zfix] back 1 mm off the wall
     } else if (isFront && type === 'brownstone') {
       // English basement with barred windows under a parlour floor reached by the stoop
       const du = centres[0];
@@ -1088,7 +1090,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
     } else if (type === 'prewar') {
       F.band(bandM, levels[levels.length - 1] - 0.1, 0.3, 0.1, 0.05);
       // brick quoins at the corners
-      for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), (yy / 0.6) % 2 < 1 ? 0.7 : 0.45, 0.3, 0.05, s2 * (L / 2 - 0.3), yy, 0.025, '#e3dccb', false);
+      for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), (yy / 0.6) % 2 < 1 ? 0.7 : 0.45, 0.3, F.side === 'E' || F.side === 'W' ? 0.06 : 0.05, s2 * (L / 2 - 0.3), yy + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), F.side === 'E' || F.side === 'W' ? 0.031 : 0.026, '#e3dccb', false); // [zfix] side-face quoins 4 mm up (they cross at the corner)
     }
     // ---- cornice
     const cKind: CorniceKind = opts.cornice ?? (type === 'midrise' ? 'parapet' : type === 'prewar' ? (rng.chance(0.65) ? 'modillion' : 'deco') : 'bracket');

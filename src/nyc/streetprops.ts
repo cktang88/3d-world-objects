@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from '../rng';
+import { fixZFight } from '../zfix';
 import { mat, glow } from '../build';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -217,6 +218,12 @@ export function kit(key: string, fn: (k: KitBuilder) => void) {
     const b = new KitBuilder();
     fn(b);
     k = b.build();
+    // [zfix] parts of one kit (housings, visors, plates) lie flush on each other: lift them apart once per kit
+    const g = new THREE.Group();
+    const ms = k.map((p) => new THREE.Mesh(p.geo, p.mat as THREE.Material));
+    g.add(...ms);
+    fixZFight(g, { step: 0.003 });
+    k = k.map((p, i) => ({ ...p, geo: ms[i].geometry }));
     kits.set(key, k);
   }
   return k;

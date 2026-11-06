@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng, hashN } from '../rng';
+import { fixZFight } from '../zfix';
 import { noWeather } from '../weather';
 
 /**
@@ -476,6 +477,23 @@ export interface WinSpec {
   noGlass?: boolean;
 }
 
+/**
+ * [zfix] the window kits (sashes, trims, AC units) have coplanar overlapping faces inside one kit (meeting rails,
+ * frames on sashes): lifted apart once per kit geometry (src/zfix.ts), not per window. Returns a fixed copy.
+ */
+const kitCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+function kitFixed(g: THREE.BufferGeometry) {
+  let f = kitCache.get(g);
+  if (!f) {
+    const mesh = new THREE.Mesh(g.clone(), new THREE.MeshBasicMaterial());
+    fixZFight(mesh, { step: 0.002, minOverlap: 0.002 });
+    f = mesh.geometry;
+    kitCache.set(g, f);
+    kitCache.set(f, f);
+  }
+  return f;
+}
+
 export class WindowBatch {
   list: WinSpec[] = [];
   add(s: WinSpec) {
@@ -487,6 +505,7 @@ export class WindowBatch {
     const M = windowMats();
     const make = (g: THREE.BufferGeometry, m: THREE.Material, items: WinSpec[], color: (s: WinSpec) => THREE.Color | null, shadow: boolean, extra?: (im: THREE.InstancedMesh, items: WinSpec[]) => void, to = parent) => {
       if (!items.length) return;
+      g = kitFixed(g);
       const im = new THREE.InstancedMesh(g, m, items.length);
       const size = new Float32Array(items.length * 2);
       items.forEach((s, i) => {
