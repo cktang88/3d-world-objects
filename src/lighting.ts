@@ -205,6 +205,33 @@ normal = normalize(mix(normal, normalize(vNormal), wetAmt * puddle));`);
   return m;
 }
 
+// ---------------------------------------------------------------- weather hook
+
+/**
+ * Modifiers another module (src/weather.ts) can drive on top of the time-of-day preset.
+ * Multipliers are relative to the preset; wet is a floor on the preset's own wetness.
+ * Call setWeather({...}) whenever they change (cheap: no HDRI reload, no shader recompiles).
+ */
+export interface WeatherMods {
+  /** 0 clear .. 1 overcast (informational; the multipliers below do the work) */
+  cloud: number;
+  sunMul: number;
+  /** sky / environment light and background brightness */
+  skyMul: number;
+  /** fog density multiplier, and an optional colour the fog moves towards (fogMix 0..1) */
+  fogMul: number;
+  fogColor: string | null;
+  fogMix: number;
+  /** street wetness floor 0..1 */
+  wet: number;
+}
+export const weather: WeatherMods = { cloud: 0, sunMul: 1, skyMul: 1, fogMul: 1, fogColor: null, fogMix: 0, wet: 0 };
+let rig: Lighting | null = null;
+export function setWeather(w: Partial<WeatherMods>) {
+  Object.assign(weather, w);
+  rig?.applyWeather();
+}
+
 // ---------------------------------------------------------------- HDRI loading
 
 interface Hdri {
@@ -363,6 +390,8 @@ export class Lighting {
   private lampT = 0;
   private emissives = new Set<THREE.MeshStandardMaterial>();
   private loadToken = 0;
+  /** preset values before weather modifiers */
+  private base = { env: 0.55, bg: 1, fog: 0.0015, fogColor: new THREE.Color('#aab6c2') };
   private frame = 0;
 
   constructor(
@@ -408,6 +437,24 @@ export class Lighting {
     this.lampGroup.visible = false;
     scene.add(this.lampGroup);
     this.grade.uniforms.uAspect.value = innerWidth / innerHeight;
+    rig = this;
+  }
+
+  /** re-apply the weather modifiers on top of the current outdoor preset */
+  applyWeather() {
+    if (this.place !== 'outdoor') return;
+    const p = PRESETS[tod];
+    const w = weather;
+    if (this.csm) for (const l of this.csm.lights) l.intensity = p.sunIntensity * w.sunMul;
+    this.scene.environmentIntensity = this.base.env * w.skyMul;
+    this.scene.backgroundIntensity = this.base.bg * w.skyMul;
+    const fog = this.scene.fog as THREE.FogExp2 | null;
+    if (fog && (fog as THREE.FogExp2).isFogExp2) {
+      fog.density = this.base.fog * w.fogMul;
+      fog.color.copy(this.base.fogColor).multiplyScalar(w.skyMul);
+      if (w.fogColor && w.fogMix > 0) fog.color.lerp(new THREE.Color(w.fogColor), w.fogMix);
+    }
+    U.wet.value = Math.max(p.wet, w.wet);
   }
 
   get time() {
@@ -563,8 +610,11 @@ export class Lighting {
       this.setSunDir(p.sunAz, p.sunElev);
       this.physicalSky();
       this.scene.fog = new THREE.FogExp2(new THREE.Color(p.fogTint ?? '#aab6c2'), p.fog);
+      this.base.fog = p.fog;
+      this.base.fogColor.copy((this.scene.fog as THREE.FogExp2).color);
     }
     this.setSunLight(p);
+    this.applyWeather();
     this.loadOutdoor();
   }
 
@@ -578,6 +628,8 @@ export class Lighting {
     this.skyEnv = this.pmrem.fromScene(this.skyScene as unknown as THREE.Scene, 0, 1, 2000);
     this.scene.environment = this.skyEnv.texture;
     this.scene.environmentIntensity = 0.55 * (1 - night * 0.95);
+    this.base.env = this.scene.environmentIntensity;
+    this.base.bg = 1;
     this.scene.background = null;
     this.sky.visible = true;
     this.sky.scale.setScalar(this.camera.far * 0.9);
@@ -617,6 +669,8 @@ export class Lighting {
     const fc = h.horizon.clone().multiplyScalar(scale);
     if (p.fogTint) fc.lerp(new THREE.Color(p.fogTint).multiplyScalar(p.sky * 1.2), 0.8);
     this.scene.fog = new THREE.FogExp2(fc, p.fog);
+    this.base = { env: scale, bg: scale, fog: p.fog, fogColor: fc.clone() };
+    this.applyWeather();
   }
 
   private hdri(name: string, res: string, clampMul: number, sat = 1) {
