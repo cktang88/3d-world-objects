@@ -209,3 +209,22 @@ test('floorStackStep: leaving the lobby pushes it once, floor to floor nothing, 
   expect(floorStackStep(F(0), F(0, 2), F(1, 2)) === 'push', 'another building has its own entry');
   expect(floorStackStep(undefined, F(2), { kind: 'interior', seed: 1, name: 'x', style: 'apartment', floor: 0, floors: 1, biome: 'town' }) === null, 'entering an apartment is a normal portal');
 });
+
+test('seamless waits for you to move (or 8 s) before prebuilding doors on the street at the start of a game', () => {
+  built = [];
+  const A = portalAt(0, -8, 21);
+  const streetDesc: LevelDesc = { kind: 'nyc', seed: 1, name: 'street' };
+  const street = fakeLevel(streetDesc, [A]);
+  const camera = new THREE.PerspectiveCamera();
+  const s = new Seamless({ scene: new THREE.Scene(), camera, renderer: { toneMappingExposure: 1 } as unknown as THREE.WebGLRenderer, build: (d) => (descKey(d) === descKey(streetDesc) ? street : fakeLevel(d)) });
+  s.setActive(s.take(streetDesc));
+  camera.position.set(0, 1.7, 0);
+  camera.lookAt(0, 1.7, -10);
+  camera.updateMatrixWorld(true);
+  const p = new THREE.Vector3(0, 0, 0);
+  for (let i = 0; i < 60 * 5; i++) s.update(1 / 60, street, p);
+  expect(!s.slots.has(descKey(A.target as LevelDesc)), 'prebuilt a shop before the player moved');
+  p.z -= 2;
+  for (let i = 0; i < 7; i++) s.update(1 / 60, street, p);
+  expect(s.slots.has(descKey(A.target as LevelDesc)), 'walking 2 m towards the door did not start its prebuild');
+});

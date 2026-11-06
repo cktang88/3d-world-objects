@@ -377,7 +377,7 @@ async function enter(p: Portal) {
   transitioning = true;
   hud.prompt.classList.remove('show');
   if (p.target === 'back') {
-    await goBack();
+    await goBack(!!p.auto); // walking through a doorway back vs. pressing E on 'back'
     transitioning = false;
     return;
   }
@@ -437,7 +437,8 @@ async function precompile() {
   }
 }
 
-async function goBack() {
+/** walked: you walked out through the door (keep moving as you were); otherwise Q / E: step out facing away */
+async function goBack(walked = false) {
   const f = stack.pop();
   if (!f) {
     toast(mode === 'museum' ? 'This is the atrium — pick a wing.' : 'This is the outermost world.');
@@ -448,8 +449,9 @@ async function goBack() {
   if (seam.enabled && !wasCity && parent?.ready) {
     // seamless: the level you came from is still alive; walk back out where you went in
     const child = seam.slotOf(level);
-    // through a glass shop door you walk out where you are; through a solid door you come out on its step
-    const carried = child?.portal?.door?.see && child.placement ? seam.carry(child, 'out', player.pos, player.yaw) : null;
+    // walking out through a glass door or a doorway: carried across where you are, facing as you were.
+    // Q / E on 'back': where the portal says to stand (returnPos), facing away from the door.
+    const carried = walked && child?.portal && child.placement ? seam.carry(child, 'out', player.pos, player.yaw) : null;
     currentDesc = f.desc;
     scale = f.scale;
     if (carried) seamSwitch(seam.take(f.desc), carried.pos, carried.yaw);
@@ -736,7 +738,7 @@ function frame() {
     if (active && walked.enter) enter(walked.enter);
     else if (active && walked.exit && !transitioning) {
       transitioning = true;
-      goBack().then(() => (transitioning = false));
+      goBack(true).then(() => (transitioning = false));
     }
     // ---- vertical.ts hook: walking up/down stairs and arriving by lift switch floors in this frame
     const vsw = !transitioning ? vert.update(dt, level, active && !infoOpen) : null;
@@ -881,7 +883,8 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
 applyQuality();
 mark('quality applied');
 ready.then(() => {
-  if (!params.has('lab') && seam.enabled) prewarmShops();
+  // after the world is up and you have been playing a while (boot memory/time: e2e finding 4)
+  if (!params.has('lab') && seam.enabled && !FLAGS.fast) setTimeout(prewarmShops, 20000);
   hud.loading.classList.add('hidden');
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => (b.disabled = false));
   $('museum-count').textContent = museum().total.toLocaleString();

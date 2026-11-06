@@ -389,6 +389,9 @@ export class Seamless {
 
   /** forget everything (a new game mode) */
   clear(except?: Level) {
+    this.settled = false;
+    this.settledT = 0;
+    this.origin = null;
     for (const s of [...this.slots.values()]) if (s.level !== except) this.drop(s);
     this.queue = [];
   }
@@ -436,8 +439,16 @@ export class Seamless {
       if (this.blend.t >= 1) this.blend = null;
     }
     if (!this.enabled) return out;
-    // 1. what are we walking towards? (every few frames: portals lists can be long)
-    if (this.tick++ % 6 === 0) this.choose(level, player);
+    // 1. what are we walking towards? (every few frames: portals lists can be long). Not while
+    // you are still standing on the street where the game started (a world boot is heavy enough already)
+    const outside = this.active?.level === level && (this.active.desc.kind === 'nyc' || this.active.desc.kind === 'city');
+    if (!this.settled && !outside) this.settled = true;
+    if (!this.settled) {
+      if (!this.origin) this.origin = player.clone();
+      this.settledT += dt;
+      this.settled = this.settledT > this.settleAfter || player.distanceTo(this.origin) > 1.5;
+    }
+    if (this.settled && this.tick++ % 6 === 0) this.choose(level, player);
     // 2. construction slices within the budget
     while (this.queue.length && performance.now() - t0 < this.budget) {
       const s = this.queue[0];
@@ -485,6 +496,11 @@ export class Seamless {
     museum: { range: 34, dot: 0.6, near: 4, dwell: 0, max: 2 },
   };
   private dwell = new Map<string, number>();
+  /** door prebuilds wait until you move 1.5 m or this many seconds after a new game */
+  settleAfter = 8;
+  private settled = false;
+  private settledT = 0;
+  private origin: THREE.Vector3 | null = null;
   private clock = 0;
 
   private choose(level: Level, player: THREE.Vector3) {
