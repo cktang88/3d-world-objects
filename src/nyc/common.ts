@@ -144,7 +144,8 @@ export function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext
 
 export let sidewalkMat: THREE.MeshStandardMaterial | null = null;
 export const M = {
-  sidewalk: () => (sidewalkMat ??= surface('nyc_sidewalk', [3, 3], { roughness: 1, normalScale: 1.2 })),
+  // plain concrete for open-space strips (block sidewalks use nyc/ground.ts)
+  sidewalk: () => (sidewalkMat ??= surface('concrete', [3, 3], { roughness: 1 })),
   curb: () => mat('#8f8b84', { rough: 0.8 }),
   tar: () => surface('nyc_roof', [1, 1], { roughness: 1 }),
   iron: () => mat('#1c1d1f', { metal: 0.6, rough: 0.5 }),
