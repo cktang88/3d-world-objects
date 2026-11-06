@@ -3,7 +3,7 @@ import { Rng } from '../rng';
 import { mat, glow } from '../build';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { SIG, CURB, BX, BZ, LX, LZ, streetName } from './common';
+import { SIG, CURB, AX, SZ, BX, BZ, LX, LZ, streetName } from './common';
 import { rect, overlaps, type Rect as LRect } from '../level';
 import { addTree, pickSpecies, TREE_VARIANTS, type Species } from './streettrees';
 import { streetLightMarker } from '../lighting';
@@ -557,6 +557,63 @@ export function hydrant(parent: THREE.Object3D, x: number, z: number, rng?: Rng,
 
 // ---------------------------------------------------------------- subway entrance
 
+/**
+ * Real stairwell below an entrance (local frame: opening x ∈ ±w/2, z ∈ ±l/2, open end at +z).
+ * 14 risers of 18 cm / 28 cm treads with yellow nosings, tiled walls getting darker with depth,
+ * handrails, a landing and a low passage running on under the closed end.
+ */
+function stairwell(k: KitBuilder, w: number, l: number) {
+  const n = 14, rise = 0.18, run = 0.28;
+  const bottom = -n * rise - CURB;
+  const tile = mat('#c9c0a6', { rough: 0.35 }), tileLo = mat('#8a8270', { rough: 0.4 }), dark = mat('#2a2826', { rough: 0.8 });
+  const conc = mat('#8d8a84', { rough: 0.9 }), nosing = mat('#d2a828', { rough: 0.6 });
+  const iw = w - 0.06;
+  for (let i = 0; i < n; i++) {
+    const top = -(i + 1) * rise;
+    const z1 = l / 2 - i * run, z0 = z1 - run;
+    k.add(new THREE.BoxGeometry(iw, top - bottom, run), conc, 0, (top + bottom) / 2, (z0 + z1) / 2);
+    k.add(new THREE.BoxGeometry(iw, 0.012, 0.05), nosing, 0, top + 0.006, z1 - 0.025, 0, 0, 0, 1, false);
+  }
+  const zl = l / 2 - n * run;
+  const pass = 3.0; // passage length beyond the closed end
+  // landing + passage floor
+  k.add(new THREE.BoxGeometry(iw, 0.1, zl + l / 2 + pass), dark, 0, bottom - 0.05, (zl - l / 2 - pass) / 2);
+  // side walls: upper (light tile) and lower (darker) bands
+  const wallLen = l + pass;
+  const wz = -pass / 2;
+  const depth = -bottom;
+  const split = 1.2;
+  for (const sx of [-1, 1]) {
+    k.add(new THREE.BoxGeometry(0.06, split, wallLen), tile, (sx * w) / 2, -split / 2, wz);
+    k.add(new THREE.BoxGeometry(0.06, depth - split, wallLen), tileLo, (sx * w) / 2, -split - (depth - split) / 2, wz);
+    // handrail following the stair slope
+    const a = new THREE.Vector3((sx * (w / 2 - 0.08)), -0.15 + 0.9 - 0.18, l / 2 - 0.1);
+    const b = new THREE.Vector3((sx * (w / 2 - 0.08)), -(n * rise) + 0.9, zl);
+    rod(k, a, b, 0.022, mat('#9ea3a5', { rough: 0.3, metal: 0.9 }), 8);
+  }
+  // passage ceiling (under the sidewalk) and its end
+  const ceil = bottom + 2.35;
+  k.add(new THREE.BoxGeometry(w, -ceil - CURB + 0.02, pass), dark, 0, (ceil - CURB) / 2, -l / 2 - pass / 2);
+  k.add(new THREE.BoxGeometry(w, ceil - bottom, 0.05), mat('#0a0a0a', { rough: 1 }), 0, (ceil + bottom) / 2, -l / 2 - pass);
+  // face of the wall above the passage at the closed end
+  k.add(new THREE.BoxGeometry(iw, -ceil, 0.06), tile, 0, ceil / 2, -l / 2 + 0.03);
+  // riser below the first tread at the open end
+  k.add(new THREE.BoxGeometry(iw, rise + CURB, 0.06), conc, 0, -(rise + CURB) / 2 + 0.001, l / 2 + 0.03);
+}
+
+/** replace a horizontal plane mesh's geometry with the same rectangle minus a rectangular hole (chunk coords) */
+function cutHole(mesh: THREE.Mesh, W: number, H: number, uvScale: (x: number, y: number) => [number, number], hx0: number, hx1: number, hz0: number, hz1: number) {
+  const outer = new THREE.Shape([new THREE.Vector2(-W / 2, -H / 2), new THREE.Vector2(W / 2, -H / 2), new THREE.Vector2(W / 2, H / 2), new THREE.Vector2(-W / 2, H / 2)]);
+  // mesh is rotated -90° about x: local y = -world z
+  outer.holes.push(new THREE.Path([new THREE.Vector2(hx0, -hz1), new THREE.Vector2(hx0, -hz0), new THREE.Vector2(hx1, -hz0), new THREE.Vector2(hx1, -hz1)]));
+  const g = new THREE.ShapeGeometry(outer);
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) uv.setXY(i, ...uvScale(pos.getX(i), pos.getY(i)));
+  mesh.geometry.dispose();
+  mesh.geometry = g;
+}
+
 /** stair entrance: dark-green railings with balusters and finials, globe lamps, black station sign */
 export function subway(parent: THREE.Object3D, group: THREE.Group, x: number, z: number, cz: number, rng: Rng) {
   const w = 2.0, l = 5.0;
@@ -600,15 +657,22 @@ export function subway(parent: THREE.Object3D, group: THREE.Group, x: number, z:
       // last baluster run to the post
       k.add(new THREE.BoxGeometry(0.05, 0.05, 0.07), Gm, px, H, pz - 0.03);
     }
-    // stair illusion: dark well with steps descending from the open end
-    const pit = plane(w - 0.04, l - 0.04, region('pit'));
-    pit.rotateX(-Math.PI / 2);
-    pit.rotateY(Math.PI);
-    k.add(pit, propAtlas(), 0, 0.006, 0, 0, 0, 0, 1, false);
+    // the stairwell itself: steps down from the open end to a landing and a passage under the sidewalk
+    stairwell(k, w, l);
     // granite kerb around the opening
     for (const s of [-1, 1]) k.add(new THREE.BoxGeometry(0.12, 0.04, l), PM.granite(), (s * w) / 2, 0.02, 0, 0, 0, 0, 1, false);
   });
   place(parent, rail, x, CURB, z, ry);
+  // open the sidewalk and the road plane under it so the stairwell is really there
+  const hx0 = x - w / 2 + 0.03, hx1 = x + w / 2 - 0.03, hz0 = z - l / 2 + 0.03, hz1 = z + l / 2 - 0.03;
+  const isPlane = (o: THREE.Object3D, W: number, H: number) => {
+    const g = (o as THREE.Mesh).geometry as THREE.PlaneGeometry | undefined;
+    return !!g && g.type === 'PlaneGeometry' && Math.abs(g.parameters.width - W) < 1e-3 && Math.abs(g.parameters.height - H) < 1e-3;
+  };
+  const sw = parent.children.find((o) => isPlane(o, BX * 2, BZ * 2)) as THREE.Mesh | undefined;
+  if (sw) cutHole(sw, BX * 2, BZ * 2, (u, v) => [(u + BX) / 3, (v + BZ) / 3], hx0, hx1, hz0, hz1);
+  const road = group.children.find((o) => isPlane(o, AX, SZ)) as THREE.Mesh | undefined;
+  if (road) cutHole(road, AX, SZ, (u, v) => [u / AX + 0.5, v / SZ + 0.5], hx0, hx1, hz0, hz1);
   // station sign between the globe posts (both faces)
   const lines = rng.pick(['1 2 3', 'A C E', 'N Q R W', '4 5 6', 'B D F M', 'L', '7', 'J Z', 'G']);
   const { mat: sm, rect } = signSlot(`${streetName(cz)}|${lines}`, 'subway');

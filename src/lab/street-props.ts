@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import * as P from '../nyc/streetprops';
-import { bake, CURB } from '../nyc/common';
+import { bake, CURB, AX, SZ, BX, BZ } from '../nyc/common';
 import { Rng } from '../rng';
 
 /**
  * ?lab=street-props — NYC street furniture on a strip of kerb.
- *   &set=lights|signals|small|big (default: small)
+ *   &set=lights|signals|small|big|subway (default: small; subway = real stairwell cut into chunk planes)
  */
 const scene: LabScene = {
   name: 'street-props',
@@ -44,6 +44,18 @@ const scene: LabScene = {
       P.signalPole(stat, 0, 0, 1, 1);
       stat.add(P.nameSign('W 34 St', 0, CURB + 6.3, 0, 0));
       stat.add(P.nameSign('Broadway', 0, CURB + 6.58, 0, Math.PI / 2));
+    } else if (set === 'subway') {
+      // the real chunk planes, so the entrance can cut its stairwell (cam e.g. 52,3,22 look 49.8,-1,18)
+      slab.visible = false;
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), new THREE.MeshStandardMaterial({ color: '#3a3a3c', roughness: 0.9 }));
+      road.rotation.x = -Math.PI / 2;
+      road.receiveShadow = true;
+      group.add(road);
+      const sw = new THREE.Mesh(new THREE.PlaneGeometry(BX * 2, BZ * 2), new THREE.MeshStandardMaterial({ color: '#b5b0a6', roughness: 0.95 }));
+      sw.rotation.x = -Math.PI / 2;
+      sw.position.y = CURB;
+      stat.add(sw);
+      P.subway(stat, group, BX - 2.2, BZ - 9, 3, r);
     } else {
       P.subway(stat, group, -8, -2, 3, r);
       P.busShelter(stat, -1, -1, 0);
