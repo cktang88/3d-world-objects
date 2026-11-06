@@ -187,6 +187,8 @@ export interface Door {
   at: number;
   w: number;
   h: number;
+  /** a lit vestibule behind the doorway instead of a dark passage (the atrium's wing doors) */
+  vest?: { depth: number; color: string };
 }
 export interface Placed {
   u: Unit;

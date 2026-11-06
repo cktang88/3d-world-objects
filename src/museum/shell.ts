@@ -217,24 +217,30 @@ function doorFrame(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: D
 
 /** a short passage beyond a doorway (you walk into it to go on) */
 function corridor(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: Door, st: Style) {
-  const m = st.arch === 'openair' ? mat('#3c4a2e', { rough: 1 }) : mat('#14110d', { rough: 1 });
-  const cc = c + out * (T + CORR / 2);
-  const end = c + out * (T + CORR);
-  if (axis === 'z') {
-    lv.bx(m, 0.1, d.h, CORR, d.at - d.w / 2 - 0.05, 0, cc);
-    lv.bx(m, 0.1, d.h, CORR, d.at + d.w / 2 + 0.05, 0, cc);
-    lv.bx(m, d.w + 0.2, 0.1, CORR, d.at, d.h, cc);
-    lv.bx(m, d.w + 0.2, d.h, 0.1, d.at, 0, end);
-    lv.bx(m, d.w + 0.2, 0.01, CORR + T, d.at, 0, c + (out * (T + CORR)) / 2);
-    pushCols(lv, rect(d.at, end, d.w + 0.4, 0.3), rect(d.at - d.w / 2 - 0.1, cc, 0.2, CORR), rect(d.at + d.w / 2 + 0.1, cc, 0.2, CORR));
-  } else {
-    lv.bx(m, CORR, d.h, 0.1, cc, 0, d.at - d.w / 2 - 0.05);
-    lv.bx(m, CORR, d.h, 0.1, cc, 0, d.at + d.w / 2 + 0.05);
-    lv.bx(m, CORR, 0.1, d.w + 0.2, cc, d.h, d.at);
-    lv.bx(m, 0.1, d.h, d.w + 0.2, end, 0, d.at);
-    lv.bx(m, CORR + T, 0.01, d.w + 0.2, c + (out * (T + CORR)) / 2, 0, d.at);
-    pushCols(lv, rect(end, d.at, 0.3, d.w + 0.4), rect(cc, d.at - d.w / 2 - 0.1, CORR, 0.2), rect(cc, d.at + d.w / 2 + 0.1, CORR, 0.2));
-  }
+  const v = d.vest;
+  const m = v ? mat(v.color, { rough: 0.9 }) : st.arch === 'openair' ? mat('#3c4a2e', { rough: 1 }) : mat('#14110d', { rough: 1 });
+  const L = v ? v.depth : CORR;
+  const half = v ? d.w / 2 + 0.9 : d.w / 2 + 0.05; // a vestibule is wider than its opening
+  const h = v ? d.h + 0.9 : d.h;
+  const cc = c + out * (T + L / 2);
+  const end = c + out * (T + L);
+  const floorM = v ? surface('floor_marble', [1, 1], { roughness: 0.5, normalScale: 0.5, color: '#e9e2d4' }) : m;
+  const glow = v ? mat('#fff6e6', { emissive: '#fff2dc', ei: 1.6 }) : m;
+  // sides, ceiling (a glowing panel in a vestibule), end wall, floor
+  const at = (along: number, across: number): [number, number] => (axis === 'z' ? [along, across] : [across, along]);
+  const box = (mm: THREE.Material, wAlong: number, hh: number, dAcross: number, along: number, y: number, across: number) => {
+    const [x, z] = at(along, across);
+    if (axis === 'z') lv.bx(mm, wAlong, hh, dAcross, x, y, z);
+    else lv.bx(mm, dAcross, hh, wAlong, x, y, z);
+  };
+  box(m, 0.1, h, L, d.at - half, 0, cc);
+  box(m, 0.1, h, L, d.at + half, 0, cc);
+  box(m, 2 * half + 0.1, 0.1, L, d.at, h, cc);
+  if (v) box(glow, 2 * half - 0.6, 0.02, L - 0.6, d.at, h - 0.02, cc);
+  box(m, 2 * half + 0.1, h, 0.1, d.at, 0, end);
+  box(floorM, 2 * half + 0.1, 0.01, L + T, d.at, 0, c + (out * (T + L)) / 2);
+  if (axis === 'z') pushCols(lv, rect(d.at, end, 2 * half + 0.3, 0.3), rect(d.at - half - 0.05, cc, 0.2, L), rect(d.at + half + 0.05, cc, 0.2, L));
+  else pushCols(lv, rect(end, d.at, 0.3, 2 * half + 0.3), rect(cc, d.at - half - 0.05, L, 0.2), rect(cc, d.at + half + 0.05, L, 0.2));
 }
 
 function pushCols(lv: MuseumBase, ...r: ReturnType<typeof rect>[]) {
