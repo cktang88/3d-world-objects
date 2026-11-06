@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AX, SZ, LX, LZ } from './common';
-import { getNight, litWindows } from '../lighting';
+import { getNight, litWindows, setCascadeLayers } from '../lighting';
 import { hashN } from '../rng';
 import type { HeightGrid } from './occlusion';
 import type { Hull } from './buildings';
@@ -18,7 +18,7 @@ import type { Hull } from './buildings';
  * Everything sits in ONE THREE.BatchedMesh (one draw for all far chunks) plus a shadow-only batch.
  * Shadows: the shadow batch holds every chunk; per cascade it casts occluded chunks always and,
  * in the farthest cascade only, the fully drawn chunks too (their real meshes leave that cascade
- * via layers: see CityHlod.shadowLayers).
+ * via layers: see CityHlod.installShadowLayers and lighting.ts setCascadeLayers).
  */
 
 /** surface kinds, in the `aKind` attribute */
@@ -265,8 +265,8 @@ function hlodMaterial() {
 }
 
 export type HlodMode = 'off' | 'draw' | 'shadow';
-/** layer the far shadow cascade renders (only proxies and what opts in), see shadowLayers() */
-export const PROXY_SHADOW_LAYER = 7;
+/** layer of the proxy batches in the shadow passes: every cascade renders it, the farthest only it */
+export const PROXY_SHADOW_LAYER = 8;
 
 export class CityHlod {
   private draw: THREE.BatchedMesh;
@@ -289,6 +289,7 @@ export class CityHlod {
       b.name = shadowOnly ? 'hlod-shadow' : 'hlod';
       return b;
     };
+    CityHlod.installShadowLayers();
     this.draw = mk(hlodMaterial(), false);
     this.shadow = mk(new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }), true);
     // the drawn proxies also cast in the far cascade
@@ -299,7 +300,7 @@ export class CityHlod {
     const base = THREE.BatchedMesh.prototype.onBeforeShadow;
     const self = this;
     this.shadow.onBeforeShadow = function (renderer, object, camera, shadowCamera, geometry, depthMaterial, group) {
-      const far = !shadowCamera.layers.isEnabled(0);
+      const far = shadowCamera.layers.mask === 1 << PROXY_SHADOW_LAYER;
       for (const e of self.ids.values()) self.shadow.setVisibleAt(e.inst[1], e.mode === 'shadow' || (far && e.mode === 'off'));
       base.call(this, renderer, object, camera, shadowCamera, geometry, depthMaterial, group);
     };
@@ -310,24 +311,12 @@ export class CityHlod {
   }
 
   /**
-   * Shadow cascades: every shadow camera sees the proxy layer; the farthest cascade sees ONLY it
-   * (real chunk meshes, trees, cars, people drop out there and the proxies stand in for them).
-   * Called each frame by CityVis.update with the scene's directional shadow lights.
+   * Shadow cascades (via lighting.ts's hook, so it survives the cascades being rebuilt): every
+   * cascade also renders the proxy layer, and the farthest renders ONLY it — there, real chunk
+   * meshes and everything else drop out and the proxies cast for the whole city.
    */
-  shadowLayers(lights: THREE.DirectionalLight[]) {
-    if (!lights.length) return;
-    let farL: THREE.DirectionalLight | null = null, farW = -1;
-    for (const l of lights) {
-      const c = l.shadow.camera;
-      const w = c.right - c.left;
-      if (w > farW) { farW = w; farL = l; }
-    }
-    for (const l of lights) {
-      const c = l.shadow.camera.layers;
-      c.enable(PROXY_SHADOW_LAYER);
-      if (l === farL && lights.length > 1) c.disable(0);
-      else c.enable(0);
-    }
+  static installShadowLayers() {
+    setCascadeLayers([PROXY_SHADOW_LAYER], PROXY_SHADOW_LAYER);
   }
 
   /** add a chunk's proxy (hulls in world coordinates unless hullsLocal); returns an id for set()/remove() */

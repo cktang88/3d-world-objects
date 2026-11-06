@@ -143,6 +143,70 @@ export const REFLECT_LAYER = 5;
 /** shadow casters with a bounding radius of at least 0.8 m / 6 m (bounding-sphere radius) also sit on these layers: the middle / far cascades draw only them */
 export const CASTER_MID = 6;
 export const CASTER_FAR = 7;
+
+// [hlod] cascade layer hook for nyc/hlod.ts: extra layers every cascade also renders, and an
+// exclusive layer for the farthest cascade (the city proxies stand in for everything there).
+// Kept here so it survives the cascades being rebuilt (quality / place changes).
+const cascadeHook: { extra: number[]; farOnly: number | null } = { extra: [], farOnly: null };
+let activeCsm: CSM | null = null;
+function applyCascadeHook(csm: CSM | null) {
+  if (!csm) return;
+  const n = csm.lights.length;
+  csm.lights.forEach((l, i) => {
+    const L = l.shadow.camera.layers;
+    if (cascadeHook.farOnly !== null && i === n - 1 && n > 1) {
+      L.set(cascadeHook.farOnly);
+      return;
+    }
+    for (const e of cascadeHook.extra) L.enable(e);
+  });
+}
+/**
+ * three r170's WebGLShadowMap tests object layers against the MAIN camera, not the shadow camera,
+ * so per-cascade layer masks (CASTER_MID / CASTER_FAR, the HLOD proxy layer) had no effect. While
+ * the shadow maps render, each cascade light swaps its shadow camera's mask onto the main camera
+ * (shadow.updateMatrices runs right before that light's scene traversal); the mask is restored
+ * after the shadow pass, before the main pass draws its (already built) render list.
+ */
+let shadowMainCam: THREE.Camera | null = null;
+let shadowMainMask = 1;
+const wrappedShadowMaps = new WeakSet<object>();
+const cascadeShadows = new WeakSet<object>();
+const layerWrapped = new WeakSet<object>();
+function layerAwareShadows(renderer: THREE.WebGLRenderer, csm: CSM) {
+  for (const l of csm.lights) cascadeShadows.add(l.shadow);
+  const sm = renderer.shadowMap as THREE.WebGLShadowMap & { render: (lights: THREE.Light[], scene: THREE.Object3D, camera: THREE.Camera) => void };
+  if (wrappedShadowMaps.has(sm)) return;
+  wrappedShadowMaps.add(sm);
+  const prev = sm.render.bind(sm);
+  sm.render = (lights, scene, camera) => {
+    shadowMainMask = camera.layers.mask;
+    shadowMainCam = camera;
+    // every shadow light: cascades swap in their camera's mask, any other light the main mask
+    for (const l of lights) {
+      const sh = (l as THREE.DirectionalLight).shadow as THREE.LightShadow | undefined;
+      if (!sh || layerWrapped.has(sh)) continue;
+      layerWrapped.add(sh);
+      const upd = sh.updateMatrices.bind(sh) as (...a: unknown[]) => void;
+      (sh as unknown as { updateMatrices: (...a: unknown[]) => void }).updateMatrices = (...a: unknown[]) => {
+        upd(...a);
+        if (shadowMainCam) shadowMainCam.layers.mask = cascadeShadows.has(sh) ? sh.camera.layers.mask : shadowMainMask;
+      };
+    }
+    try {
+      prev(lights, scene, camera);
+    } finally {
+      camera.layers.mask = shadowMainMask;
+      shadowMainCam = null;
+    }
+  };
+}
+/** [hlod] extra shadow layers for all cascades + an exclusive layer for the farthest one (null: lighting's default) */
+export function setCascadeLayers(extra: number[], farOnly: number | null) {
+  cascadeHook.extra = extra;
+  cascadeHook.farOnly = farOnly;
+  applyCascadeHook(activeCsm);
+}
 function tagCaster(m: THREE.Mesh) {
   const g = m.geometry;
   if (!g) return;
@@ -1239,6 +1303,9 @@ export class Lighting {
     });
     if (!FLAGS.shadows) csm.lights.forEach((l, i) => (l.visible = i === 0));
     this.csm = csm;
+    activeCsm = csm; // [hlod]
+    applyCascadeHook(csm); // [hlod]
+    layerAwareShadows(this.renderer, csm); // per-cascade layer masks actually apply
     this.csmMats.clear();
     if (this.place === 'outdoor') this.applyCurrent();
   }
