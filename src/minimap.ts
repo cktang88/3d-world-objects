@@ -321,7 +321,7 @@ export class Minimap {
     g.fillRect(0, 0, S, S);
     g.setTransform(ppm, 0, 0, ppm, S / 2 - pos.x * ppm, S / 2 - pos.z * ppm);
     const half = S / 2 / ppm;
-    this.blit(g, src, pos.x - half, pos.z - half, pos.x + half, pos.z + half, 1);
+    this.blit(g, src, pos.x - half, pos.z - half, pos.x + half, pos.z + half, 1, 6);
     if (this.hudName && src.describe) {
       const t = src.describe(pos.x, pos.z).split(' · ')[0];
       if (this.hudName.textContent !== t) this.hudName.textContent = t;
@@ -379,20 +379,28 @@ export class Minimap {
   }
 
   /** blit the tiles covering a world rect into g with the current transform (paints at most `budget` new tiles) */
-  private blit(g: Ctx2D, src: MinimapSource, x0: number, z0: number, x1: number, z1: number, budget: number) {
+  private blit(g: Ctx2D, src: MinimapSource, x0: number, z0: number, x1: number, z1: number, budget: number, msBudget = 0) {
     const T = src.tileSize;
-    let painted = 0, n = 0;
+    let painted = 0;
     this.pending = false;
+    // nearest the view centre first: the tile under the player paints before the corners
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const tiles: [number, number, number][] = [];
     for (let tz = Math.floor(z0 / T); tz <= Math.floor(z1 / T); tz++)
-      for (let tx = Math.floor(x0 / T); tx <= Math.floor(x1 / T); tx++) {
-        const before = this.cache.painted;
-        const surf = this.cache.get(src, tx, tz, painted < budget);
-        if (surf) g.drawImage(surf as unknown as CanvasImageSource, tx * T, tz * T, T, T);
-        else this.pending = true;
-        painted += this.cache.painted - before;
-        n++;
-      }
-    return n;
+      for (let tx = Math.floor(x0 / T); tx <= Math.floor(x1 / T); tx++) tiles.push([tx, tz, Math.hypot((tx + 0.5) * T - cx, (tz + 0.5) * T - cz)]);
+    tiles.sort((a, b) => a[2] - b[2]);
+    const t0 = performance.now();
+    for (const [tx, tz] of tiles) {
+      const before = this.cache.painted;
+      // paint new tiles while within the tile budget, or while within the time budget (a slow frame
+      // rate must not leave the map empty for seconds)
+      const may = painted < budget || (msBudget > 0 && performance.now() - t0 < msBudget);
+      const surf = this.cache.get(src, tx, tz, may);
+      if (surf) g.drawImage(surf as unknown as CanvasImageSource, tx * T, tz * T, T, T);
+      else this.pending = true;
+      painted += this.cache.painted - before;
+    }
+    return tiles.length;
   }
 
   /** text with a dark halo, greedy-placed: returns false (and draws nothing) when it would collide */

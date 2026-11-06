@@ -78,6 +78,21 @@ test(`the HUD rebuilds its map only every ${RECOMPOSITE_M} m (or to fill a tile)
   expect(m.stats.composites === before, 'drew a map for a level with no source');
 });
 
+test('standing still at spawn on a slow frame rate, the HUD paints the tile under the player within 3 updates', () => {
+  // regression: the first composite painted 1 tile, top-left first, so at 2 fps the HUD stayed an empty disc
+  const m = new Minimap();
+  m.headless = surface(HUD_MAP, HUD_MAP);
+  const level = {};
+  registerMinimapSource((l) => (l === level ? nycMinimapSource : null));
+  const pos = { x: 49.8, z: 9 };
+  for (let i = 0; i < 3; i++) m.update(level, pos, 0, i * 0.5);
+  expect(m.stats.composites >= 1, `${m.stats.composites} composites`);
+  expect(m.stats.painted >= 1, `${m.stats.painted} tiles painted`);
+  const T = nycMinimapSource.tileSize, p0 = m.cache.painted;
+  expect(m.cache.get(nycMinimapSource, Math.floor(pos.x / T), Math.floor(pos.z / T), false) !== null, "the player's own tile is not painted");
+  expect(m.cache.painted === p0, 'probe repainted');
+});
+
 test('large map labels: one per district area, and none overlapping', () => {
   const ls = nycMinimapSource.labels!(-600, -500, 900, 250).filter((l) => l.kind === 'district');
   const names = ls.map((l) => l.text);
