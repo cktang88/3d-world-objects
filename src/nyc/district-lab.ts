@@ -32,6 +32,7 @@ export function districtLab(name: string, description: string, cx: number, cz: n
       group.userData.cam = rel('rcam', cam);
       group.userData.look = rel('rlook', look);
       if (params.get('radius')) SHOWCASE.radius = Number(params.get('radius'));
+      if (params.get('cap')) SHOWCASE.cap = Number(params.get('cap')); // load only slots this close to the player (px, pz)
       // a bare NycLevel: just the chunk builder, no traffic or pedestrians
       const lv = Object.create(NycLevel.prototype) as { seed: number; chunks: Map<string, unknown>; group: THREE.Group; steam: unknown[]; ensure(x: number, z: number): boolean };
       lv.seed = Number(params.get('seed') ?? 20261105);

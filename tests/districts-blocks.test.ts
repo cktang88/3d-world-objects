@@ -1,4 +1,5 @@
 /** NYC districts (districts-blocks): each special block builds within budgets; its showcase slots are sane. */
+// default: a few representative blocks (<10 s); QA_DISTRICTS=all for every special block
 import { readFileSync } from 'fs';
 import { test, expect, none, stats, sceneHash, fmt, rectOverlap } from './qa';
 import { nycChunk } from './world';
@@ -14,7 +15,7 @@ const ALL: [string, number, number][] = [
   ['pier shed', 6, 0], ['pier aircraft', 6, 1], ['pier marina', 6, -1], ['carrier', 7, -1],
   ['airport stands', -3, -2], ['airport', -4, -3], ['bowery', 1, 2],
 ];
-const SPECIAL = ALL.filter(([n]) => /^(auto|construction|rail|greenmarket|museum|bowery)/.test(n) && (!process.env.QA_BLOCK || new RegExp(process.env.QA_BLOCK).test(n)));
+const SPECIAL = ALL.filter(([n]) => (process.env.QA_DISTRICTS === 'all' ? /^(auto|construction|rail|greenmarket|museum|bowery)/ : /^(auto row|construction)$/).test(n) && (!process.env.QA_BLOCK || new RegExp(process.env.QA_BLOCK).test(n)));
 
 test('special blocks build in Node within budgets', () => {
   const bad: string[] = [];
@@ -57,12 +58,12 @@ test('showcase slots: inside the block, pools exist, not inside buildings', () =
     }
   }
   expect(total >= 6 * SPECIAL.length, `only ${total} showcase slots in ${SPECIAL.length} special blocks`);
-  expect(kinds.size >= (process.env.QA_BLOCK ? 1 : 10), `only ${kinds.size} showcase kinds used`);
+  expect(kinds.size >= (process.env.QA_DISTRICTS === 'all' ? 10 : 3), `only ${kinds.size} showcase kinds used`);
   none(bad, 'slot problems');
 });
 
 test('districts change the street: shop mix differs by district', () => {
   const sig = (cx: number, cz: number) => sceneHash(nycChunk(1, cx, cz).group);
-  expect(sig(0, 0) !== sig(1, 2), 'Midtown and Bowery blocks identical');
+  expect(SPECIAL.length < 2 || sig(SPECIAL[0][1], SPECIAL[0][2]) !== sig(SPECIAL[1][1], SPECIAL[1][2]), 'two different districts built identical blocks');
   void BZ;
 });

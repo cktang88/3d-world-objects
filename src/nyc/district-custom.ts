@@ -161,7 +161,7 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
       if (Math.abs(x) < 4) continue;
       slot({ kind: ['car', 'truck'], x, y: CURB + 0.01, z: fz - row * 3.4, rot: Math.PI / 2, w: 5.6, d: 2.7, h: 3.2, min: 3.2, radius: 85, maxTris: 150_000 });
     }
-    for (let x = x0 + 2.5; x < x1 - 8; x += 3.2) {
+    for (let x = x0 + 2.5; x < x1 - 8; x += 6.4) {
       const car = carMesh(r.chance(0.1) ? 'cab' : 'sedan', r);
       car.position.set(x, CURB, fz - row * 11);
       car.rotation.y = r.chance(0.5) ? 0 : Math.PI;

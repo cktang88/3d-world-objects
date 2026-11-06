@@ -77,7 +77,7 @@ function loadPools() {
 }
 
 /** budgets (the lab lowers them for software rendering) */
-export const SHOWCASE = { tris: 3_000_000, loads: 4, radius: 110 };
+export const SHOWCASE = { tris: 3_000_000, loads: 4, radius: 110, cap: Infinity };
 let shownTris = 0;
 let loading = 0;
 /** how often each object is on show: prefer ones nobody nearby has */
@@ -262,7 +262,7 @@ export function updateShowcases(p: THREE.Vector3) {
       s.holder.getWorldPosition(s.wp);
     }
     const d = Math.hypot(s.wp.x - p.x, s.wp.z - p.z);
-    const R = s.spec.radius ?? SHOWCASE.radius;
+    const R = Math.min(SHOWCASE.cap, s.spec.radius ?? SHOWCASE.radius);
     if (s.state === 'shown' && d > R + 40) unload(s);
     else if (s.state === 'idle' && d < R) want.push({ s, d });
   }
