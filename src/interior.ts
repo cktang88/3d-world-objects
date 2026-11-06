@@ -191,6 +191,12 @@ export class InteriorLevel implements Level {
   cells: Cell[] = [];
   /** the entry (exit) door in level coordinates: centre of the doorway on the inner wall face; yaw faces into the building */
   entry = { x: 0, z: 0, width: DOOR, height: DOOR_H, yaw: Math.PI };
+  /**
+   * the in-unit stair (houses / direct-from-street multi-floor units), for src/rooms/vertical.ts:
+   * centre, rotation (local +x runs up the flight from the bottom at -len/2... see placeStairs), size and footprint.
+   * Units reached from a building hall (vertical.ts, floors: 1) have none.
+   */
+  stairCore?: { x: number; z: number; rot: number; len: number; width: number; rect: Rect };
   /** openable containers whose contents are generated only when needed (see Container) */
   containers: Container[] = [];
   private cellMap = new Map<Room, Cell>();
@@ -1757,6 +1763,11 @@ export class InteriorLevel implements Level {
             k.box(M.fabric('#6b7a6a'), dw - 0.1, 0.35, 0.03, 0, p.h, -0.34);
             F.monitor(k, 0, p.h, -0.1, r.chance(0.8));
             if (r.chance(0.4)) F.mug(k, r, 0.5, p.h, 0.05);
+            // desk clutter: papers, a book stack, a phone, a desk lamp
+            if (r.chance(0.7)) for (let j = 0; j < r.int(1, 4); j++) k.box(M.matte('#f4f4f0'), 0.21, 0.004, 0.297, -0.5 + r.range(-0.05, 0.05), p.h + j * 0.004, 0.08, r.range(-0.3, 0.3));
+            if (r.chance(0.4)) F.bookStack(k, r, -0.45, p.h, -0.2);
+            if (r.chance(0.5)) k.box(M.black(), 0.08, 0.012, 0.16, 0.3, p.h, 0.15, r.range(-0.4, 0.4));
+            if (r.chance(0.3)) F.tableLamp(k, r, 0.55, p.h, -0.22);
             this.kit.at(r.range(-0.2, 0.2), 0, 0.65 + r.range(0, 0.15), Math.PI + r.range(-0.5, 0.5), () => F.officeChair(k, chairM));
           });
           if (r.chance(0.35)) {
@@ -1770,13 +1781,106 @@ export class InteriorLevel implements Level {
         c.occ.push(long ? rect(x, z, dw, pairD + 1.4) : rect(x, z, pairD + 1.4, dw));
       }
     }
-    // a lounge corner and plants
-    this.corners(c, 'plant', r.int(2, 4));
-    for (const s of this.sidesByFreeLength(c, 2.4).slice(0, 1)) {
-      const f = this.onWall(c, s.sd, 2.0, 0.92, 0.85, 'any', 0.03);
-      if (f) this.draw(f, () => F.sofa(k, r, 2.0, M.fabric(r.pick(['#3d4a5c', '#c4553a', '#e8c86a', '#5a6b5a'])), M.black(), this.pal.accent));
+    // a lounge: sofa, armchairs, coffee table on a rug
+    this.lounge(c);
+    // phone booths against a wall
+    for (let i = 0; i < (Math.max(w, d) > 10 ? 2 : 1); i++) this.phoneBooth(c);
+    // a kitchenette when the floor is big
+    if (Math.max(w, d) > 9) this.kitchenette(c);
+    // low storage with plants and binders, bookcases
+    for (const s of this.sidesByFreeLength(c, 1.6).slice(0, 2)) {
+      const f = this.onWall(c, s.sd, 1.5, 0.45, 0.75, 'any', 0.02) as (Frame & { t: number }) | null;
+      if (!f) continue;
+      const p = this.draw(f, () => F.dresser(k, r, M.matte('#e4e4e2'))) as F.Piece;
+      this.movingParts(f, p.parts);
+      this.libTop(r, f, { ...p.tops[0], x: -p.tops[0].w / 4, w: p.tops[0].w / 2 }, 'smallplant', 1, 0.4);
+      this.kit.at(f.x, 0, f.z, f.rot, () => F.bookStack(k, r, p.tops[0].w / 4, p.tops[0].y, 0));
+      this.painting(r, s.sd, f.t, 1.75, 1.0);
     }
-    this.paintings(c, r.int(0, 2));
+    this.corners(c, 'plant', 4);
+    this.paintings(c, r.int(1, 3));
+  }
+
+  /** sofa against a wall, two armchairs and a coffee table on a rug */
+  private lounge(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    for (const s of this.sidesByFreeLength(c, 3.0)) {
+      const sf = this.onWall(c, s.sd, 2.2, 0.92, 0.85, midFree(s.sd), 0.03) as (Frame & { t: number }) | null;
+      if (!sf) continue;
+      const fab = M.fabric(r.pick(['#3d4a5c', '#c4553a', '#e8c86a', '#5a6b5a', '#2f3d4f']));
+      this.draw(sf, () => F.sofa(k, r, 2.2, fab, M.black(), this.pal.accent));
+      const c0 = Math.cos(sf.rot), s0 = Math.sin(sf.rot);
+      const at = (lx: number, lz: number): [number, number] => [sf.x + lx * c0 + lz * s0, sf.z - lx * s0 + lz * c0];
+      const [rx, rz] = at(0, 1.2);
+      k.flat(M.mapped(`rugo${this.desc.seed % 5}`, rugTex(hashN(this.desc.seed, 5, room2n(c.room)) % 40)), 3.0, 2.2, rx, 0.008, rz, 'keep', [1, 1], sf.rot);
+      const [tx, tz] = at(0, 1.05);
+      const tf = this.freeAt(c, 1.1, 0.6, tx, tz, sf.rot, true, 0.0);
+      if (tf) {
+        this.libPiece(tf, r.chance(0.5) ? 'modern_coffee_table_01' : null, (kk) => F.coffeeTable(kk, r, this.pal.wood, M.black(), M.marble()));
+        this.libTop(r, tf, { x: 0, z: 0, y: 0.39, w: 0.9, d: 0.4 }, 'table', 1, 0.4);
+      }
+      for (const sgn of [-1, 1]) {
+        const [ax, az] = at(sgn * 1.0, 1.75);
+        const af = this.freeAt(c, 0.9, 0.9, ax, az, 0, true, 0.0);
+        if (af) this.libPiece({ x: ax, z: az, rot: sf.rot + Math.PI + sgn * 0.5 }, r.chance(0.6) ? pickLib('armchair', r) : null, (kk) => F.armchair(kk, fab, M.black()));
+      }
+      return;
+    }
+  }
+
+  /** a glass phone booth with a shelf and a stool */
+  private phoneBooth(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    for (const s of this.sidesByFreeLength(c, 1.3)) {
+      const f = this.onWall(c, s.sd, 1.1, 1.1, 2.3, 'any', 0.02) as (Frame & { t: number }) | null;
+      if (!f) continue;
+      const frame = M.matte('#2b2c2e');
+      const felt = M.fabric(r.pick(['#5a6b5a', '#3d4a5c', '#8a5a4a', '#c9b79c']));
+      this.kit.at(f.x, 0, f.z, f.rot, () => {
+        k.box(felt, 1.1, 2.25, 0.04, 0, 0, -0.53);
+        for (const sx of [-1, 1]) k.box(felt, 0.04, 2.25, 1.1, sx * 0.53, 0, 0);
+        k.box(frame, 1.1, 0.05, 1.1, 0, 2.25, 0);
+        k.box(frame, 1.1, 0.03, 1.1, 0, 0, 0);
+        for (const sx of [-1, 1]) k.box(frame, 0.04, 2.25, 0.04, sx * 0.53, 0, 0.53);
+        k.unshadowed(() => k.box(M.glass(), 1.02, 2.2, 0.012, 0, 0.03, 0.53));
+        k.box(M.oak('#d8c4a4'), 0.9, 0.03, 0.35, 0, 1.0, -0.33);
+        k.cyl(felt, 0.17, 0.17, 0.08, 0, 0.6, 0.05, 16);
+        k.cyl(M.black(), 0.025, 0.025, 0.6, 0, 0, 0.05, 8);
+        k.box(M.diffuser(), 0.6, 0.01, 0.3, 0, 2.23, 0);
+      });
+      this.libTop(r, f, { x: 0, z: -0.33, y: 1.03, w: 0.6, d: 0.25 }, 'smallplant', 1, 0.3);
+      return;
+    }
+  }
+
+  /** a short kitchen run with a fridge, and a high table with stools */
+  private kitchenette(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    for (const s of this.sidesByFreeLength(c, 3.0)) {
+      const f = this.onWall(c, s.sd, 2.8, 0.64, 2.3, 'any', 0.0, 0.0) as (Frame & { t: number }) | null;
+      if (!f) continue;
+      const p = this.draw(f, () =>
+        F.kitchenRun(k, r, { len: 2.8, cab: M.painted('#f2f2f0'), counter: M.marble('#ffffff'), splash: M.subway('#f4f2ec'), fridgeAt: 1, rangeAt: 0.5, sinkAt: 0.3, uppers: true, ceilingH: this.H }),
+      ) as F.Piece;
+      for (const b of p.boxes ?? []) this.container(b.kind as Container['kind'], f, b);
+      this.movingParts(f, p.parts);
+      for (const tp of p.tops) this.libTop(r, f, tp, 'kitchen', 2, 0.4);
+      // a high table with stools in front
+      const c0 = Math.cos(f.rot), s0 = Math.sin(f.rot);
+      const tx = f.x + 1.9 * s0, tz = f.z + 1.9 * c0;
+      const tf = this.freeAt(c, 1.6, 0.7, tx, tz, f.rot, true, 0.02);
+      if (tf) {
+        this.kit.at(tx, 0, tz, f.rot, () => {
+          k.box(M.oak('#d8c4a4'), 1.6, 0.04, 0.7, 0, 1.02, 0);
+          for (const sx of [-1, 1]) k.box(M.black(), 0.05, 1.02, 0.5, sx * 0.7, 0, 0);
+        });
+        for (const sx of [-0.45, 0.45]) for (const sz of [-0.55, 0.55]) {
+          const px = tx + sx * c0 + sz * s0, pz = tz - sx * s0 + sz * c0;
+          this.libPiece({ x: px, z: pz, rot: f.rot + (sz > 0 ? Math.PI : 0) }, 'bar_chair_round_01', (kk) => void kk.cyl(M.black(), 0.2, 0.2, 0.75, 0, 0, 0, 12));
+        }
+      }
+      return;
+    }
   }
 
   private meeting(c: RoomCtx) {
@@ -1867,7 +1971,8 @@ export class InteriorLevel implements Level {
   }
 
   private placeStairs(c: RoomCtx) {
-    const sl = 4.2, sw = 1.05;
+    // 17-19 cm risers on 27 cm treads
+    const sl = Math.round(this.H / 0.185) * 0.27, sw = 1.05;
     for (const s of this.sidesByFreeLength(c, sl + 0.2)) {
       const f = this.onWall(c, s.sd, sl, sw, 9, 'any', 0.0, 0.0) as (Frame & { t: number }) | null;
       if (!f) continue;
@@ -1876,6 +1981,7 @@ export class InteriorLevel implements Level {
       c.occ.push(rect(bx, bz, 1.2, 1.2));
       this.kit.at(f.x, 0, f.z, f.rot, () => this.kit.at(0, 0, 0, Math.PI, () => F.stair(this.kit, sl, sw, this.H, M.oak('#b08a60'), M.trim(), M.trim())));
       const fp = footprint(sl, sw, f.rot, f.x, f.z);
+      this.stairCore = { x: f.x, z: f.z, rot: f.rot, len: sl, width: sw, rect: fp };
       const next = this.desc.floor + 1;
       this.ports.push({
         box: new THREE.Box3(new THREE.Vector3(fp.minX - 0.3, 0, fp.minZ - 0.3), new THREE.Vector3(fp.maxX + 0.3, this.H, fp.maxZ + 0.3)),
