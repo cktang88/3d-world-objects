@@ -54,6 +54,9 @@ function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean
     obj.userData.wheels = lod.userData.wheels;
     obj.userData.wheelR = lod.userData.wheelR;
   }
+  if (lod.userData.brake) {
+    obj.userData.brake = lod.userData.brake;
+  }
   if (cab && id !== 'taxi_cv') {
     let top = 0, zc = 0;
     for (const part of p.lod0) {
@@ -317,6 +320,8 @@ export class Traffic {
       // don't run the player over
       const pg = (along - c.t) * c.dir - c.len / 2;
       if (Math.abs(across - c.line) < c.wid && pg > -1 && pg < 12) target = 0;
+      const brake = c.obj.userData.brake as THREE.Object3D | undefined;
+      if (brake) brake.visible = target < c.v - 0.3 || c.v < 0.5;
       c.v += (target - c.v) * Math.min(1, dt * (target < c.v ? 4 : 1.2));
       c.t += c.dir * c.v * dt;
       const x = c.axis === 'x' ? c.t : c.line, z = c.axis === 'x' ? c.line : c.t;

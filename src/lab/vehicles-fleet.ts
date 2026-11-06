@@ -30,6 +30,8 @@ const scene: LabScene = {
       o.position.x = (i - (ids.length - 1) / 2) * 2.8;
       // &spin=<rad> turns the cut-out wheels, to check they were cut cleanly
       for (const w of (o.userData.wheels ?? []) as THREE.Object3D[]) w.rotation.x = Number(params.get('spin') ?? 0);
+      // &brake=1 lights the brake lamps
+      if (o.userData.brake) o.userData.brake.visible = params.has('brake');
       group.add(o);
     });
     let tris = 0;

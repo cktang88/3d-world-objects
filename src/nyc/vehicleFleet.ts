@@ -126,6 +126,8 @@ export interface Prepared {
   lod1: Part[];
   /** the four near-LOD wheels, cut out of the body so moving cars can spin them */
   wheels: Wheel[];
+  /** the rear red lamp lenses, slightly proud of the body: lit while braking */
+  brake: THREE.BufferGeometry | null;
 }
 
 const prepared = new Map<string, Promise<Prepared | null>>();
@@ -136,7 +138,7 @@ export function loadFleet(id: string): Promise<Prepared | null> {
     p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`)])
       .then(([a, b]) => {
         const lod0 = prepare(a.scene, id);
-        return { id, lod0, lod1: prepare(b.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0) };
+        return { id, lod0, lod1: prepare(b.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0), brake: brakeLenses(lod0) };
       })
       .catch((e) => {
         console.warn('vehicle', id, e);
@@ -370,7 +372,45 @@ function cutWheels(parts: Part[], r: number): Wheel[] {
     return { geo, center: w.c, r: w.r };
   });
 }
-const WHEEL_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.45, roughness: 0.45, side: THREE.DoubleSide, name: 'car-wheel' });
+/** red vertex-coloured triangles in the last 0.7 m of the car, above the bumper: the tail/brake lamp lenses */
+function brakeLenses(parts: Part[]): THREE.BufferGeometry | null {
+  let zmax = -Infinity;
+  for (const p of parts) zmax = Math.max(zmax, p.geo.boundingBox!.max.z);
+  const P: number[] = [], N: number[] = [];
+  const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  const nn = new THREE.Vector3();
+  for (const part of parts) {
+    const col = part.geo.getAttribute('color');
+    if (!col || part.mat === 'paint') continue;
+    const pos = part.geo.getAttribute('position'), nor = part.geo.getAttribute('normal');
+    const idx = part.geo.index!.array;
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i];
+      if (!(col.getX(a) > 0.3 && col.getY(a) < 0.15 && col.getZ(a) < 0.15)) continue;
+      let ok = true;
+      for (let k = 0; k < 3; k++) {
+        v[k].fromBufferAttribute(pos, idx[i + k]);
+        if (v[k].z < zmax - 0.7 || v[k].y < 0.45) ok = false;
+      }
+      if (!ok) continue;
+      for (let k = 0; k < 3; k++) {
+        nn.fromBufferAttribute(nor, idx[i + k]);
+        P.push(v[k].x + nn.x * 0.004, v[k].y + nn.y * 0.004, v[k].z + nn.z * 0.004);
+        N.push(nn.x, nn.y, nn.z);
+      }
+    }
+  }
+  if (P.length < 9 * 4) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  g.computeBoundingSphere();
+  return g;
+}
+/** lit brake lamps (shared; a car shows or hides its lens mesh) */
+export const BRAKE_MAT = new THREE.MeshStandardMaterial({ color: '#ff2a1a', emissive: '#ff1a0a', emissiveIntensity: 3, roughness: 0.3, name: 'car-brake' });
+
+const WHEEL_MAT =new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.45, roughness: 0.45, side: THREE.DoubleSide, name: 'car-wheel' });
 
 /** average colour of a texture (for the single-material distant LOD) */
 const avgCache = new WeakMap<THREE.Texture, THREE.Color>();
@@ -462,5 +502,13 @@ export function fleetObject(p: Prepared, paint: THREE.Material, far = 26, farthe
   m2.castShadow = true;
   m2.userData.owned = false;
   lod.addLevel(m2, farther);
+  if (p.brake) {
+    // not a LOD level: shown at every distance while the car brakes (Traffic toggles visible)
+    const b = new THREE.Mesh(p.brake, BRAKE_MAT);
+    b.visible = false;
+    b.userData.owned = false;
+    lod.add(b);
+    lod.userData.brake = b;
+  }
   return lod;
 }
