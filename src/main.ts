@@ -683,3 +683,7 @@ ready.then(() => {
 Object.assign(window, {
   __world: { renderer, lighting, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
 });
+
+// ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----
+import('./perf').then((m) => m.installPerf({ renderer, composer, scene, camera, level: () => level }));
+// ---- end perf hook ----
