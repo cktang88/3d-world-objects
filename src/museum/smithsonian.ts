@@ -69,7 +69,8 @@ export function siMeasured(e: LibraryEntry, hero: boolean): Measured {
     ds: 'Smithsonian Open Access (CC0)', split: '', row: 0, id: `si:${e.id}`, family: e.category, entry: '', title: e.title, author: e.author || 'Smithsonian Institution',
     url: e.page, license: e.licence, path: '', bytes: 0, f: 0, joints: 0,
   };
-  const quality = hero || Math.max(real.x, real.y, real.z) > 3 ? 'full' : 'low';
+  // the full scans are ~150k faces with 2k textures: only for a hero you can walk right up to
+  const quality = hero && Math.max(real.x, real.y, real.z) < 5 ? 'full' : 'low';
   return {
     entry, raw: real.clone(), k: 1, real,
     library: true,

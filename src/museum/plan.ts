@@ -238,8 +238,6 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   const hangU = units.filter((u) => u.place === 'hang');
   const heroU = floorU.find((u) => u.hero);
   const others = floorU.filter((u) => !u.hero);
-  if (!st.outdoor && others.length >= 4) others.push(bench());
-  if (!st.outdoor && others.length >= 12) others.push(bench());
 
   const ceiling = r.pick(st.ceilings);
   const floorKind = r.pick(st.floors);
@@ -335,6 +333,21 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
     }
     z -= d + aisle + extra + (isHero ? 1 : 0);
   });
+
+  // benches in the widest gaps between rows, off the room's centre line
+  if (!st.outdoor && floorU.length >= 4) {
+    const gaps: { z: number; g: number }[] = [];
+    for (let i = 0; i + 1 < rowsZ.length; i++) {
+      const top = rowsZ[i] - rowD[i] / 2, bot = rowsZ[i + 1] + rowD[i + 1] / 2;
+      gaps.push({ z: (top + bot) / 2, g: top - bot });
+    }
+    gaps.sort((x, y) => y.g - x.g);
+    gaps.slice(0, floorU.length >= 10 ? 2 : 1).forEach((gp, i) => {
+      if (gp.g < 3.2) return;
+      const b = bench();
+      floor.push({ u: b, f: new Frame((i % 2 ? 1 : -1) * Math.min(W / 4, 4), gp.z, 0) });
+    });
+  }
 
   // hung things in lanes along the hall's length, alternating heights
   const hangP: Placed[] = [];
