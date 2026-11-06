@@ -17,6 +17,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import draco3d from 'draco3dgltf';
+import { meshopt } from '@gltf-transform/functions';
 
 let io = null;
 async function getIO() {
@@ -141,6 +142,8 @@ export async function scanGlb(file, { minArea = 1e-5, maxExamples = 5, fix = fal
   }
   if (fix && (drop.size || lift.size)) {
     applyFix(drop, lift, liftBy);
+    // re-compress: meshopt with 16-bit positions (0.08 mm on a 5 m car: the 0.8 mm lift survives)
+    await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16 }));
     await (await getIO()).write(file, doc);
   }
   return { file, tris: tris.length, pairs, twins, examples, dropped: drop.size, lifted: lift.size };
@@ -206,24 +209,40 @@ function applyFix(drop, lift, by) {
   }
 }
 
+/**
+ * Fix one car GLB in place until it scans clean. Depth precision falls with distance (near 0.05 m,
+ * 24-bit): the near LOD (< 12 m) is lifted 0.8 mm, the mid LOD (12-40 m) 4 mm; at far-LOD distances the
+ * upper layer (decal, trim) is simply dropped. Stacks of three or more layers take a few passes; a stack
+ * lifting cannot separate has its upper layers dropped. Returns { first, after } scans.
+ */
+export async function fixFile(f) {
+  const opts = /_lod2\.glb$/.test(f) ? { dropAll: true } : /_lod1\.glb$/.test(f) ? { lift: 0.004 } : { lift: 0.0008 };
+  let r = await scanGlb(f, { fix: true, ...opts });
+  const first = r;
+  for (let pass = 0, prev = -1; pass < 12 && r.pairs; pass++) {
+    const stuck = r.pairs === prev;
+    prev = r.pairs;
+    r = await scanGlb(f, { fix: true, ...opts, ...(stuck ? { dropAll: true } : {}) });
+  }
+  return { first, after: await scanGlb(f) };
+}
+
+/** re-compress a GLB in place: meshopt with 16-bit positions (keeps the lifts) */
+export async function compressFile(f) {
+  const io = await getIO();
+  const doc = await io.read(f);
+  await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16 }));
+  await io.write(f, doc);
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
+  if (process.argv.includes('--compress')) for (const f of process.argv.slice(2).filter((a) => !a.startsWith('--'))) await compressFile(f);
   const files = process.argv.slice(2).filter((a) => !a.startsWith('--'));
   const fix = process.argv.includes('--fix');
   for (const f of files) {
-    // depth precision falls with distance (near 0.05 m, 24-bit): the near LOD (< 12 m) is lifted 0.8 mm,
-    // the mid LOD (12-40 m) 4 mm; at far LOD distances the upper layer (decal, trim) is simply dropped
-    const opts = /_lod2\.glb$/.test(f) ? { dropAll: true } : /_lod1\.glb$/.test(f) ? { lift: 0.004 } : { lift: 0.0008 };
-    let r = await scanGlb(f, { fix, ...opts });
-    const first = r;
-    // stacks of three or more layers: repeat until clean
-    // (a stack lifting cannot separate: drop its upper layers)
-    for (let pass = 0, prev = -1; fix && pass < 12 && r.pairs; pass++) {
-      const stuck = r.pairs === prev;
-      prev = r.pairs;
-      r = await scanGlb(f, { fix, ...opts, ...(stuck ? { dropAll: true } : {}) });
-    }
-    if (fix) r = await scanGlb(f);
-    console.log(`${f}: ${first.tris} triangles, ${first.pairs} coplanar overlapping pairs (${first.twins} twins)${fix ? ` -> ${r.pairs} after the fix (${r.tris} triangles)` : ''}`);
+    const { first, after: r } = fix ? await fixFile(f) : { first: null, after: await scanGlb(f) };
+    const head = first ?? r;
+    console.log(`${f}: ${head.tris} triangles, ${head.pairs} coplanar overlapping pairs (${head.twins} twins)${fix ? ` -> ${r.pairs} after the fix (${r.tris} triangles)` : ''}`);
     for (const e of r.examples) console.log('   ', e);
   }
 }

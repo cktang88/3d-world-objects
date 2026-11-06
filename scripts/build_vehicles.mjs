@@ -13,6 +13,7 @@ import { NodeIO, getBounds, PropertyType } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { dedup, flatten, join, weld, simplify, prune, textureCompress, meshopt, resample, sparse } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer';
+import { fixFile } from './coplanar-scan.mjs';
 import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
@@ -138,6 +139,10 @@ async function main() {
       );
       const file = path.join(OUT, `${cfg.id}${lod ? '_lod' + lod : ''}.glb`);
       await io.write(file, doc);
+      // no coplanar overlapping triangles (z-fighting: "two textures overlapping"): scan and fix every file
+      const zf = await fixFile(file);
+      if (zf.after.pairs) throw new Error(`${file}: ${zf.after.pairs} coplanar overlaps left after the fix`);
+      if (zf.first.pairs) console.log(cfg.id, 'lod', lod, `z-fight fix: ${zf.first.pairs} overlapping pairs -> 0`);
       const sz2 = getBounds(scene);
       console.log(cfg.id, 'lod', lod, 'tris', tris, '->', count(root), 'mats', root.listMaterials().length, 'size', sz2.max.map((v, i) => (v - sz2.min[i]).toFixed(2)).join('x'), (fs.statSync(file).size / 1024) | 0, 'KB');
     }
