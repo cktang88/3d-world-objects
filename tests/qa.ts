@@ -11,10 +11,11 @@ import * as THREE from 'three';
 import type { Rect } from '../src/level';
 
 type Fn = () => void | Promise<void>;
-const tests: { name: string; fn: Fn; only?: boolean }[] = [];
+const tests: { name: string; fn: Fn; only?: boolean; timeout?: number }[] = [];
 const filter = process.env.QA_TEST ? new RegExp(process.env.QA_TEST, 'i') : null;
 
-export function test(name: string, fn: Fn) { tests.push({ name, fn }); }
+/** opts.timeout: a longer per-test limit (ms) for a test that must cycle real builds (still under the 45 s file cap) */
+export function test(name: string, fn: Fn, opts: { timeout?: number } = {}) { tests.push({ name, fn, timeout: opts.timeout }); }
 
 export class QAError extends Error {}
 export function fail(msg: string): never { throw new QAError(msg); }
@@ -144,7 +145,8 @@ setTimeout(async () => {
     try {
       // hard per-test limit (QA_TEST_TIMEOUT ms, default 20 s): nothing may hang
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([t.fn(), new Promise((_, rej) => (timer = setTimeout(() => rej(new QAError(`timed out after ${TIMEOUT} ms`)), TIMEOUT)))]);
+      const lim = Math.max(TIMEOUT, t.timeout ?? 0);
+      await Promise.race([t.fn(), new Promise((_, rej) => (timer = setTimeout(() => rej(new QAError(`timed out after ${lim} ms`)), lim)))]);
       clearTimeout(timer);
       pass++;
       console.log(`  PASS ${t.name} (${Math.round(performance.now() - s)} ms)`);

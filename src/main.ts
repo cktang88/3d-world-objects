@@ -35,6 +35,7 @@ const PROBE_PEDCAR = new URLSearchParams(location.search).get('probe') === 'pedc
 import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
 import { Vertical } from './vertical';
 import { preloadFleet } from './nyc/vehicleFleet';
+import { enableMemTracker, installMemProbe, memTrackChildren, memTrackerOn } from './dispose';
 
 // ---------------------------------------------------------------- renderer
 
@@ -43,6 +44,10 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
+// window.__mem(): GPU/heap counts; ?mem=1 also tracks live geometries/materials/textures by owner (src/dispose.ts)
+installMemProbe(renderer);
+if (new URLSearchParams(location.search).has('mem')) enableMemTracker();
+let memTick = 0;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // AgX keeps hue in bright sunlit/neon areas instead of ACES' skew to yellow/cyan; ?tm= to compare
 renderer.toneMapping = ({ aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping } as Record<string, THREE.ToneMapping>)[new URLSearchParams(location.search).get('tm') ?? ''] ?? THREE.AgXToneMapping;
@@ -744,6 +749,7 @@ function frame() {
     requestAnimationFrame(frame);
     return;
   }
+  if (memTrackerOn() && ++memTick % 120 === 0) memTrackChildren(scene);
   if (level && !transitioning) {
     const active = started || coarse;
     player.update(dt, seam.colliders(level.colliders(player.pos), player.pos), !active || infoOpen);

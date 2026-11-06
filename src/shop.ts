@@ -10,7 +10,7 @@ import { loadPools } from './museumData';
 import { loadRemote, isRebuilt, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { SHOPS } from './nyc';
 import { bakeSteps } from './shopkit/bake';
-import { loadOriginal } from './detail';
+import { loadOriginal, releaseOriginal } from './detail';
 import { Kit, M, quad, surfMat, lit, type Seg, type Container } from './shopkit/kit';
 import * as F from './shopkit/fixtures';
 import { dropTile, tinTile, textTex } from './shopkit/tex';
@@ -101,6 +101,8 @@ export class ShopLevel implements Level {
   private alive = true;
   /** dispose(): stop waiting for stock models */
   private stopWaiting: (() => void) | null = null;
+  /** originals (detail.ts cache) in use here */
+  private originals: THREE.Object3D[] = [];
   private models: RemoteModel[] = [];
   /** triangles we are willing to spend on products (sand3d instances and swapped-in originals) */
   private triBudget = SHOP_BUDGET.tris;
@@ -837,7 +839,9 @@ export class ShopLevel implements Level {
     for (const b of boxes) this.portalFor(e, b);
     // then the original textured model, if this product has one and the budget allows
     loadOriginal(e.id, e.og, p.size, { prio: 50 + prio, texMax: 512 }).then((orig) => {
-      if (!orig || !this.alive) return;
+      if (!orig) return;
+      if (!this.alive) return releaseOriginal(orig);
+      this.originals.push(orig); // detail.ts refcounts the cached original: released in dispose()
       // originals made of many separate meshes would multiply draw calls across every facing
       let meshes = 0, tris = 0;
       orig.traverse((o) => {
@@ -947,6 +951,7 @@ export class ShopLevel implements Level {
     disposeTree(this.group); // owned geometry, instance buffers, owned materials; marks the tree disposed
     for (const m of this.models) disposeModel(m.object);
     this.models.length = 0;
+    for (const o of this.originals.splice(0)) releaseOriginal(o);
   }
 }
 

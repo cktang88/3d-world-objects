@@ -248,6 +248,29 @@ interface Loaded {
   box: THREE.Box3;
 }
 const modelCache = new Map<string, Promise<Loaded>>();
+/** the copies handed out per cached model (weak: a dropped copy does not keep its model alive) */
+const copies = new Map<string, WeakRef<THREE.Object3D>[]>();
+/** cached models kept with no copy in use; past this the least recently used unused ones are freed */
+const UNUSED_MAX = 24;
+/** is any copy of this model still in a live scene? (disposeTree marks a dropped level's nodes disposed) */
+function inUse(key: string) {
+  const list = (copies.get(key) ?? []).filter((r) => {
+    const o = r.deref();
+    return !!o && !o.userData.disposed;
+  });
+  copies.set(key, list);
+  return list.length > 0;
+}
+/** free the GPU data of cached models nobody uses, oldest first, beyond UNUSED_MAX */
+function trimModels() {
+  const unused = [...modelCache.keys()].filter((k) => !inUse(k));
+  for (const key of unused.slice(0, Math.max(0, unused.length - UNUSED_MAX))) {
+    const p = modelCache.get(key)!;
+    modelCache.delete(key);
+    copies.delete(key);
+    p.then((l) => disposeDeep(l.scene), () => undefined);
+  }
+}
 
 async function parseGltf(data: ArrayBuffer | string, path: string): Promise<THREE.Object3D> {
   const l = gltf();
@@ -328,8 +351,14 @@ export async function loadLibraryModel(e: LibraryEntry, opts: LoadOptions = {}):
     });
     modelCache.set(key, p);
     p.catch(() => modelCache.delete(key));
+    trimModels();
+  } else {
+    modelCache.delete(key);
+    modelCache.set(key, p); // LRU bump
   }
   const { scene, box } = await p;
+  // freed while we waited (trimModels): load it afresh
+  if (modelCache.get(key) !== p) return loadLibraryModel(e, opts);
   const raw = box.getSize(new THREE.Vector3());
   const rawMax = Math.max(raw.x, raw.y, raw.z, 1e-6);
   let s = 1;
@@ -347,6 +376,9 @@ export async function loadLibraryModel(e: LibraryEntry, opts: LoadOptions = {}):
   g.userData.library = e;
   g.userData.attribution = attribution(e);
   g.userData.size = raw.clone().multiplyScalar(s);
+  const list = copies.get(key) ?? [];
+  list.push(new WeakRef(inner));
+  copies.set(key, list);
   return g;
 }
 
@@ -355,5 +387,6 @@ export async function evictLibraryModel(e: LibraryEntry, opts: LoadOptions = {})
   const key = cacheKey(e, opts);
   const p = modelCache.get(key);
   modelCache.delete(key);
+  copies.delete(key);
   if (p) disposeDeep((await p).scene);
 }

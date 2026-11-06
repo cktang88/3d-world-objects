@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * Freeing GPU resources, and a dev-only leak tracker.
  *
- * Ownership rules used across the game (see docs/research/memory.md):
+ * Ownership rules used across the game:
  * - geometry is disposed with its tree only when the mesh says it owns it (`userData.owned`, set by
  *   the procedural builders). Shared unit shapes and loader-cache geometry are not owned.
  * - materials and textures are shared through caches (build.ts `mat`, textures.ts, pbr.ts, atlases)
@@ -174,4 +174,10 @@ export function installMemProbe(renderer: { info: THREE.WebGLRenderer['info'] })
       tracked: enabled ? memCounts() : null,
     };
   };
+}
+
+/** tracker on: register what each top-level child of `root` (e.g. the scene) holds, owner = its name */
+export function memTrackChildren(root: THREE.Object3D) {
+  if (!enabled) return;
+  for (const c of root.children) memTrack(c, c.name || c.type);
 }

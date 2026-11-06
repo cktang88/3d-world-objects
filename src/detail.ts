@@ -158,6 +158,8 @@ export async function loadOriginal(id: string, og: number | undefined, fit: THRE
     trim();
   }
   const c = await p;
+  // trimmed (and disposed, its bitmaps closed) while we waited: load it afresh
+  if (c && cache.get(id) !== p) return loadOriginal(id, og, fit, opts);
   if (!c || c.tris > MAX_TRIS_EACH) {
     failed.add(id);
     return null;
@@ -178,7 +180,11 @@ export async function loadOriginal(id: string, og: number | undefined, fit: THRE
 export function releaseOriginal(g: THREE.Object3D) {
   const id = g.userData.originalOf as string | undefined;
   if (!id) return;
-  cache.get(id)?.then((c) => c && c.users--);
+  delete g.userData.originalOf; // once per copy
+  cache.get(id)?.then((c) => {
+    if (c) c.users--;
+    trim();
+  });
 }
 
 const CACHE_MAX = 60;
@@ -201,7 +207,11 @@ export function disposeDeep(o: THREE.Object3D) {
     if (!m.isMesh) return;
     m.geometry.dispose();
     for (const mt of Array.isArray(m.material) ? m.material : [m.material]) {
-      for (const v of Object.values(mt)) if (v instanceof THREE.Texture) v.dispose();
+      for (const v of Object.values(mt))
+        if (v instanceof THREE.Texture) {
+          v.dispose();
+          (v.image as ImageBitmap | undefined)?.close?.(); // decoded bitmaps live outside the JS heap
+        }
       mt.dispose();
     }
   });
@@ -234,6 +244,8 @@ export function updateDetail(player: THREE.Vector3, radius: number) {
   for (let i = tracked.length - 1; i >= 0; i--) {
     if (!tracked[i].holder.userData.disposed) continue;
     shownTris -= (tracked[i].holder.userData.originalTris as number) || 0;
+    // its level is gone: let go of the shared original so the cache can free it
+    if (tracked[i].original) releaseOriginal(tracked[i].original!);
     tracked.splice(i, 1);
   }
   if (shownTris < 0) shownTris = 0;

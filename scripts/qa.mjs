@@ -43,7 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
-  zfight: ['zfight'], flicker: ['zfight'], memory: ['memory'], mem: ['memory'], leaks: ['memory'],
+  zfight: ['zfight'], flicker: ['zfight'], memory: ['memory', 'memory-city'], mem: ['memory', 'memory-city'], leaks: ['memory', 'memory-city'],
   meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],
   museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
@@ -51,7 +51,7 @@ const AREAS = {
 const SRC_MAP = [
   [/^tests\/(qa|shim|env|world)\.ts$|^scripts\/qa\.mjs$|^src\/(level|build|rng|detail)\.ts$/, ['*']],
   [/^tests\/(.+)\.test\.ts$/, (m) => [m[1]]],
-  [/^tests\/heap\.ts$|^src\/dispose\.ts$/, ['memory']],
+  [/^tests\/heap\.ts$|^src\/dispose\.ts$/, ['memory', 'memory-city']],
   [/^src\/nyc\/people/, ['people']],
   [/^src\/nyc\/ground/, ['ground']],
   [/^src\/rooms\/vertical/, ['vertical']],
