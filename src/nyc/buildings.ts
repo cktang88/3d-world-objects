@@ -24,6 +24,21 @@ export { SHOPS } from './buildings-shop';
 
 export type BType = 'brownstone' | 'tenement' | 'prewar' | 'midrise' | 'tower' | 'castiron';
 
+/**
+ * A building's outline for occlusion culling and HLOD proxies (src/nyc/occlusion.ts, hlod.ts):
+ * `rect` its footprint (block-local, like colliders), `h` the full height to the roof/cornice
+ * (not water towers or masts), `top` the street-wall height (top of the lowest full-footprint mass,
+ * below any setbacks), `side` the street front. `tiers` lists setback masses above it.
+ */
+export interface Hull {
+  rect: Rect;
+  h: number;
+  top: number;
+  side: Side;
+  type: BType;
+  tiers?: { rect: Rect; y0: number; y1: number }[];
+}
+
 export interface BCtx {
   rng: Rng;
   group: THREE.Group;
@@ -42,13 +57,15 @@ export interface BCtx {
   text: TextBatch;
   /** style of the building being generated (storefronts read it) */
   style: BuildingStyle;
+  /** one per building: footprint, full height, street-wall height (occlusion / HLOD contract) */
+  hulls: Hull[];
   /** facade groups inside stat (their unit boxes are instanced by finishBuildings) */
   faceGroups: THREE.Object3D[];
 }
 
 export function makeCtx(rng: Rng, group: THREE.Group, stat: THREE.Group, cx: number, cz: number, seed: number): BCtx {
   const fine = new THREE.Group();
-  return { rng, group, stat, fine, colliders: [], portals: [], cx, cz, seed, doors: [], win: new WindowBatch(), shop: new ShopGlass(), text: new TextBatch(), faceGroups: [], style: {} };
+  return { rng, group, stat, fine, colliders: [], portals: [], cx, cz, seed, doors: [], win: new WindowBatch(), shop: new ShopGlass(), text: new TextBatch(), faceGroups: [], style: {}, hulls: [] };
 }
 
 /** bake the block's buildings and add the instanced windows and shop glass */
@@ -1036,6 +1053,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   }
   rooftopClutter(stat, fine, r, roofY, rng, type === 'brownstone' ? rng.int(0, 1) : rng.int(1, 3));
   colliders.push({ ...r });
+  ctx.hulls.push({ rect: { ...r }, h, top: roofY, side: front, type });
 }
 
 function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean, addr: string, floors: number, type: BType, style: string) {
@@ -1071,6 +1089,7 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
   let rr = { ...r };
   let y = 0;
   const tiers = rng.int(1, 3);
+  const hullTiers: { rect: Rect; y0: number; y1: number }[] = [];
   for (let t = 0; t < tiers; t++) {
     const th = t === tiers - 1 ? h - y : (h - y) * rng.range(0.45, 0.65);
     for (const s of sides) {
@@ -1114,6 +1133,7 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
         }
       }
     }
+    hullTiers.push({ rect: { ...rr }, y0: y, y1: y + th });
     roof(stat, rr, y + th);
     parapet(stat, rr, y + th, 1.2, finM, finM);
     rooftopClutter(stat, ctx.fine, rr, y + th, rng, 3);
@@ -1124,4 +1144,5 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
   }
   if (rng.chance(0.5)) C(stat, M.iron(), 0.12, rng.range(8, 20), (rr.minX + rr.maxX) / 2, y, (rr.minZ + rr.maxZ) / 2);
   colliders.push({ ...r });
+  ctx.hulls.push({ rect: { ...r }, h: y, top: hullTiers[0].y1, side: front, type: 'tower', tiers: hullTiers });
 }

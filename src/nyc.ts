@@ -8,7 +8,7 @@ import { Pedestrians } from './nyc/people';
 export { avenueName, streetName };
 export { SHOPS } from './nyc/buildings';
 export { setNight } from './nyc/buildings';
-import { building, makeCtx, finishBuildings, setBlockDetail, setNight as setBuildingNight, type BCtx } from './nyc/buildings';
+import { building, makeCtx, finishBuildings, setBlockDetail, setNight as setBuildingNight, type BCtx, type Hull } from './nyc/buildings';
 // lighting.ts drives the time of day: lit rooms, shop interiors and signs follow it
 onTimeChange((_t, n) => setBuildingNight(n));
 setBuildingNight(getNight());
@@ -28,6 +28,8 @@ interface Chunk {
   group: THREE.Group;
   colliders: Rect[];
   portals: Portal[];
+  /** building outlines in world coordinates (occlusion / HLOD) */
+  hulls?: Hull[];
 }
 
 export class NycLevel implements Level {
@@ -60,6 +62,12 @@ export class NycLevel implements Level {
     this.peds = new Pedestrians(this.group, this.seed);
   }
 
+  /** building outlines of every streamed chunk, world coordinates, keyed by chunk "cx,cz" */
+  hulls(): Map<string, Hull[]> {
+    const m = new Map<string, Hull[]>();
+    for (const [k, ch] of this.chunks) m.set(k, ch.hulls ?? []);
+    return m;
+  }
   colliders() {
     return this.nearCols.concat(this.traffic.rects());
   }
@@ -135,6 +143,7 @@ export class NycLevel implements Level {
     const ox = cx * AX, oz = cz * SZ;
     ch.group.position.set(ox, 0, oz);
     for (const c of ch.colliders) { c.minX += ox; c.maxX += ox; c.minZ += oz; c.maxZ += oz; }
+    for (const hl of ch.hulls ?? []) for (const rr of [hl.rect, ...(hl.tiers ?? []).map((t) => t.rect)]) { rr.minX += ox; rr.maxX += ox; rr.minZ += oz; rr.maxZ += oz; }
     for (const p of ch.portals) {
       p.box.translate(new THREE.Vector3(ox, 0, oz));
       p.returnPos?.add(new THREE.Vector3(ox, 0, oz));
@@ -224,7 +233,7 @@ export class NycLevel implements Level {
       const m = o as THREE.Mesh;
       if (m.isMesh && m.geometry !== unitBox && m.geometry !== unitCyl && m.geometry !== unitSphere) m.geometry.dispose();
     });
-    return { group, colliders, portals };
+    return { group, colliders, portals, hulls: ctx.hulls };
   }
 
   // ------------------------------------------------------------ street furniture
