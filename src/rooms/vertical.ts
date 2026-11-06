@@ -1632,11 +1632,13 @@ export class FloorLevel implements Level, VCore {
     }
     const cx = 0, cz = (zA + zB) / 2;
     for (let i = 0; i < 160; i++) {
-      const a = r.range(0, Math.PI * 2), dist = r.range(22, 260);
+      const a = r.range(0, Math.PI * 2), dist = r.range(34, 300);
       const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       if (Math.abs(x) < W / 2 + 10 && z > zA - 10 && z < zB + 10) continue;
       const w = r.range(10, 26), dd = r.range(10, 26);
-      const h = r.chance(0.12) ? r.range(80, 220) : r.range(12, 60);
+      // the neighbours across the street are about as tall as this building; towers further off
+      const own = -street;
+      const h = dist < 70 ? r.range(Math.max(8, own - 8), own + 10) : r.chance(0.15) ? r.range(80, 220) : r.range(12, 60);
       const m2 = r.pick(matsF);
       k.box(m2, w, h, dd, x, street, z, Math.round(a / (Math.PI / 2)) * (Math.PI / 2), 'world', [1 / 12, 1 / 12.8]);
       k.box(mat('#4a4744', { rough: 0.95 }), w, 0.3, dd, x, street + h, z, Math.round(a / (Math.PI / 2)) * (Math.PI / 2));

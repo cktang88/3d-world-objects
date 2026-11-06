@@ -63,3 +63,32 @@ Elevator cab 1.6 x 1.4 x 2.4 m inside, door 0.95–1.1 m clear, two leaves.
   panel (or the number keys) picks a floor, the doors close, the destination is prefetched and the
   ride lasts until it is built (or the travel time, whichever is longer); then the level switches
   behind the closed doors and they open onto the new floor.
+
+## Houses (brownstones)
+
+A house with `floors > 1` gets a `HouseCore` (src/rooms/vertical.ts) through marked hooks in
+src/interior.ts. It has the same footprint on every floor (W/D from the seed) and a stair hall
+behind the back wall, with its doorway 1.05 m from the -x corner, where no BSP wall ever ends. The
+stair has wood treads, white risers and walnut rails, and closed doors on far floors. Each floor
+has 12 point lights, so climbing never recompiles shaders. The old in-room stair portal (a fade to
+the next floor) is gone. Any level that exposes `vcore` works with src/vertical.ts.
+
+## Checks and numbers
+
+- `npm run qa -- vertical` (tests/vertical.test.ts) runs on each building type. It checks the
+  rise (0.17–0.19 m), run (0.25–0.28 m) and flight width (≥ 0.95 m). It walks from the street
+  door up two floors and back, finds no flight down at the lobby, climbs to the roof and out of
+  the bulkhead, finds no flight up from the roof, reaches every door, and checks determinism.
+  A floor of a walk-up has about 50 meshes and 21k triangles, all storeys of the stair included.
+- `npm run qa -- vertical-play` (tests/vertical-play.test.ts) drives the real Seamless + Vertical +
+  Player at 60 Hz:
+  - a walk-up, lobby to roof and back: 12 one-frame switches and no synchronous ("forced") builds;
+    the cache stays at 8 levels or fewer
+  - the pre-war elevator: called, opened, floor chosen, ridden, arrived, walked out
+  - floor → apartment (prebuilt) → cells and containers → back to the same cached floor
+  - a 4-floor brownstone climbed to the top and back
+- A floor switch on the stair costs about 1 ms in the browser (`__world.vert.stats.maxSwitchMs`):
+  nothing is built, and the light count stays the same.
+- A floor builds in about 10 slices of 1–20 ms in node (the first slice builds the building's
+  stair column, and later floors reuse it). The slowest slices in the halls come from the
+  apartments that seamless.ts prebuilds when you face their doors (InteriorLevel, 30–300 ms in node).
