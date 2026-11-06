@@ -38,7 +38,7 @@ const t0 = performance.now();
 
 /** areas -> test files (tests/<name>.test.ts): `npm run qa -- people` runs tests/people.test.ts */
 const AREAS = {
-  nyc: ['nyc', 'ground'], ground: ['ground'], streets: ['nyc', 'ground'], buildings: ['nyc'],
+  nyc: ['nyc', 'ground'], ground: ['ground'], streets: ['nyc', 'ground'], buildings: ['nyc', 'buildings'],
   districts: ['districts', 'districts-blocks', 'districts-open'],
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
@@ -55,7 +55,8 @@ const SRC_MAP = [
   [/^src\/nyc\/vehicle/, ['vehicles']],
   [/^src\/nyc\/district/, ['districts']],
   [/^src\/nyc\/common\.ts$/, ['nyc', 'people', 'vehicles', 'districts']],
-  [/^src\/nyc\/buildings-shop\.ts$/, ['nyc', 'shop']],
+  [/^src\/nyc\/buildings-shop\.ts$/, ['nyc', 'buildings', 'shop']],
+  [/^src\/nyc\/buildings/, ['nyc', 'buildings']],
   [/^src\/(nyc\.ts|nyc\/)/, ['nyc']],
   [/^src\/(shop\.ts|shopkit\/)/, ['shop']],
   [/^src\/(interior\.ts|rooms\/)/, ['interior']],

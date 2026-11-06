@@ -591,7 +591,7 @@ function fireEscape(F: Face, uc: number, w: number, levels: number[], top: numbe
     // stairs up to the next balcony, alternating direction
     if (i < levels.length - 1) {
       const fh = levels[i + 1] - y;
-      const run = Math.min(w - 0.7, fh * 0.62);
+      const run = fireStairRun(w, fh);
       const dir = i % 2 ? -1 : 1;
       const sa = dir > 0 ? u0 + 0.25 : u1 - 0.25; // foot of the stair
       const len = Math.hypot(run, fh);
@@ -631,9 +631,19 @@ function fireEscape(F: Face, uc: number, w: number, levels: number[], top: numbe
 // ---------------------------------------------------------------- residential entrances
 
 /** brownstone stoop to the parlour floor: stone steps between solid cheek walls, iron rails */
+/** steps of a stoop up to a parlour floor `parlor` m above the pavement */
+export function stoopSteps(parlor: number) {
+  const n = Math.round(parlor / 0.18);
+  return { n, rise: parlor / n, tread: 0.28, land: 0.9, length: 0.9 + n * 0.28 };
+}
+/** horizontal run of a fire-escape stair between balconies fh apart on a w-wide escape (~60°) */
+export function fireStairRun(w: number, fh: number) {
+  return Math.min(w - 0.5, fh * 0.6);
+}
+
 function stoop(F: Face, uc: number, parlor: number, stoneM: THREE.Material, tint: string, rail: THREE.Material) {
-  const n = Math.round(parlor / 0.19);
-  const rise = parlor / n, tread = 0.3, w = 1.9, land = 1.1;
+  const { n, rise, tread, land } = stoopSteps(parlor);
+  const w = 1.9;
   const run = n * tread;
   // landing at the door, then the flight down towards the street
   PB(F.g, stoneM, w + 0.5, parlor, land, uc, 0, land / 2, tint);
@@ -806,7 +816,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   if (type === 'tower') return tower(ctx, r, front, floors, fm, tint, addr);
 
   // ---- vertical layout
-  const parlor = type === 'brownstone' ? rng.range(1.5, 1.9) : 0;
+  const parlor = type === 'brownstone' ? rng.range(1.4, 1.7) : 0;
   const ground = type === 'brownstone' ? parlor : store ? (type === 'castiron' ? 4.6 : 4.3) : type === 'prewar' ? 4.4 : 3.5;
   const fh = type === 'castiron' ? 4.0 : type === 'brownstone' ? 3.3 : type === 'tenement' ? 3.05 : 3.15;
   // floor levels above the ground floor (brownstone: parlour floor is taller)
@@ -899,13 +909,29 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
     // ---- ground floor
     const groundTint = type === 'prewar' ? '#e3dccb' : tint;
     if (isFront && store) {
-      // storefronts take the whole ground floor between piers
-      const nS = Math.max(1, Math.min(3, Math.floor((L - 0.6) / 5.5)));
+      // the walk-up's own street door in a narrow bay at one end, shops in the rest
       const pier = 0.45;
-      const span = (L - pier * 2) / nS;
-      F.cut(-L / 2 + pier, L / 2 - pier, 0, ground - 0.55);
+      const walkup = type !== 'castiron' || rng.chance(0.5);
+      const dbay = walkup ? 1.75 : 0;
+      const dEnd = rng.chance(0.5) ? -1 : 1;
+      let a0 = -L / 2 + pier, a1 = L / 2 - pier;
+      if (walkup) {
+        const du = dEnd < 0 ? a0 + dbay / 2 : a1 - dbay / 2;
+        if (dEnd < 0) a0 += dbay + 0.3; else a1 -= dbay + 0.3;
+        PB(F.g, type === 'castiron' ? fm : stoneMat(), 0.3, ground - 0.55, 0.12, dEnd < 0 ? a0 - 0.15 : a1 + 0.15, 0, 0.06, type === 'castiron' ? tint : '#d8d0bf');
+        const stepM = mat('#8f8b84', { rough: 0.9 });
+        B(F.g, stepM, dbay, 0.3, 0.32, du, 0, 0.16);
+        doorway(F, du, 0.3, 1.15, Math.min(2.8, ground - 0.85), rng.pick(['#2a2a2a', '#3b2414', '#1d2a22', '#5a3a2a', '#6a6d70']), 'plain', undefined, addr.split(' ')[0]);
+        F.cut(dEnd < 0 ? -L / 2 + pier : a1 + 0.3, dEnd < 0 ? a0 - 0.3 : L / 2 - pier, Math.min(2.8, ground - 0.85) + 0.3, ground - 0.55);
+        // transom over the residential door: glazed panel lit from the hall
+        ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(du - dbay / 2 + 0.05, Math.min(2.8, ground - 0.85) + 0.35, -0.1)), dbay - 0.1, ground - 0.6 - Math.min(2.8, ground - 0.85) - 0.4, 15, 3, 0.3, 1);
+        portalDoor(ctx, F, du, 0.8, alongX, addr, floors, type, rng.pick(['apartment', 'apartment', 'office']));
+      }
+      const nS = Math.max(1, Math.min(3, Math.floor((a1 - a0) / 5.0)));
+      const span = (a1 - a0) / nS;
+      F.cut(a0, a1, 0, ground - 0.55);
       for (let k = 0; k < nS; k++) {
-        const s0 = -L / 2 + pier + span * k, s1 = s0 + span;
+        const s0 = a0 + span * k, s1 = s0 + span;
         storefront(ctx, F, s0 + (k ? 0.12 : 0), s1 - (k < nS - 1 ? 0.12 : 0), ground - 0.55, addr, type);
         if (k < nS - 1) PB(F.g, type === 'castiron' ? fm : stoneMat(), 0.3, ground - 0.55, 0.12, s1, 0, 0.06, type === 'castiron' ? tint : '#d8d0bf');
       }
@@ -928,7 +954,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       B(F.g, mat('#1e1a16', { rough: 0.6 }), 0.9, Math.min(1.9, parlor) - 0.15, 0.05, du, 0, -0.3, false);
       doorway(F, du, parlor, 1.35, 2.7, rng.pick(['#3b2414', '#2a1a10', '#1d1d1d', '#4a2c1a']), 'hood', tint, addr.split(' ')[0]);
       stoop(F, du, parlor, brownMat(), tint, M.iron());
-      colliders.push(F.rectOf(du - 1.2, du + 1.2, 0, 1.1 + Math.round(parlor / 0.19) * 0.3 + 0.3));
+      colliders.push(F.rectOf(du - 1.2, du + 1.2, 0, stoopSteps(parlor).length + 0.3));
       // areaway railing in front of the basement
       const ar = 1.6, au0 = du + 1.3, au1 = L / 2 - 0.05;
       if (au1 - au0 > 1) {
@@ -939,7 +965,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
         for (let z = 0.1; z < ar; z += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, au1, 0.1, z, false);
         colliders.push(F.rectOf(au0, au1, 0, ar + 0.1));
       }
-      portalDoor(ctx, F, du, 1.1 + Math.round(parlor / 0.19) * 0.3 + 0.5, alongX, addr, floors, 'brownstone', 'house');
+      portalDoor(ctx, F, du, stoopSteps(parlor).length + 0.5, alongX, addr, floors, 'brownstone', 'house');
     } else if (isFront) {
       const grilles = type !== 'prewar' && rng.chance(0.6);
       // residential entrance on the ground floor, windows either side
