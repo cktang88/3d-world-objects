@@ -124,6 +124,61 @@ const FULL_SCANS = 3;
 const phMat = new THREE.MeshBasicMaterial({ color: '#ffe9b0', wireframe: true, transparent: true, opacity: 0.35 });
 const phGeo = new THREE.IcosahedronGeometry(0.5, 1);
 
+/**
+ * Merge a static model's meshes by material, in the model's own frame: draw calls drop from one
+ * per part to one per material. Geometry shared with a cache (userData.shared) is left alone and
+ * copied; the model's own part geometries are disposed.
+ */
+export function mergeStatic(root: THREE.Object3D, moving: Set<THREE.Object3D> = new Set()) {
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const groups = new Map<string, { mat: THREE.Material | THREE.Material[]; geos: THREE.BufferGeometry[]; meshes: THREE.Mesh[] }>();
+  const movingUnder = (o: THREE.Object3D) => {
+    for (let p: THREE.Object3D | null = o; p && p !== root; p = p.parent) if (moving.has(p)) return true;
+    return false;
+  };
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || (m as unknown as THREE.SkinnedMesh).isSkinnedMesh || Array.isArray(m.material) || movingUnder(m)) return;
+    const g = m.geometry;
+    const sig = Object.keys(g.attributes).sort().join(',') + (g.index ? '|i' : '|n');
+    const key = `${matKey(m.material as THREE.Material)}|${g.getAttribute('color') ? 'c' : ''}`;
+    void sig;
+    let e = groups.get(key);
+    if (!e) groups.set(key, (e = { mat: m.material, geos: [], meshes: [] }));
+    const c = g.clone();
+    c.applyMatrix4(inv.clone().multiply(m.matrixWorld));
+    e.geos.push(c);
+    e.meshes.push(m);
+  });
+  let total = 0;
+  for (const e of groups.values()) total += e.meshes.length;
+  if (total < 4 || groups.size >= total) {
+    for (const e of groups.values()) for (const g of e.geos) g.dispose();
+    return;
+  }
+  const out: THREE.Mesh[] = [];
+  for (const e of groups.values()) {
+    const merged = e.geos.length === 1 ? e.geos[0] : concatGeometries(e.geos);
+    if (!merged) {
+      for (const g of e.geos) g.dispose();
+      return; // leave the model as it was
+    }
+    if (e.geos.length > 1) for (const g of e.geos) g.dispose();
+    const mm = new THREE.Mesh(merged, e.mat);
+    mm.castShadow = e.meshes[0].castShadow;
+    mm.receiveShadow = e.meshes[0].receiveShadow;
+    out.push(mm);
+  }
+  for (const e of groups.values()) for (const m of e.meshes) {
+    if (!m.userData.shared) m.geometry.dispose();
+    m.removeFromParent();
+  }
+  // the merged meshes sit in the model's frame; moving parts (and their nodes) stay where they are
+  for (const m of out) root.add(m);
+  root.updateMatrixWorld(true);
+}
+
 export function easeOut(t: number) {
   return 1 - (1 - t) ** 3;
 }
@@ -460,6 +515,12 @@ export abstract class MuseumBase implements Level {
           if (Math.abs(c.x) > 1e-3 || Math.abs(c.z) > 1e-3 || Math.abs(b.min.y) > 1e-3) mod.object.position.sub(new THREE.Vector3(c.x, b.min.y, c.z));
         }
         holder.remove(placeholder);
+        // one mesh per material: a sand3d piano is ~90 parts. Objects with many joints (88 piano keys)
+        // stop moving; a few joints (a lid, a door) keep their moving parts separate.
+        if (!m.library) {
+          if (mod.animator && mod.animator.joints.length > 6) mod.animator = null;
+          mergeStatic(mod.object, new Set(mod.animator?.joints.map((j) => j.node) ?? []));
+        }
         holder.add(mod.object);
         trackForDetail(holder, mod.object, e.id, e.og, mod.size);
         // the room was planned for m.real: if the model that arrived has another raw size (a
@@ -496,4 +557,50 @@ export abstract class MuseumBase implements Level {
     }
     return slot;
   }
+}
+
+/** materials that look the same share a key (a GLB gives every part its own material instance) */
+function matKey(m: THREE.Material) {
+  const s = m as THREE.MeshStandardMaterial & { sheen?: number; transmission?: number; clearcoat?: number };
+  if (!s.isMeshStandardMaterial) return m.uuid;
+  const t = (x: THREE.Texture | null) => (x ? x.source.uuid : '');
+  return [m.type, s.color.getHexString(), s.roughness.toFixed(2), s.metalness.toFixed(2), s.emissive.getHexString(), s.opacity.toFixed(2), s.transparent, s.side, t(s.map), t(s.normalMap), t(s.roughnessMap), t(s.metalnessMap), t(s.emissiveMap), t(s.alphaMap), s.vertexColors, s.transmission ?? 0, s.clearcoat ?? 0, s.sheen ?? 0, m.customProgramCacheKey?.() ?? ''].join('|');
+}
+
+/** position + normal (+ uv when all have it) of several geometries in one, indexed (robust where mergeGeometries refuses) */
+function concatGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
+  const uv = geos.every((g) => g.getAttribute('uv'));
+  const col = geos.every((g) => g.getAttribute('color')) ? geos[0].getAttribute('color').itemSize : 0;
+  let nv = 0, ni = 0;
+  for (const g of geos) {
+    const p = g.getAttribute('position');
+    if (!p) return null;
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    nv += p.count;
+    ni += g.index ? g.index.count : p.count;
+  }
+  const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), uvs = uv ? new Float32Array(nv * 2) : null;
+  const cols = col ? new Float32Array(nv * col) : null;
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  let v = 0, i = 0;
+  for (const g of geos) {
+    const p = g.getAttribute('position'), n = g.getAttribute('normal'), t = g.getAttribute('uv'), c = g.getAttribute('color');
+    for (let k = 0; k < p.count; k++) {
+      pos[(v + k) * 3] = p.getX(k); pos[(v + k) * 3 + 1] = p.getY(k); pos[(v + k) * 3 + 2] = p.getZ(k);
+      nrm[(v + k) * 3] = n.getX(k); nrm[(v + k) * 3 + 1] = n.getY(k); nrm[(v + k) * 3 + 2] = n.getZ(k);
+      if (uvs && t) { uvs[(v + k) * 2] = t.getX(k); uvs[(v + k) * 2 + 1] = t.getY(k); }
+      if (cols && c) for (let q = 0; q < col; q++) cols[(v + k) * col + q] = c.getComponent(k, q);
+    }
+    if (g.index) for (let k = 0; k < g.index.count; k++) idx[i++] = g.index.getX(k) + v;
+    else for (let k = 0; k < p.count; k++) idx[i++] = v + k;
+    v += p.count;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  if (uvs) out.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  if (cols) out.setAttribute('color', new THREE.BufferAttribute(cols, col));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  out.computeBoundingSphere();
+  return out;
 }
