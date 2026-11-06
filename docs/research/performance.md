@@ -16,7 +16,7 @@ Most of these come from reading the code, so each one should be confirmed with a
 1. **Every scene object is drawn in up to 5 passes.** These are the main pass, the GTAOPass normal/depth pass (`GTAOPass.setGBuffer()` with no textures, so `_renderGBuffer = true` and the scene is re-rendered with `scene.overrideMaterial = normalMaterial`), and 3 CSM cascades (`lighting.ts makeCsm()`, `cascades: 3`, 2048² each, `maxFar 260`). Shadow casters are culled against each cascade frustum, but the near cascades still overlap most of the city around the player. **Draw calls and triangles per frame are therefore roughly 2.5–4× the "on screen" numbers.** This multiplier is the single biggest lever in the project.
    - Side effect: the override `MeshNormalMaterial` drops the `onBeforeCompile` vertex patch in `buildings-win.ts anchored()` (`transformed.xy += aAnchor * aSize`). The GTAO normal buffer therefore sees instanced windows at the wrong size, which is a correctness bug as well as a cost.
 2. **49 chunks are resident and all of them are visible.** `nyc.ts NycLevel.update()` builds rings up to `RX = RZ = 2` (25 chunks) but only removes chunks beyond `RX + 1`, so the ring-3 hysteresis band (another 24 chunks) keeps rendering at full detail. `camera.far = fogFar + 60 = 480 m`. There is no distance-based hiding and no HLOD.
-3. **Parked cars are probably baked with both LODs into chunk static geometry.** In `nyc.ts street()`, `stat.add(carMesh(...))`, and `bake(stat)` (`nyc/common.ts`) traverses every mesh, including both `THREE.LOD` levels from `vehicleFleet.ts fleetObject()`. `vehicleFleet.ts` says near LOD is ~30–75k triangles and far LOD ~6k. With ~10–20 parked cars per block, that is **~0.4–1.5M triangles per chunk, always drawn, in every pass**. If the fleet was not loaded when the chunk was built, a stand-in is baked, and the later `dress()` swaps the children of an orphaned object, so the real model never appears. *Verify first: this alone may account for most of the 10.6M.*
+3. **[Fixed on main in 64a22f6, "parked cars no longer baked into the chunk"; kept here as the rationale]** **Parked cars were baked with both LODs into chunk static geometry.** In `nyc.ts street()`, `stat.add(carMesh(...))`, and `bake(stat)` (`nyc/common.ts`) traverses every mesh, including both `THREE.LOD` levels from `vehicleFleet.ts fleetObject()`. `vehicleFleet.ts` says near LOD is ~30–75k triangles and far LOD ~6k. With ~10–20 parked cars per block, that is **~0.4–1.5M triangles per chunk, always drawn, in every pass**. If the fleet was not loaded when the chunk was built, a stand-in is baked, and the later `dress()` swaps the children of an orphaned object, so the real model never appears. *Verify first: this alone may account for most of the 10.6M.*
 4. **`bake()` de-indexes everything** (`if (g.index) g = g.toNonIndexed()`). Merged chunk meshes have 3 vertices per triangle (unit boxes go from 24 to 36 vertices; smooth cylinders and spheres grow 3–6×). The post-transform vertex cache cannot help, so vertex work is roughly doubled in all 5 passes, and memory and upload size grow too.
 5. **Culling granularity is one chunk.** The merged static meshes, the window `InstancedMesh`es (`buildings-win.ts WindowBatch.build`, one per kind per chunk) and the tree batches all have chunk-sized bounding spheres (a 120 × 64 m block, with radius ≈ 70 m plus height). Frustum culling removes whole chunks or nothing.
 6. **Nothing exploits street-canyon occlusion.** Manhattan blocks are lined with continuous street walls: buildings fill the frontage from `-LX` to `LX`, and `nyc.ts block()` adds a backyard core box. From the sidewalk, chunks that are not on the player's street or avenue corridor are almost entirely hidden.
@@ -36,7 +36,7 @@ Columns: win (estimated), cost (engineer-days), risk.
 | # | Recommendation | Win | Cost | Risk | Files |
 |---|---|---|---|---|---|
 | 1 | Measurement harness: per-pass counts, `info.autoReset = false`, headless count script | enables everything else | 1 d | none | `main.ts`, new `src/perf.ts`, new `scripts/perf.mjs` |
-| 2 | Stop baking parked cars into static geometry (keep their LOD, or instance them) | −4…−8M tris (if §0.3 is confirmed) | 0.5 d | low | `nyc.ts street()`, `nyc/vehicles.ts` |
+| 2 | ~~Stop baking parked cars into static geometry~~ (done in 64a22f6; re-measure) | −4…−8M tris | done | — | `nyc.ts street()`, `nyc/vehicles.ts` |
 | 3 | GTAO: reuse the main pass depth (`setGBuffer(depthTexture)`), half resolution, fewer samples | −1 full scene pass (≈ −25–35% draws) | 1 d | low–med | `main.ts` |
 | 4 | Keep `bake()` indexed (`mergeVertices` / indexed merge) | −40–60% vertex work in all passes | 0.5 d | low | `nyc/common.ts bake()`, `rooms/kit.ts flush()` |
 | 5 | Chunk visibility by distance plus HLOD proxies for ring ≥ 2 | −50–70% city draws and tris | 3 d | med | `nyc.ts`, new `nyc/hlod.ts`, `nyc/buildings.ts` (footprint export) |
@@ -254,7 +254,7 @@ Win: −1 scene pass, −30–50% fragment cost. Risk: low.
 
 ### WP2: City chunk pipeline, visibility and occlusion
 **Owns:** `src/nyc.ts`, new `src/nyc/occlusion.ts`, new `src/nyc/hlod.ts`.
-1. **P0:** parked cars go to `group` (not `stat`) so their `THREE.LOD` survives and they are not double-baked. Verify with counts. (One-line call-site change. Later instancing belongs to WP4.)
+1. ~~P0: parked cars out of `stat`~~ (already done on main in 64a22f6). Re-measure the triangle count after it.
 2. Hide ring-3 hysteresis chunks (`visible = false`, keep them resident). Store `cx, cz` on `Chunk` (no `split` per frame).
 3. Analytic per-chunk PVS (§3.2), then the 2.5D occlusion horizon (§3.1) on chunk side-slabs, HLODs and per-chunk dynamic objects.
 4. HLOD proxies per chunk from `ctx.hulls` (provided by WP3). One BatchedMesh for all HLODs. Ring 2: shells plus HLOD windows; ring 3: HLOD only. HLODs as shadow casters for hidden or far chunks.
@@ -294,7 +294,7 @@ Win: −shadow draws, −GPU ms, −VRAM. Risk: medium (shadow artefacts).
 4. Generate LODs for heavy GLB exhibits and products (gltf-transform simplify offline) and make sure `TRI_BAKE` vertex AO is everywhere, so GTAO can be lower indoors.
 Win: −6 shadow passes per frame indoors, no room-change hitches. Risk: low.
 
-**Suggested order:** WP1 steps 1–2 and WP2 step 1 (parked cars) first, since they are hours each and fix the measurement plus the probable biggest triangle sink. Then all six packages run in parallel. The only data contract is WP3 step 2 (`ctx.hulls`) → WP2 step 4. The rest is independent.
+**Suggested order:** WP1 steps 1–2 first, since they take hours and give every other package real counts. Then all six packages run in parallel. The only data contract is WP3 step 2 (`ctx.hulls`) → WP2 step 4. The rest is independent.
 
 ---
 
