@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { FLAGS } from '../flags';
 import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { getNight } from '../lighting';
 
 /**
@@ -143,18 +145,70 @@ const files = new Map<string, Promise<{ scene: THREE.Object3D }>>();
 function file(id: string, lod: 0 | 1 | 2) {
   const url = `${import.meta.env.BASE_URL}assets/vehicles/${id}${lod ? '_lod' + lod : ''}.glb`;
   let f = files.get(url);
-  if (!f) files.set(url, (f = gltf()!.loadAsync(url)));
+  if (!f) files.set(url, (f = lod ? liteFile(`${id}_lod${lod}`, url) : gltf()!.loadAsync(url)));
   return f;
 }
+
+/**
+ * The mid and far LODs only ever use a texture's average colour (merged(): vertex colours), so they are parsed
+ * without decoding a single image: the averages come precomputed (public/assets/vehicles/avg.json, built by
+ * scripts/vehicle_avg.py) and each texture is an empty stand-in carrying its colour. Decoding the models'
+ * little webp images had to queue behind the whole city's textures: the textured models (taxi, Charger,
+ * Suburban, Sprinter) appeared a minute after their files had arrived. The near LOD still loads every image.
+ */
+let avgP: Promise<Record<string, number[][]>> | null = null;
+const avgs = () =>
+  (avgP ??= fetch(`${import.meta.env.BASE_URL}assets/vehicles/avg.json`)
+    .then((r): Promise<Record<string, number[][]>> | Record<string, number[][]> => (r.ok ? r.json() : {}))
+    .catch(() => ({}) as Record<string, number[][]>));
+let lite: GLTFLoader | null = null;
+function liteLoader() {
+  if (!lite) {
+    lite = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    // replaces the built-in EXT_texture_webp handler (same name): no image fetch, no decode
+    lite.register((parser) => ({
+      name: 'EXT_texture_webp',
+      loadTexture(index: number) {
+        const def = parser.json.textures[index];
+        const t = new THREE.Texture();
+        t.userData.src = def.extensions?.EXT_texture_webp?.source ?? def.source;
+        return Promise.resolve(t);
+      },
+    }) as unknown as import('three/examples/jsm/loaders/GLTFLoader.js').GLTFLoaderPlugin);
+  }
+  return lite;
+}
+function liteFile(key: string, url: string): Promise<{ scene: THREE.Object3D }> {
+  return avgs().then((all) => {
+    const list = all[key];
+    // no precomputed colours for this file: the normal loader (decodes its images)
+    if (!list || typeof fetch === 'undefined') return gltf()!.loadAsync(url);
+    return liteLoader().loadAsync(url).then((g) => {
+      g.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (m?.map && m.map.userData.src !== undefined) m.map.userData.avg = list[m.map.userData.src];
+      });
+      return g;
+    });
+  });
+}
 const prepared = new Map<string, Promise<Prepared | null>>();
+/** load timings per model (ms since page start): requested, files parsed, prepared (for QA / the e2e timing check) */
+export const fleetTimings: Record<string, { req: number; files?: number; prep?: number; prepMs?: number; dressed?: number }> = {};
+if (typeof window !== 'undefined') (window as unknown as { __fleetTimings: typeof fleetTimings }).__fleetTimings = fleetTimings;
 /** a model's mid and far LODs (enough to draw it beyond FLEET_LOD.NEAR) */
 export function loadFleet(id: string): Promise<Prepared | null> {
   let p = prepared.get(id);
   if (!p) {
+    const tm = (fleetTimings[id] = { req: Math.round(performance.now()) } as (typeof fleetTimings)[string]);
     p = Promise.all([file(id, 1), file(id, 2)])
       .then(([b, c]) => {
+        tm.files = Math.round(performance.now());
         const lod1 = prepare(b.scene, id);
-        return { id, lod0: [], lod1, lod2: prepare(c.scene, id), wheels: [], brake: null, lamps: lampCards(lod1), nearReady: false } as Prepared;
+        const out = { id, lod0: [], lod1, lod2: prepare(c.scene, id), wheels: [], brake: null, lamps: lampCards(lod1), nearReady: false } as Prepared;
+        tm.prep = Math.round(performance.now());
+        tm.prepMs = tm.prep - tm.files;
+        return out;
       })
       .catch((e) => {
         console.warn('vehicle', id, e);
@@ -474,6 +528,9 @@ const WHEEL_MAT =new THREE.MeshStandardMaterial({ vertexColors: true, metalness:
 const avgCache = new WeakMap<object, THREE.Color>();
 const WHITE = new THREE.Color(1, 1, 1);
 function textureAverage(t: THREE.Texture): THREE.Color {
+  // mid/far LOD textures carry their precomputed average (liteFile) and have no image at all
+  const pre = t.userData.avg as number[] | undefined;
+  if (pre) return new THREE.Color().setRGB(pre[0], pre[1], pre[2], THREE.SRGBColorSpace);
   // ?notex=1 strips the maps anyway, so the flat colour is the material colour alone
   if (FLAGS.notex) return WHITE;
   const key = (t.image as object | null) ?? t;

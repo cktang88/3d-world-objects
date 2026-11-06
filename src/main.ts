@@ -30,6 +30,7 @@ import { Seamless, descKey, doorOf, floorStackStep, type Slot } from './seamless
 import { Lazy, type LazyContainer } from './lazy';
 import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
 import { Vertical } from './vertical';
+import { preloadFleet } from './nyc/vehicleFleet';
 
 // ---------------------------------------------------------------- renderer
 
@@ -56,6 +57,10 @@ initDetail(renderer);
 
 type Quality = 'ultra' | 'high' | 'low';
 const params0 = new URLSearchParams(location.search);
+// ---- vehicles: start the car models (mid + far LODs, ~2 MB) at boot, before the city build floods the image
+// decoder with facade/PBR textures: in the city their parse otherwise finished a minute after the download
+if (!params0.has('lab')) void preloadFleet();
+// ---- end vehicles
 let quality: Quality = (params0.get('quality') as Quality) || 'ultra';
 const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
 // the main pass's depth, shared by both composer buffers, feeds GTAO (no second scene pass)

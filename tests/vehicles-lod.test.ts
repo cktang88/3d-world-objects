@@ -53,3 +53,18 @@ test('before its model loads a car is a car-shaped stand-in (tapered cabin over 
   car.traverse((o) => o.userData.standin && standins++);
   expect(standins === 1, 'an unloaded street car shows one stand-in');
 });
+
+test('mid/far LODs load without decoding images: avg.json has a colour for every image of every _lod1/_lod2 file', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const dir = path.join(process.cwd(), 'public', 'assets', 'vehicles');
+  const avg = JSON.parse(fs.readFileSync(path.join(dir, 'avg.json'), 'utf8')) as Record<string, number[][]>;
+  for (const f of fs.readdirSync(dir).filter((n: string) => /_lod[12]\.glb$/.test(n))) {
+    const b = fs.readFileSync(path.join(dir, f));
+    const json = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString('utf8'));
+    const n = (json.images ?? []).length;
+    const key = f.replace(/\.glb$/, '');
+    expect(Array.isArray(avg[key]) && avg[key].length === n, `${key}: ${avg[key]?.length} colours for ${n} images (rerun scripts/vehicle_avg.py)`);
+    for (const c of avg[key]) expect(c.length === 3 && c.every((v) => v >= 0 && v <= 1), `${key}: colour in range`);
+  }
+});

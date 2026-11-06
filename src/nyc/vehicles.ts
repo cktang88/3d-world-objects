@@ -4,7 +4,7 @@ import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST, CYCLE, SIGNAL } from './common';
 import { laneOpen } from './districts'; // [districts]
-import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, loadFleet, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
+import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, fleetTimings, loadFleet, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
 import { truckMesh } from './vehicleTruck';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
@@ -46,6 +46,7 @@ function startLoading() {
     loadFleet(id).then((p) => {
       if (!p) return;
       ready.set(id, p);
+      if (fleetTimings[id]) fleetTimings[id].dressed = Math.round(performance.now());
       for (let i = waiting.length - 1; i >= 0; i--) {
         const w = waiting[i];
         if (w.id !== id) continue;
