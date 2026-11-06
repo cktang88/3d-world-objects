@@ -1437,7 +1437,7 @@ export class Pedestrians {
     const u = pd.t / CP - 0.5;
     // step down / up the kerb over a short stride instead of snapping
     const e = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) - ch;
-    return CURB * THREE.MathUtils.smoothstep(e, -0.12, 0.25);
+    return CURB * THREE.MathUtils.smoothstep(e, -0.18, 0.35);
   }
   private walk(pd: Ped, dt: number, along: number, across: number) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
