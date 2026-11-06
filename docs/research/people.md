@@ -40,3 +40,11 @@ All free stock photos by Yuta / PAKUTASO, Manhattan, late winter / early spring:
 - Animation: **Quaternius — Universal Animation Library [Standard]**, CC0 (https://quaternius.com/packs/universalanimationlibrary.html). Same skeleton; we use Walk_Loop, Walk_Formal_Loop, Idle_Loop, Idle_Talking_Loop, Jog_Fwd_Loop, Sitting_Idle_Loop. Native walk speed 1.3 m per 1.333 s cycle (0.98 m/s), measured from the root-motion version.
 - Rejected: Mixamo-derived files (three.js Xbot / Michelle / Soldier) — Mixamo licence does not allow redistribution as raw assets. Kenney / older Quaternius modular men — too stylised.
 - No CC0 modern-clothing meshes for this skeleton exist, so clothes are painted on in the shader from the bind pose and inflated along the normal (see `src/nyc/people.ts`).
+
+## What was built (src/nyc/people.ts)
+
+- 84 pedestrians (`Pedestrians`), each a `SkeletonUtils.clone` of the male or female base with its own `AnimationMixer` (Walk_Loop or Walk_Formal_Loop, Idle_Loop, Idle_Talking_Loop). Walk cadence = speed / (0.98 m/s × body scale). Heights 1.76 m / 1.63 m ± 6 %.
+- Clothes painted in the body shader from the bind-pose position: tee, sweater, quilted puffer, open coat with shirt V, hoodie; jeans (twill + thigh fading), trousers, shorts, leggings; belt / cuffs / hem bands. Cloth regions drop the skin normal map and are pushed out along the normal. The superhero build is slimmed in the vertex shader (arms, legs, shoulders, chest depth, neck, trapezius).
+- Separate meshes: knee-length coat skirts skinned to pelvis + thighs, sneakers / boots on the foot bones (feet shrunk inside), hoods, beanies, backpacks with straps, crossbody bags, phones; Quaternius hair and beards on the head bone.
+- Behaviour: walkers on sidewalk lines, keep right when meeting oncoming people, sidestep and slow for the player; people waiting at corners facing the crossing (idle, on the phone with head down, talking), then crossing; companions walking shoulder to shoulder or standing face to face.
+- Perf: shared geometry, one body material per person (one shared program), 2.5k-triangle body LOD beyond 22 m, animation every 2nd / 4th frame beyond 25 / 50 m, shadows within 30 m. Whole crowd ≈ 0.66 M triangles, ≈ 520 meshes, ≈ 0.27 M shadow triangles.
