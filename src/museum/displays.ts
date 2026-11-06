@@ -635,6 +635,85 @@ export function drawers(items: Measured[]): { unit: Unit; rest: Measured[] } {
   };
 }
 
+const WALLPAPERS = ['#7b5b3a', '#4f6146', '#6c3b3b', '#3f4c63', '#8a7a5a', '#5c4a63'];
+
+/**
+ * A period room (Met / V&A period rooms): a three-walled room set behind a rope, papered,
+ * with a rug, a picture and a chandelier, its furniture arranged as if in use.
+ */
+export function periodRoom(items: Measured[], r: Rng): Unit {
+  const sorted = [...items].sort((a, b) => along(b).w * along(b).d - along(a).w * along(a).d);
+  const back = sorted.slice(0, Math.min(2, Math.ceil(sorted.length / 2)));
+  const front = sorted.slice(back.length);
+  const rowW = (row: Measured[]) => row.reduce((s, m) => s + along(m).w, 0) + 0.6 * (row.length + 1);
+  const W = Math.max(4.2, rowW(back), rowW(front));
+  const backD = Math.max(...back.map((m) => along(m).d));
+  const frontD = front.length ? Math.max(...front.map((m) => along(m).d)) : 0;
+  const D = Math.max(3.2, backD + frontD + 1.8);
+  const wallH = Math.max(3, Math.max(...items.map((m) => m.real.y)) + 0.9);
+  const paper = r.pick(WALLPAPERS);
+  const ph = 0.15;
+  return {
+    type: 'room', place: 'floor', w: W + 0.4, d: D + 1.6, h: wallH, items: sorted,
+    focus: new THREE.Vector3(0, 1.0, -0.5), glow: W * 0.55,
+    build(c, f) {
+      const lv = c.lv;
+      const o = f.sub(0, -0.5);
+      const wallM = mat(paper, { rough: 0.9 });
+      const trimM = mat('#efe6d2', { rough: 0.6 });
+      // floor, walls, skirting, cornice
+      lv.bx(mat('#5a3d28', { rough: 0.55 }), W, ph, D, 0, 0, 0, o);
+      lv.bx(wallM, W + 0.2, wallH, 0.1, 0, 0, -D / 2 - 0.05, o);
+      for (const sx of [-1, 1]) lv.bx(wallM, 0.1, wallH, D, (sx * (W + 0.1)) / 2, 0, 0, o);
+      lv.bx(trimM, W, 0.12, 0.03, 0, ph, -D / 2 + 0.015, o);
+      lv.bx(trimM, W + 0.2, 0.14, 0.14, 0, wallH - 0.14, -D / 2, o);
+      for (const sx of [-1, 1]) lv.bx(trimM, 0.14, 0.14, D, (sx * (W + 0.1)) / 2, wallH - 0.14, 0, o);
+      // rug, a picture over the back row, a chandelier
+      lv.bx(mat(r.pick(['#7a2f2a', '#2f4a6a', '#6a5a2a', '#3d5a3a']), { rough: 1 }), W * 0.6, 0.01, D * 0.55, 0, ph, 0.1, o);
+      const pw = Math.min(1.4, W * 0.3);
+      lv.bx(mat('#8a6a2a', { metal: 0.6, rough: 0.4 }), pw + 0.1, pw * 0.75 + 0.1, 0.04, 0, wallH - 0.5 - pw * 0.75, -D / 2 + 0.02, o);
+      lv.bx(mat(r.pick(['#4a5a4a', '#5a4a3a', '#3a4a5a']), { rough: 0.8 }), pw, pw * 0.75, 0.02, 0, wallH - 0.45 - pw * 0.75, -D / 2 + 0.05, o);
+      lv.cy(c.m.brass, 0.01, 0.6, 0, wallH - 0.6, 0, o, true);
+      lv.cy(c.m.brass, 0.25, 0.05, 0, wallH - 0.65, 0, o, true);
+      lv.cy(mat('#fff3d8', { emissive: '#ffe6b8', ei: 2.5 }), 0.18, 0.08, 0, wallH - 0.72, 0, o, true);
+      // furniture: the big pieces against the back wall, the rest in front, facing the room
+      const place = (row: Measured[], z: number) => {
+        const used = row.reduce((s, m) => s + along(m).w, 0);
+        const g = (W - used) / (row.length + 1);
+        let x = -W / 2 + g;
+        for (const m of row) {
+          const a = along(m);
+          lv.exhibit(m, o, x + a.w / 2, ph, z, a.rot, { prio: c.prio() });
+          x += a.w + g;
+        }
+      };
+      place(back, -D / 2 + 0.25 + backD / 2);
+      if (front.length) place(front, -D / 2 + 0.25 + backD + 0.9 + frontD / 2);
+      lv.col(o, 0, 0, W + 0.3, D + 0.1);
+      // a rope across the front
+      const n = Math.max(2, Math.ceil(W / 2));
+      let prev: THREE.Vector3 | null = null;
+      for (let i = 0; i <= n; i++) {
+        const x = -W / 2 + (W * i) / n;
+        lv.cy(c.m.brass, 0.028, 0.95, x, 0, D / 2 + 0.5, o, true);
+        lv.cy(c.m.brass, 0.14, 0.03, x, 0, D / 2 + 0.5, o, true);
+        const p = o.point(x, 0.9, D / 2 + 0.5);
+        if (prev) {
+          const mid = prev.clone().add(p).multiplyScalar(0.5);
+          mid.y -= 0.12;
+          lv.rod(c.m.rope, prev, mid, 0.018);
+          lv.rod(c.m.rope, mid, p, 0.018);
+        }
+        prev = p;
+      }
+      lv.col(o, 0, D / 2 + 0.5, W, 0.1);
+      const lp = labelPanel(c, sorted, 0.6, false, 'A room set');
+      put(c, lp, f, W / 2 - 0.3, 1.0, D / 2 + 0.2, 0, 0.5);
+      lv.bx(c.m.fixture, 0.04, 0.95, 0.04, W / 2 - 0.3, 0, D / 2 + 0.05, f);
+    },
+  };
+}
+
 /** A bench for the visitors (leather on a dark frame, after the V&A / Louvre). */
 export function bench(): Unit {
   return {

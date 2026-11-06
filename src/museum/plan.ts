@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Rng } from '../rng';
 import { Frame } from './base';
-import { along, bench, cluster, drawers, hang, mount, platform, plinth, riser, tableCase, typeKey, vitrine, wallCase, type Unit } from './displays';
+import { along, bench, cluster, drawers, periodRoom, hang, mount, platform, plinth, riser, tableCase, typeKey, vitrine, wallCase, type Unit } from './displays';
 import type { Measured } from './sizes';
 import type { Ceiling, Floor, Style } from './style';
 
@@ -51,8 +51,13 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   buckets.floor.forEach((m, i) => units.push(platform({ st, r }, m, false, barrier, turn * (i % 2 ? 1 : -1))));
   for (const m of buckets.mount) units.push(mount(m));
 
-  // medium things: stepped risers, plinth landscapes or single plinths
+  // medium things: period rooms, stepped risers, plinth landscapes or single plinths
   let med = r.shuffle([...buckets.medium]);
+  if (st.arch === 'period' && med.length >= 3 && r.chance(0.7)) {
+    const n = Math.min(med.length, r.int(3, 5));
+    units.push(periodRoom(med.slice(0, n), r));
+    med = med.slice(n);
+  }
   const leftovers: Measured[] = [];
   while (med.length) {
     const mode = st.medium.includes('riser') && med.length >= 3 && r.chance(0.75) ? 'riser' : st.medium.includes('cluster') && med.length >= 2 && r.chance(0.6) ? 'cluster' : 'plinth';
