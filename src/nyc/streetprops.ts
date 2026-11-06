@@ -604,7 +604,7 @@ export function litterBasket(parent: THREE.Object3D, x: number, z: number, ry = 
     k.add(new THREE.CylinderGeometry(0.25, 0.25, 0.02, 20), Gm, 0, 0.06, 0);
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 0.4;
-      k.add(new THREE.BoxGeometry(0.025, H, 0.012), Gm, Math.cos(a) * 0.272, H / 2 + 0.02, Math.sin(a) * 0.272, 0, -a, 0.045);
+      k.add(new THREE.BoxGeometry(0.025, H, 0.012), Gm, Math.cos(a) * 0.272, H / 2 + 0.02, Math.sin(a) * 0.272, 0, -a, -0.045);
     }
     // liner bag: black plastic folded over the rim
     const bag = mat('#0d0d0e', { rough: 0.3 });
