@@ -25,7 +25,7 @@ export const FLEET: Record<string, FleetModel> = {
   accord: { id: 'accord', len: 4.93, wid: 1.85, paint: true },
   charger: { id: 'charger', len: 5.08, wid: 1.9, paint: true },
   suburban: { id: 'suburban', len: 5.7, wid: 2.0, paint: true },
-  escalade: { id: 'escalade', len: 5.14, wid: 2.05, paint: true },
+  escalade: { id: 'escalade', len: 5.14, wid: 2.05, paint: false },
   explorer: { id: 'explorer', len: 5.05, wid: 2.0, paint: true },
   sprinter: { id: 'sprinter', len: 5.9, wid: 2.0, paint: false },
 };
