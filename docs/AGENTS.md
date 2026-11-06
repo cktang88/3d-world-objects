@@ -44,7 +44,7 @@ Write what you learned to `docs/research/<area>.md` with the image URLs and the 
 
 ## Commits
 
-- **Size:** small and frequent, each a working state: `npx tsc --noEmit -p .` passes and your lab scene renders.
+- **Size:** small and frequent, each a working state: `npx tsc --noEmit -p .` passes, plus only the tests relevant to what you changed (`npm run qa -- <pattern>`). Don't run the full suite or re-render scenes on every commit.
 - **Pushing:** `git fetch origin main && git rebase origin/main && git push origin HEAD:main`. If the push is rejected, rebase and push again. Never force-push `main`.
 - **Messages:** say what changed and why. End with:
 

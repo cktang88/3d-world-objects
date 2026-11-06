@@ -83,5 +83,5 @@ Even a three-car lab takes minutes to render here under load. Full-city counts a
 
 1. Write or extend a `qa` test for the rule. It runs in seconds: make it fail, fix it, make it pass.
 2. Tune looks in a lab scene with tiny screenshots (`--notex --nopost` until materials matter).
-3. Run `tsc` and the relevant `npm run qa -- <area>` before each commit. Commit small, push to main.
+3. Before each commit run `tsc` and only the tests for what you touched (`npm run qa -- <area or file pattern>`). Never run the whole suite per commit. Run the full suite only occasionally, e.g. at the end of a feature, and the coordinator runs it at check-ins. Commit small, push to main.
 4. Only at the end of a feature: one perf count or one full-world shot under the lock.
