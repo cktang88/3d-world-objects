@@ -418,8 +418,8 @@ const propGeo = {
   crossbody: new RoundedBoxGeometry(0.22, 0.16, 0.07, 2, 0.02),
   tote: new RoundedBoxGeometry(0.36, 0.34, 0.1, 2, 0.015),
   phone: new RoundedBoxGeometry(0.075, 0.155, 0.009, 2, 0.006),
-  beanie: new THREE.SphereGeometry(0.112, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
-  cuff: new THREE.CylinderGeometry(0.106, 0.11, 0.05, 20, 1, true),
+  beanie: knitBeanie(),
+  cap: baseballCap(),
   hood: new THREE.SphereGeometry(0.13, 18, 10, Math.PI, Math.PI, 0, Math.PI * 0.62),
   // a raised hood: a shell over the head, open at the face (+z)
   hoodUp: new THREE.SphereGeometry(0.13, 18, 10, Math.PI / 2 + 0.55, Math.PI * 2 - 1.1, 0, Math.PI * 0.62),
@@ -593,6 +593,58 @@ function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeom
   }
   return mergeGeometries(out)!;
 }
+/** lathe a (radius, height) profile around y with radial ribs: `ribs` bumps of `amp` (fraction of r) */
+function lathe(profile: [number, number][], seg: number, ribs = 0, amp = 0) {
+  const pts = profile.map(([r, y]) => new THREE.Vector2(r, y));
+  const g = new THREE.LatheGeometry(pts, seg);
+  if (ribs) {
+    const p = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), z = p.getZ(i);
+      const a = Math.atan2(z, x), k = 1 + amp * Math.cos(a * ribs);
+      p.setX(i, x * k);
+      p.setZ(i, z * k);
+    }
+  }
+  g.computeVertexNormals();
+  return g;
+}
+/** a snug knit beanie, rim at the origin (unit-ish: radius 1 at the rim, ~1.3 tall), with a
+ *  folded, ribbed cuff and a slight slouch toward the back */
+function knitBeanie() {
+  const body = lathe([[1.0, 0], [1.01, 0.3], [0.99, 0.55], [0.93, 0.8], [0.8, 1.02], [0.6, 1.18], [0.34, 1.28], [0.0, 1.31]], 40, 40, 0.012);
+  // slouch: the crown drifts back
+  const p = body.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) p.setZ(i, p.getZ(i) - 0.12 * Math.max(0, p.getY(i) - 0.6) ** 2);
+  body.computeVertexNormals();
+  const cuff = lathe([[0.99, -0.04], [1.075, -0.02], [1.09, 0.2], [1.075, 0.4], [1.0, 0.43]], 40, 40, 0.03);
+  return mergeGeometries([body.toNonIndexed(), cuff.toNonIndexed()])!;
+}
+/** a baseball cap: a low crown (rim at the origin) and a curved brim to the front (+z) */
+function baseballCap() {
+  const crown = lathe([[1.0, 0], [1.0, 0.35], [0.92, 0.65], [0.72, 0.9], [0.4, 1.04], [0.0, 1.08]], 32);
+  const brim = new THREE.CircleGeometry(0.95, 20, 0, Math.PI);
+  brim.rotateX(-Math.PI / 2);
+  const bp = brim.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < bp.count; i++) {
+    const x = bp.getX(i), z = -bp.getZ(i);
+    bp.setXYZ(i, x * 0.95, 0.06 - 0.25 * x * x - 0.1 * z, 0.82 + z * 0.85);
+  }
+  brim.computeVertexNormals();
+  return mergeGeometries([crown.toNonIndexed(), brim.toNonIndexed()])!;
+}
+/** where a hat sits: rim centre (body space), rim half-width / half-depth, tilt (front up) */
+const HAT_FIT: Record<Gender, { y: number; z: number; rx: number; rz: number }> = {
+  male: { y: 1.738, z: -0.014, rx: 0.087, rz: 0.104 },
+  female: { y: 1.684, z: -0.014, rx: 0.083, rz: 0.1 },
+};
+function hatMatrix(g: Gender, kind: 'beanie' | 'cap') {
+  const f = HAT_FIT[g];
+  const h = kind === 'beanie' ? 0.085 : 0.075;
+  return new THREE.Matrix4()
+    .compose(new THREE.Vector3(0, f.y, f.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(kind === 'beanie' ? -0.32 : -0.18, 0, 0)), new THREE.Vector3(1, 1, 1))
+    .multiply(new THREE.Matrix4().makeScale(f.rx, h, f.rz));
+}
 const propMats = new Map<string, THREE.MeshStandardMaterial>();
 function propMat(color: string, rough = 0.8) {
   const k = `${color}|${rough}`;
@@ -692,7 +744,7 @@ export class Person {
       if ((obj as THREE.Mesh).isMesh) this.meshes.push(obj as THREE.Mesh);
       return obj;
     };
-    const hat = r.chance(season === 'mild' ? 0.04 : 0.22);
+    const hat = r.chance(season === 'mild' ? 0.15 : 0.28);
     this.hasHat = hat;
     this.weatherRoll = r.next();
     this.bindInvOf = (bone) => A.bindInv.get(bone)!;
@@ -709,7 +761,6 @@ export class Person {
     const b = BODY[gender];
     const at = (x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) =>
       new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
-    const headTop = gender === 'male' ? 1.712 : 1.655;
     // far-crowd look (painted hair: -1 bald, 0 short / hat, 1 long)
     const b0 = BODY[gender];
     this.far = {
@@ -721,10 +772,11 @@ export class Person {
     // per person: rigid parts are weighted 100 % to their bone, the skirt keeps its blend
     const parts: RigidPart[] = [];
     if (hat) {
-      const hc = r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a']);
+      // cold: mostly knit beanies, some caps; mild: mostly caps
+      const cap = r.chance(season === 'mild' ? 0.85 : 0.35);
+      const hc = cap ? r.pick(['#151515', '#1f3d5a', '#2a2c30', '#e8e6e0', '#7a1d1d', '#3b4232', '#c8b48c']) : r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a', '#b03a3a']);
       this.far.hair.set(hc);
-      parts.push({ geo: propGeo.beanie, bone: 'Head', m: at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)), color: hc });
-      parts.push({ geo: propGeo.cuff, bone: 'Head', m: at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12)), color: hc });
+      parts.push({ geo: cap ? propGeo.cap : propGeo.beanie, bone: 'Head', m: hatMatrix(gender, cap ? 'cap' : 'beanie'), color: hc });
     }
     // bags
     const bagRoll = r.next();
@@ -984,7 +1036,7 @@ export class Person {
     if (beanie && !this.weatherProps.beanie) {
       const col = SNOWHAT[Math.floor(this.weatherRoll * 131) % SNOWHAT.length];
       const m = new THREE.Mesh(propGeo.beanie, propMat(col, 0.95));
-      this.weatherProps.beanie = put('Head', m, at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)));
+      this.weatherProps.beanie = put('Head', m, hatMatrix(this.gender, 'beanie'));
     }
     if (this.weatherProps.beanie) this.weatherProps.beanie.visible = beanie;
     if (this.hairMesh && !this.longHair) this.hairMesh.visible = !beanie && !hoodUp;

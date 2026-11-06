@@ -94,7 +94,7 @@ const scene: LabScene = {
       const want = params.get('want');
       const gen = (i: number) => (params.get('g') === 'male' ? 'male' : params.get('g') === 'female' ? 'female' : i % 2 ? 'female' : 'male');
       let p = new Person(assets, r, gen(i));
-      for (let k = 0; k < 200 && want && !(want === 'dog' ? p.dog : want === 'stroller' ? p.noPhone && !p.dog : want === 'slow' ? p.slow : !!p.pose); k++) p = new Person(assets, r, gen(i));
+      for (let k = 0; k < 200 && want && !(want === 'dog' ? p.dog : want === 'stroller' ? p.noPhone && !p.dog : want === 'slow' ? p.slow : want === 'hat' ? p.hasHat : !!p.pose); k++) p = new Person(assets, r, gen(i));
       p.root.position.set((i - (n - 1) / 2) * 0.9, 0, 0);
       p.root.rotation.y = face === 'back' ? Math.PI : face === 'side' ? Math.PI / 2 : 0;
       p.setActivity(act, i * 0.37);
