@@ -37,6 +37,8 @@ interface Preset {
   sky: number;
   /** clip HDRI pixels brighter than this many times the median sky (the sun is the directional light) */
   clampMul: number;
+  /** saturation of the image-based light / background (tames very blue skies, sodium-yellow skylines) */
+  envSat: number;
   exposure: number;
   /** exponential fog density (1/m), tinted from the HDRI horizon */
   fog: number;
@@ -53,25 +55,25 @@ interface Preset {
 export const PRESETS: Record<TimeOfDay, Preset> = {
   day: {
     label: 'Day', hdri: 'docklands_02', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 6,
-    sky: 0.6, clampMul: 12, exposure: 0.62, fog: 0.0012, night: 0, lit: 0.04, wet: 0,
+    sky: 0.6, clampMul: 12, envSat: 0.75, exposure: 0.58, fog: 0.0012, night: 0, lit: 0.04, wet: 0,
     bloom: { strength: 0.12, radius: 0.4, threshold: 3.0 },
     grade: { gain: '#fffaf4', lift: '#04060a', sat: 1.04, contrast: 1.04, vignette: 0.22 },
   },
   golden: {
     label: 'Golden hour', hdri: 'venice_sunset', align: true, sunAz: 250, sunElev: 8, sunColor: '#ffb067', sunIntensity: 5.5,
-    sky: 0.55, clampMul: 10, exposure: 0.8, fog: 0.0022, night: 0.15, lit: 0.12, wet: 0,
+    sky: 0.55, clampMul: 10, envSat: 1, exposure: 0.8, fog: 0.0022, night: 0.15, lit: 0.12, wet: 0,
     bloom: { strength: 0.2, radius: 0.5, threshold: 2.2 },
     grade: { gain: '#fff1e0', lift: '#060812', sat: 1.08, contrast: 1.06, vignette: 0.28 },
   },
   dusk: {
     label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
-    sky: 0.12, clampMul: 30, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.3, wet: 0.35,
+    sky: 0.12, clampMul: 30, envSat: 0.95, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.3, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
   },
   night: {
     label: 'Night', hdri: 'shanghai_bund', align: false, sunAz: 140, sunElev: 50, sunColor: '#8ea4d6', sunIntensity: 0.12,
-    sky: 0.04, clampMul: 400, exposure: 1.35, fog: 0.0022, fogTint: '#2a2a3a', night: 1, lit: 0.36, wet: 0.8,
+    sky: 0.04, clampMul: 400, envSat: 0.55, exposure: 1.35, fog: 0.0022, fogTint: '#2a2a3a', night: 1, lit: 0.36, wet: 0.8,
     bloom: { strength: 0.5, radius: 0.5, threshold: 0.8 },
     grade: { gain: '#fbfaff', lift: '#050712', sat: 1.12, contrast: 1.08, vignette: 0.38 },
   },
@@ -224,7 +226,7 @@ function dirFromPixel(c: number, r: number, W: number, H: number, out: THREE.Vec
   return out.set(Math.cos(el) * Math.cos(a), Math.sin(el), Math.cos(el) * Math.sin(a));
 }
 
-function analyse(tex: THREE.DataTexture, clampMul: number): Omit<Hdri, 'tex' | 'env'> {
+function analyse(tex: THREE.DataTexture, clampMul: number, sat = 1): Omit<Hdri, 'tex' | 'env'> {
   const img = tex.image as unknown as { data: Uint16Array; width: number; height: number };
   const { data, width: W, height: H } = img;
   const half = THREE.DataUtils.fromHalfFloat;
@@ -264,12 +266,14 @@ function analyse(tex: THREE.DataTexture, clampMul: number): Omit<Hdri, 'tex' | '
     for (let c = 0; c < W; c++) {
       const i = r * W + c, p = i * 4;
       let l = lum[i];
-      if (l > cap) {
-        const s = cap / l;
-        data[p] = toHalf(half(data[p]) * s);
-        data[p + 1] = toHalf(half(data[p + 1]) * s);
-        data[p + 2] = toHalf(half(data[p + 2]) * s);
-        l = cap;
+      if (l > cap || sat !== 1) {
+        const s = l > cap ? cap / l : 1;
+        const R = half(data[p]) * s, G = half(data[p + 1]) * s, Bc = half(data[p + 2]) * s;
+        const L = l * s;
+        data[p] = toHalf(L + (R - L) * sat);
+        data[p + 1] = toHalf(L + (G - L) * sat);
+        data[p + 2] = toHalf(L + (Bc - L) * sat);
+        l = L;
       }
       sum += l * w;
       if (el > 0) { skySum += l * w; skyN += w; }
@@ -577,7 +581,7 @@ export class Lighting {
     const key = `${p.hdri}@${res}`;
     const token = ++this.loadToken;
     this.status = `loading ${p.hdri}`;
-    const pr = this.hdri(p.hdri, res, p.clampMul);
+    const pr = this.hdri(p.hdri, res, p.clampMul, p.envSat);
     this.ready = pr;
     const h = await pr;
     if (!h || token !== this.loadToken || this.place !== 'outdoor') return;
@@ -607,7 +611,7 @@ export class Lighting {
     this.scene.fog = new THREE.FogExp2(fc, p.fog);
   }
 
-  private hdri(name: string, res: string, clampMul: number) {
+  private hdri(name: string, res: string, clampMul: number, sat = 1) {
     const key = `${name}@${res}`;
     let pr = hdriCache.get(key);
     if (!pr) {
@@ -616,7 +620,7 @@ export class Lighting {
         .setDataType(THREE.HalfFloatType)
         .loadAsync(url)
         .then((tex) => {
-          const a = analyse(tex, clampMul);
+          const a = analyse(tex, clampMul, sat);
           tex.mapping = THREE.EquirectangularReflectionMapping;
           tex.colorSpace = THREE.LinearSRGBColorSpace;
           const env = this.pmrem.fromEquirectangular(tex).texture;
