@@ -225,6 +225,38 @@ export function kit(key: string, fn: (k: KitBuilder) => void) {
 export function place(parent: THREE.Object3D, parts: KitPart[], x: number, y: number, z: number, ry = 0, sc: number | [number, number, number] = 1) {
   for (const p of parts) put(parent, p.geo, p.mat, x, y, z, ry, p.shadow, 0, 0, sc);
 }
+/**
+ * Small street props (hydrants, baskets, meters, bags, bollards…) cast no real shadow: in three
+ * CSM cascades they cost triangles for a few pixels of shadow. Instead each gets a soft contact
+ * blob; all blobs of a chunk bake into one transparent draw.
+ */
+let blobM: THREE.MeshBasicMaterial | null = null;
+function blobMat() {
+  if (blobM) return blobM;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(0,0,0,0.75)');
+  gr.addColorStop(0.45, 'rgba(0,0,0,0.45)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  blobM = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, opacity: 0.85 });
+  return blobM;
+}
+const blobGeo = (() => {
+  const g = new THREE.PlaneGeometry(1, 1);
+  g.rotateX(-Math.PI / 2);
+  return g;
+})();
+export function placeSmall(parent: THREE.Object3D, parts: KitPart[], x: number, y: number, z: number, ry: number, radius: number, sc: number | [number, number, number] = 1) {
+  for (const p of parts) put(parent, p.geo, p.mat, x, y, z, ry, false, 0, 0, sc);
+  const s = typeof sc === 'number' ? sc : sc[0];
+  put(parent, blobGeo, blobMat(), x, y + 0.006, z, ry, false, 0, 0, radius * 2.4 * s);
+}
+
 /** a geometry with its faces flipped (inner walls of thin shells) */
 function flipped(g: THREE.BufferGeometry) {
   const o = normGeo(g);
@@ -560,7 +592,7 @@ export function hydrant(parent: THREE.Object3D, x: number, z: number, rng?: Rng,
     k.add(new THREE.CylinderGeometry(0.07, 0.07, 0.04, 16), Tm, 0, 0.36, 0.18, Math.PI / 2);
     k.add(new THREE.CylinderGeometry(0.026, 0.026, 0.035, 5), Tm, 0, 0.36, 0.21, Math.PI / 2);
   });
-  place(parent, parts, x, CURB, z, ry ?? r.range(0, Math.PI * 2));
+  placeSmall(parent, parts, x, CURB, z, ry ?? r.range(0, Math.PI * 2), 0.22);
 }
 
 // ---------------------------------------------------------------- subway entrance
@@ -721,7 +753,7 @@ export function litterBasket(parent: THREE.Object3D, x: number, z: number, ry = 
     lump.computeVertexNormals();
     k.add(lump, bag, 0, H - 0.07, 0);
   });
-  place(parent, parts, x, CURB, z, ry);
+  placeSmall(parent, parts, x, CURB, z, ry, 0.33);
 }
 
 /** USPS-style blue collection box: legs, domed top, pull-down chute, decals */
@@ -740,7 +772,7 @@ export function mailbox(parent: THREE.Object3D, x: number, z: number, ry = 0) {
     k.add(plane(W - 0.04, H - 0.18, decal), propAtlas(), 0, leg + H / 2 - 0.05, D / 2 + 0.002, 0, 0, 0, 1, false);
     for (const s of [-1, 1]) k.add(plane(D - 0.04, H - 0.18, decal), propAtlas(), (s * W) / 2 + s * 0.002, leg + H / 2 - 0.05, 0, 0, (s * Math.PI) / 2, 0, 1, false);
   });
-  place(parent, parts, x, CURB, z, ry);
+  placeSmall(parent, parts, x, CURB, z, ry, 0.36);
 }
 
 /** parking pay station ("Muni-Meter"): pedestal, head with face, solar panel */
@@ -754,7 +786,7 @@ export function muniMeter(parent: THREE.Object3D, x: number, z: number, ry = 0) 
     k.add(new THREE.BoxGeometry(0.36, 0.02, 0.3), mat('#16233a', { rough: 0.15, metal: 0.4 }), 0, 1.66, 0, -0.35);
     k.add(new THREE.BoxGeometry(0.4, 0.05, 0.32), Gr, 0, 1.625, 0);
   });
-  place(parent, parts, x, CURB, z, ry);
+  placeSmall(parent, parts, x, CURB, z, ry, 0.26);
 }
 
 /** a row of coin-op / free newspaper boxes on pedestals */
@@ -775,7 +807,7 @@ export function newsBoxes(parent: THREE.Object3D, x: number, z: number, axis: 'x
       k.add(new THREE.BoxGeometry(0.1, 0.12, 0.04), Gr, 0.14, 1.06, 0.12);
     });
     const t = (i - (n - 1) / 2) * 0.52;
-    place(parent, parts, x + (axis === 'x' ? t : 0), CURB, z + (axis === 'z' ? t : 0), ry + rng.range(-0.06, 0.06));
+    placeSmall(parent, parts, x + (axis === 'x' ? t : 0), CURB, z + (axis === 'z' ? t : 0), ry + rng.range(-0.06, 0.06), 0.3);
   }
 }
 
@@ -842,7 +874,7 @@ export function trashBags(parent: THREE.Object3D, x: number, z: number, rng: Rng
     });
     const a = rng.range(0, 6.28), d = rng.range(0, 0.6);
     const s = rng.range(0.7, 1.05);
-    place(parent, parts, x + Math.cos(a) * d, CURB, z + Math.sin(a) * d, rng.range(0, 6.28), [s, s * rng.range(0.85, 1.1), s]);
+    placeSmall(parent, parts, x + Math.cos(a) * d, CURB, z + Math.sin(a) * d, rng.range(0, 6.28), 0.36, [s, s * rng.range(0.85, 1.1), s]);
   }
 }
 
@@ -1005,7 +1037,7 @@ export function bollard(parent: THREE.Object3D, x: number, z: number, kind: 'bla
     k.add(new THREE.LatheGeometry([[0, 0], [r + 0.02, 0], [r + 0.02, 0.02], [r, 0.04], [r, H - 0.06], [r + 0.012, H - 0.04], [r * 0.8, H], [r * 0.45, H + 0.04], [0, H + 0.05]].map(([a, b]) => new THREE.Vector2(a, b)), 16), m);
     k.add(new THREE.CylinderGeometry(r + 0.003, r + 0.003, 0.05, 16, 1, true), mat(kind === 'black' ? '#e8d24a' : '#2a2a2a', { rough: 0.35 }), 0, H - 0.2, 0, 0, 0, 0, 1, false);
   });
-  place(parent, parts, x, CURB, z);
+  placeSmall(parent, parts, x, CURB, z, 0, kind === 'black' ? 0.15 : 0.18);
 }
 
 /** sidewalk Siamese standpipe connection by a building: a pipe rising to a Y with two capped inlets */
@@ -1025,7 +1057,7 @@ export function standpipe(parent: THREE.Object3D, x: number, z: number, ry: numb
       k.add(new THREE.TorusGeometry(0.05, 0.004, 4, 10, Math.PI), mat('#4a4a48', { rough: 0.5, metal: 0.8 }), dx * 1.3, 0.5, 0.08, 0, 0, Math.PI);
     }
   });
-  place(parent, parts, x, CURB, z, ry);
+  placeSmall(parent, parts, x, CURB, z, ry, 0.16);
 }
 
 // ---------------------------------------------------------------- block furnishing
