@@ -70,8 +70,18 @@ page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.t
 
 log('loading', url);
 await page.goto(`http://localhost:${port}${url}`, { waitUntil: 'load' });
-await page.waitForFunction(() => window.__labReady !== undefined || window.__world !== undefined, null, { timeout: 60000 }).catch(() => {});
+// a lab page defines __world long before its scene starts (after the asset manifests load, slower
+// under ?fast=1's up-front compile): wait for __labReady itself, or the shot shows the default camera
+const isLab = /[?&]lab=/.test(url);
+await page.waitForFunction((lab) => (lab ? window.__labReady !== undefined : window.__labReady !== undefined || window.__world !== undefined), isLab, { timeout: 60000 }).catch(() => log('no __labReady after 60 s'));
 await page.evaluate(() => window.__labReady).catch(() => {});
+// a lab with ?cam= must be looking from there (catches shots taken before the scene started)
+const camArg = /[?&]cam=([-\d.]+)(?:,|%2C)([-\d.]+)(?:,|%2C)([-\d.]+)/.exec(url);
+if (isLab && camArg) {
+  const at = await page.evaluate(() => window.__world?.camera?.position.toArray()).catch(() => null);
+  const want = camArg.slice(1, 4).map(Number);
+  if (!at || at.some((v, i) => Math.abs(v - want[i]) > 0.5)) log(`WARNING: camera at ${JSON.stringify(at)}, not cam=${want} (the lab did not start?)`);
+}
 if (args.eval) console.log('eval:', await page.evaluate(args.eval).catch((e) => 'ERR ' + e.message));
 await page.waitForTimeout(Number(args.wait ?? 2000));
 const info = await page.evaluate(() => { const r = window.__world?.renderer?.info?.render; return r ? `calls=${r.calls} tris=${r.triangles}` : ''; }).catch(() => '');
