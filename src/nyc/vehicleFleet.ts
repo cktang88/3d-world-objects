@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FLAGS } from '../flags';
 import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
 
@@ -413,9 +414,15 @@ export const BRAKE_MAT = new THREE.MeshStandardMaterial({ color: '#ff2a1a', emis
 const WHEEL_MAT =new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.45, roughness: 0.45, side: THREE.DoubleSide, name: 'car-wheel' });
 
 /** average colour of a texture (for the single-material distant LOD) */
-const avgCache = new WeakMap<THREE.Texture, THREE.Color>();
+// keyed by the image: GLTF clones share one image across many textures, and each drawImage of a
+// full-size image down to 1x1 costs ~100+ ms in software rendering (it was 30% of a lab's load)
+const avgCache = new WeakMap<object, THREE.Color>();
+const WHITE = new THREE.Color(1, 1, 1);
 function textureAverage(t: THREE.Texture): THREE.Color {
-  let c = avgCache.get(t);
+  // ?notex=1 strips the maps anyway, so the flat colour is the material colour alone
+  if (FLAGS.notex) return WHITE;
+  const key = (t.image as object | null) ?? t;
+  let c = avgCache.get(key);
   if (!c) {
     c = new THREE.Color(0.5, 0.5, 0.5);
     try {
@@ -428,7 +435,7 @@ function textureAverage(t: THREE.Texture): THREE.Color {
     } catch {
       /* image not decodable here: keep grey */
     }
-    avgCache.set(t, c);
+    avgCache.set(key, c);
   }
   return c;
 }

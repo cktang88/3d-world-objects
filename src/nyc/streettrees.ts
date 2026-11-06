@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng } from '../rng';
+import { FLAGS } from '../flags';
 import { normalFrom } from '../textures';
 
 /**
@@ -70,7 +71,8 @@ function makeCanvas(w: number, h = w) {
 }
 
 /** canvas → DataTexture with the colour bled into transparent pixels (no dark fringes when mip-mapped) */
-function bleedTexture(c: HTMLCanvasElement) {
+function bleedTexture(c: HTMLCanvasElement): THREE.Texture {
+  if (FLAGS.notex) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; } // maps are stripped anyway
   const w = c.width, h = c.height;
   const src = c.getContext('2d')!.getImageData(0, 0, w, h).data;
   const d = new Uint8Array(src.length);

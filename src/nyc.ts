@@ -60,7 +60,8 @@ export class NycLevel implements Level {
     };
     void b;
     this.vis.attach(this.group); // [vis]
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.ensure(dx, dz);
+    // the first ring at once (?r=0: just the spawn block, so fast dev/QA boots build one chunk, not nine)
+    for (let dz = -Math.min(1, RZ); dz <= Math.min(1, RZ); dz++) for (let dx = -Math.min(1, RX); dx <= Math.min(1, RX); dx++) this.ensure(dx, dz);
     this.refresh(0, 0);
     this.traffic = new Traffic(this.group, this.seed);
     this.peds = new Pedestrians(this.group, this.seed);

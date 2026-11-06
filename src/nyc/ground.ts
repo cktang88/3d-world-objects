@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AX, SZ, BX, BZ, LX, LZ, SW, CURB } from './common';
 import { wetSurface } from '../lighting';
 import { Rng, hashN } from '../rng';
+import { FLAGS } from '../flags';
 
 /**
  * NYC ground surfaces: sidewalk flags, granite curbs with ADA corner ramps, asphalt roadway,
@@ -782,6 +783,11 @@ let fxTex: { map: THREE.Texture; normal: THREE.Texture; rm: THREE.Texture } | nu
 
 function fixturesTextures() {
   if (fxTex) return fxTex;
+  if (FLAGS.notex) {
+    // ?notex=1: maps are stripped anyway; the per-pixel atlas cost ~6 s of a fast boot
+    const t = () => new THREE.CanvasTexture(Object.assign(document.createElement('canvas'), { width: 1, height: 1 }));
+    return (fxTex = { map: t(), normal: t(), rm: t() });
+  }
   const mk = () => {
     const c = document.createElement('canvas');
     c.width = c.height = FX_N;

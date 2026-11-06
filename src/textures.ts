@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from './rng';
+import { FLAGS } from './flags';
 
 function canvas(w: number, h = w): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -17,6 +18,7 @@ function tex(c: HTMLCanvasElement, repeat = true, srgb = true): THREE.CanvasText
 }
 
 function noise(ctx: CanvasRenderingContext2D, w: number, h: number, amt: number, rng: Rng) {
+  if (FLAGS.notex) return; // ?notex=1: the maps are stripped anyway; per-pixel work dominated fast boots
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -26,6 +28,16 @@ function noise(ctx: CanvasRenderingContext2D, w: number, h: number, amt: number,
     d[i + 2] += n;
   }
   ctx.putImageData(img, 0, 0);
+}
+
+let flatN: THREE.CanvasTexture | null = null;
+/** ?notex=1: a 1x1 flat normal map instead of a per-pixel one (maps are stripped anyway) */
+function flatNormal() {
+  if (flatN) return flatN;
+  const [c, g] = canvas(1, 1);
+  g.fillStyle = 'rgb(128,128,255)';
+  g.fillRect(0, 0, 1, 1);
+  return (flatN = new THREE.CanvasTexture(c));
 }
 
 function shade(hex: string, f: number): string {
@@ -551,6 +563,7 @@ export function signTex(text: string, bg: string, fg: string) {
 
 /** Tangent-space normal map from a canvas, treating luminance as height (mortar, joints and pores sink). */
 export function normalFrom(src: HTMLCanvasElement, strength = 2): THREE.CanvasTexture {
+  if (FLAGS.notex) return flatNormal();
   const w = src.width, h = src.height;
   const d = src.getContext('2d')!.getImageData(0, 0, w, h).data;
   const H = new Float32Array(w * h);

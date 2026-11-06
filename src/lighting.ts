@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { CSM } from 'three/examples/jsm/csm/CSM.js';
+import { FLAGS } from './flags';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import type { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -570,7 +571,8 @@ export class Lighting {
         this.scanMarkers();
       }
       if (this.csm) {
-        this.setupCsmMaterials();
+        // ?shadows=0 / ?fast=1: no CSM shader patch (a much smaller program per material); one plain sun light
+        if (FLAGS.shadows) this.setupCsmMaterials();
         this.camera.updateMatrixWorld();
         this.csm.update();
         // the near cascade re-renders every frame; the wider ones every 2nd / 3rd frame, staggered.
@@ -816,6 +818,7 @@ export class Lighting {
       l.shadow.normalBias = [0.02, 0.06, 0.15][i] ?? 0.15;
       l.shadow.radius = 2;
     });
+    if (!FLAGS.shadows) csm.lights.forEach((l, i) => (l.visible = i === 0));
     this.csm = csm;
     this.csmMats.clear();
     this.setSunLight(PRESETS[tod]);
