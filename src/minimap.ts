@@ -256,6 +256,8 @@ export class Minimap {
       }
     }
     const ms = performance.now() - t0;
+    if (!this.hudBox && !this.headless && typeof document !== 'undefined') return;
+    if (this.stats.frames === 0 && !this.headless) return void (this.stats.frames = 1); // the first frame builds the DOM: not counted
     this.stats.frames++;
     this.stats.frameMs = +(this.stats.frameMs + (ms - this.stats.frameMs) / Math.min(this.stats.frames, 300)).toFixed(4);
   }
@@ -269,11 +271,16 @@ export class Minimap {
     return s;
   }
 
+  private shown = '';
   private show() {
     if (this.headless || typeof document === 'undefined') return;
     const want = !!this.src && !this.src.hidden;
     if (!this.hudBox) this.buildHud();
     if (!this.big) this.buildLarge();
+    // write the styles only when they change (no per-frame style churn)
+    const key = `${want}|${this.mode}`;
+    if (key === this.shown) return;
+    this.shown = key;
     this.hudBox!.style.display = want && this.mode === 'hud' ? 'block' : 'none';
     this.big!.style.display = want && this.mode === 'large' ? 'block' : 'none';
   }
