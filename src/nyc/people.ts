@@ -4,7 +4,8 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
 import { Rng, hashN } from '../rng';
-import { CURB, AX, SZ, AVE, ST, SW } from './common';
+import { CURB, AX, SZ, AVE, ST, SW, CYCLE, lightFor } from './common';
+import type { Rect } from '../level';
 
 /**
  * Pedestrians: skinned, animated people on the sidewalks.
@@ -438,6 +439,9 @@ export class Person {
     this.root = new THREE.Group();
     this.root.add(model);
     const o = pickOutfit(r, gender);
+    this.slow = r.chance(0.1);
+    this.walkSpeed = this.slow ? r.range(0.8, 1.0) : r.range(1.15, 1.5);
+    if (this.slow) o.hair = r.pick(['#8a8a86', '#b0aea8', '#d0cec8', '#6b6b6b']);
     const hm = hairMat(A.hairBase, o.hair);
     const bm = bodyMaterial(A.base, o, gender, A.geo, A.geoScale, r);
     model.traverse((x) => {
@@ -555,139 +559,226 @@ export class Person {
   }
   update(dt: number) {
     this.mixer.update(dt);
-    if (this.activity === 'phone') this.phonePose();
+    const phone = this.activity === 'phone';
+    if (!phone && !this.slow && !this.pose) return;
+    this.model().updateMatrixWorld(true);
+    this.rq.copy(this.model().getWorldQuaternion(_q0));
+    if (this.slow) {
+      // older people: a slight stoop, head carried forward
+      this.turn('spine_02', 0.16);
+      this.turn('neck_01', 0.12);
+    }
+    if (phone) this.phonePose();
+    this.pose?.(this);
   }
   twoHands = false;
   walkClip = 'Walk_Loop';
+  /** older person: slower gait and a stoop */
+  slow = false;
+  /** preferred walking speed (m/s) */
+  walkSpeed = 1.3;
+  /** extra per-frame pose (carrying a cup, pushing a stroller...) run after the animation */
+  pose: ((p: Person) => void) | null = null;
+  private rq = new THREE.Quaternion();
+  /** rotate a bone so the direction to its child points along `dir` (model space, +z forward) */
+  aim(bone: string, child: string, dir: THREE.Vector3) {
+    const b = this.bones.get(bone), c = this.bones.get(child);
+    if (!b || !c || !b.parent) return;
+    const from = c.getWorldPosition(_v1).sub(b.getWorldPosition(_v0)).normalize();
+    const to = _v2.copy(dir).normalize().applyQuaternion(this.rq);
+    const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromUnitVectors(from, to));
+    b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
+    b.updateMatrixWorld(true);
+  }
+  /** bend a bone forward (about the model's right axis) */
+  turn(bone: string, ang: number) {
+    const b = this.bones.get(bone);
+    if (!b || !b.parent) return;
+    const ax = _v2.set(1, 0, 0).applyQuaternion(this.rq);
+    const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromAxisAngle(ax, ang));
+    b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
+    b.updateMatrixWorld(true);
+  }
+  /** keep a carried object hanging plumb under (or upright in) the hand, facing forward */
+  upright(o: THREE.Object3D) {
+    const parent = o.parent;
+    if (!parent) return;
+    o.quaternion.copy(parent.getWorldQuaternion(_q2).invert().multiply(this.rq));
+  }
   /** hold the phone up in front of the chest and look down at it (aimed in world space, so it
    *  does not depend on the rig's local bone axes) */
   private phonePose() {
-    const model = this.model();
-    model.updateMatrixWorld(true);
-    const rq = model.getWorldQuaternion(_q0);
-    const aim = (bone: string, child: string, dir: THREE.Vector3) => {
-      const b = this.bones.get(bone), c = this.bones.get(child);
-      if (!b || !c || !b.parent) return;
-      const from = c.getWorldPosition(_v1).sub(b.getWorldPosition(_v0)).normalize();
-      const to = _v2.copy(dir).normalize().applyQuaternion(rq);
-      const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromUnitVectors(from, to));
-      b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
-      b.updateMatrixWorld(true);
-    };
-    const turn = (bone: string, axis: THREE.Vector3, ang: number) => {
-      const b = this.bones.get(bone);
-      if (!b || !b.parent) return;
-      const ax = _v2.copy(axis).applyQuaternion(rq);
-      const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromAxisAngle(ax, ang));
-      b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
-      b.updateMatrixWorld(true);
-    };
     // the model faces +z; its right side is -x
-    aim('upperarm_r', 'lowerarm_r', _v3.set(0.12, -1, 0.18));
-    aim('lowerarm_r', 'hand_r', _v3.set(0.45, 0.8, 0.6));
+    this.aim('upperarm_r', 'lowerarm_r', _v3.set(0.12, -1, 0.18));
+    this.aim('lowerarm_r', 'hand_r', _v3.set(0.45, 0.8, 0.6));
     if (this.twoHands) {
-      aim('upperarm_l', 'lowerarm_l', _v3.set(-0.12, -1, 0.18));
-      aim('lowerarm_l', 'hand_l', _v3.set(-0.45, 0.8, 0.6));
+      this.aim('upperarm_l', 'lowerarm_l', _v3.set(-0.12, -1, 0.18));
+      this.aim('lowerarm_l', 'hand_l', _v3.set(-0.45, 0.8, 0.6));
     }
-    turn('neck_01', _v3.set(1, 0, 0), 0.25);
-    turn('Head', _v3.set(1, 0, 0), 0.3);
+    this.turn('neck_01', 0.25);
+    this.turn('Head', 0.3);
   }
 }
 const _v0 = new THREE.Vector3(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
 
 // ---------------------------------------------------------------- the crowd
+type State = 'walk' | 'kerb' | 'stand';
 interface Ped {
   p: Person;
+  /** walking direction axis and sign */
   axis: 'x' | 'z';
   dir: number;
+  /** centre line of the road this sidewalk runs along, and which side of it (+1 / -1) */
+  c: number;
+  s: number;
+  /** distance in from the kerb; line = c + s * (roadHalf + inSw) */
   line: number;
+  /** position along the axis */
   t: number;
   v: number;
-  /** sidestep offset across the walking line (to pass the player and each other) */
+  /** speed this frame */
+  v0: number;
+  /** sidestep offset across the walking line */
   off: number;
-  /** standing: seconds left before walking on */
+  state: State;
+  /** stand: seconds left; kerb: reaction delay once the walk phase starts */
   wait: number;
+  /** how far back from the kerb this person waits (0.5–1.5 m) */
+  wd: number;
   tick: number;
   acc: number;
+  yaw: number;
   /** a companion: walks beside this person, or stands facing them talking */
   buddy?: Ped;
   /** set on the companion: the person it follows */
   lead?: Ped;
-  /** facing (radians) */
-  yaw: number;
-  /** speed this frame */
-  v0?: number;
 }
-const COUNT = 84;
+const COUNT = 110;
 const yawOf = (axis: 'x' | 'z', dir: number) => (axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI);
+/** walking along x crosses avenues, along z crosses streets */
+const crossPeriod = (axis: 'x' | 'z') => (axis === 'x' ? AX : SZ);
+const crossHalf = (axis: 'x' | 'z') => (axis === 'x' ? AVE : ST) / 2;
+/** the half-width of the road a sidewalk line runs along */
+const sideHalf = (axis: 'x' | 'z') => (axis === 'x' ? ST : AVE) / 2;
+/** Walk signal: crossing an avenue (walking along x) goes with the street traffic and vice
+ *  versa. Only start in the first part of the green so nobody is caught mid-road. */
+function walkSignal(axis: 'x' | 'z', time: number) {
+  const ph = ((time % CYCLE) + CYCLE) % CYCLE;
+  return lightFor(axis, time) === 'g' && (axis === 'x' ? ph < 17.5 : ph < 5.5);
+}
+
+/** colliders bucketed in 4 m cells, rebuilt when the level hands over a new list */
+class ColliderGrid {
+  private cells = new Map<number, Rect[]>();
+  src: Rect[] | null = null;
+  set(list: Rect[]) {
+    if (list === this.src) return;
+    this.src = list;
+    this.cells.clear();
+    for (const r of list) {
+      if (r.maxX - r.minX > 40 || r.maxZ - r.minZ > 40) continue; // whole buildings: never on a sidewalk line
+      for (let ix = Math.floor(r.minX / 4); ix <= Math.floor(r.maxX / 4); ix++)
+        for (let iz = Math.floor(r.minZ / 4); iz <= Math.floor(r.maxZ / 4); iz++) {
+          const k = ix * 100003 + iz;
+          let a = this.cells.get(k);
+          if (!a) this.cells.set(k, (a = []));
+          a.push(r);
+        }
+    }
+  }
+  /** rects overlapping an axis-aligned box */
+  query(minX: number, minZ: number, maxX: number, maxZ: number, out: Rect[]) {
+    out.length = 0;
+    for (let ix = Math.floor(minX / 4); ix <= Math.floor(maxX / 4); ix++)
+      for (let iz = Math.floor(minZ / 4); iz <= Math.floor(maxZ / 4); iz++) {
+        const a = this.cells.get(ix * 100003 + iz);
+        if (!a) continue;
+        for (const r of a) if (r.maxX > minX && r.minX < maxX && r.maxZ > minZ && r.minZ < maxZ && !out.includes(r)) out.push(r);
+      }
+    return out;
+  }
+}
+const _rects: Rect[] = [];
 
 export class Pedestrians {
   peds: Ped[] = [];
   private rng: Rng;
   private assets: PeopleAssets | null = null;
   private frame = 0;
+  private clock = 0;
+  private grid = new ColliderGrid();
   constructor(private group: THREE.Group, seed: number) {
     this.rng = new Rng(hashN(seed, 909));
     loadPeopleAssets()
       .then((a) => (this.assets = a))
       .catch((e) => console.warn('people assets failed to load', e));
   }
+  /** keep the walking line on the sidewalk: 0.35 m off the kerb, 0.45 m off the shopfronts */
+  private clampLine(pd: Ped, l: number) {
+    const h = sideHalf(pd.axis);
+    const a = pd.c + pd.s * (h + 0.35), b = pd.c + pd.s * (h + SW - 0.45);
+    return THREE.MathUtils.clamp(l, Math.min(a, b), Math.max(a, b));
+  }
+  private blocked(pd: Ped, t: number, line: number, r = 0.32) {
+    const x = pd.axis === 'x' ? t : line, z = pd.axis === 'x' ? line : t;
+    return this.grid.query(x - r, z - r, x + r, z + r, _rects).length > 0;
+  }
   private place(pd: Ped, p: THREE.Vector3, ahead: boolean) {
     const r = this.rng;
-    pd.axis = r.chance(0.55) ? 'x' : 'z';
+    // avenues carry more people than side streets
+    pd.axis = r.chance(0.6) ? 'z' : 'x';
     pd.dir = r.chance(0.5) ? 1 : -1;
     pd.off = 0;
-    const standing = ahead ? r.chance(0.3) : r.chance(0.12);
-    // the sidewalk runs from the curb (0) to the building line (SW); keep a little off both
-    const inSw = pd.buddy ? r.range(0.9, SW - 1.6) : r.range(0.8, SW - 0.9);
-    if (pd.axis === 'x') {
-      const k = Math.round(p.z / SZ - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
-      pd.line = (k + 0.5) * SZ + r.pick([-1, 1]) * (ST / 2 + inSw);
-      pd.t = p.x + (ahead ? r.range(-50, 50) : -pd.dir * r.range(40, 60));
-    } else {
-      const k = Math.round(p.x / AX - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
-      pd.line = (k + 0.5) * AX + r.pick([-1, 1]) * (AVE / 2 + inSw);
-      pd.t = p.z + (ahead ? r.range(-50, 50) : -pd.dir * r.range(40, 60));
-    }
-    pd.v = r.range(1.05, 1.5);
+    pd.wd = r.range(0.5, 1.5);
+    const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
+    const P2 = pd.axis === 'x' ? SZ : AX; // spacing of the parallel roads
+    const k = Math.round(across / P2 - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
+    pd.c = (k + 0.5) * P2;
+    pd.s = r.chance(0.5) ? 1 : -1;
+    const inSw = pd.buddy ? r.range(1.0, SW - 1.5) : r.range(0.6, SW - 0.7);
+    pd.line = this.clampLine(pd, pd.c + pd.s * (sideHalf(pd.axis) + inSw));
+    // half of them start near a corner, where Midtown sidewalks are busiest
+    const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+    if (ahead) {
+      pd.t = along + r.range(-50, 50);
+      if (r.chance(0.5)) {
+        const kc = Math.round(pd.t / CP - 0.5);
+        pd.t = (kc + 0.5) * CP + r.pick([-1, 1]) * (ch + r.range(0.5, 14));
+      }
+    } else pd.t = along - pd.dir * r.range(40, 60);
+    pd.v = pd.p.walkSpeed * r.range(0.9, 1.1);
     pd.yaw = yawOf(pd.axis, pd.dir);
-    if (standing) {
-      // wait at the corner, near the curb, facing across the street
-      const crossAxis = pd.axis === 'x' ? 'z' : 'x';
-      const period = crossAxis === 'x' ? AX : SZ;
-      const half = (crossAxis === 'x' ? AVE : ST) / 2;
-      const k = Math.round(pd.t / period - 0.5);
-      const c = (k + 0.5) * period;
-      const side = pd.t > c ? 1 : -1;
-      pd.dir = -side;
-      pd.t = c + side * (half + r.range(0.5, 1.6) + (pd.buddy ? 1.5 : 0));
-      pd.line += r.range(-0.6, 0.6);
-      pd.wait = r.range(6, 30) + (pd.buddy ? 20 : 0);
-      pd.yaw = yawOf(pd.axis, pd.dir);
-      if (pd.buddy) {
-        pd.p.setActivity('talk', r.range(0, 5));
-        pd.yaw += Math.PI / 2;
-      } else pd.p.setActivity(r.chance(0.5) ? 'phone' : r.chance(0.25) ? 'talk' : 'idle', r.range(0, 5));
-      if (!pd.buddy && pd.p.activity === 'talk') pd.yaw += r.pick([-1, 1]) * r.range(0.8, 2.2);
+    // never start inside a newsstand, tree pit or stoop
+    for (let i = 0; i < 6 && this.blocked(pd, pd.t, pd.line); i++) pd.line = this.clampLine(pd, pd.line + r.range(-1.2, 1.2));
+    pd.state = 'walk';
+    pd.wait = 0;
+    if (ahead && r.chance(0.12) && !pd.p.slow) {
+      // loiterers: on the phone or chatting near the shopfronts
+      pd.state = 'stand';
+      pd.wait = r.range(8, 40) + (pd.buddy ? 20 : 0);
+      pd.line = this.clampLine(pd, pd.c + pd.s * (sideHalf(pd.axis) + SW - 0.9));
+      pd.yaw += pd.s * (pd.axis === 'x' ? 1 : -1) * pd.dir * r.range(0.6, 1.4);
+      pd.p.setActivity(pd.buddy ? 'talk' : r.chance(0.6) ? 'phone' : 'idle', r.range(0, 5));
     } else {
-      pd.wait = 0;
       pd.p.setActivity('walk', r.range(0, 5));
       pd.p.setSpeed(pd.v);
     }
     pd.p.root.rotation.y = pd.yaw;
   }
-  update(dt: number, p: THREE.Vector3) {
+  update(dt: number, p: THREE.Vector3, time?: number, colliders?: Rect[]) {
     if (!this.assets) return;
     this.frame++;
-    // spawn a few per frame so building 84 skinned clones does not hitch one frame
+    this.clock = time ?? this.clock + dt;
+    if (colliders) this.grid.set(colliders);
+    // spawn a few per frame so building the skinned clones does not hitch one frame
     for (let n = 0; n < 8 && this.peds.length < COUNT; n++) {
       const person = new Person(this.assets, this.rng);
       this.group.add(person.root);
-      const pd: Ped = { p: person, axis: 'x', dir: 1, line: 0, t: 0, v: 1.3, off: 0, wait: 0, tick: this.peds.length, acc: 0, yaw: 0 };
+      const pd: Ped = { p: person, axis: 'x', dir: 1, c: 0, s: 1, line: 0, t: 0, v: 1.3, v0: 0, off: 0, state: 'walk', wait: 0, wd: 1, tick: this.peds.length, acc: 0, yaw: 0 };
       // about one in five people is out with a companion
       const prev = this.peds[this.peds.length - 1];
-      if (prev && !prev.lead && !prev.buddy && this.rng.chance(0.25)) {
+      if (prev && !prev.lead && !prev.buddy && !prev.p.slow && this.rng.chance(0.25)) {
         pd.lead = prev;
         prev.buddy = pd;
         this.place(prev, p, true);
@@ -698,45 +789,17 @@ export class Pedestrians {
       if (pd.lead) continue;
       const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
       if (Math.abs(pd.t - along) > 80 || Math.abs(pd.line - across) > 80) this.place(pd, p, false);
-      if (pd.wait > 0) {
+      if (pd.state === 'stand') {
         pd.wait -= dt;
         if (pd.wait <= 0) {
+          pd.state = 'walk';
           pd.yaw = yawOf(pd.axis, pd.dir);
-          pd.p.root.rotation.y = pd.yaw;
           pd.p.setActivity('walk', 0);
-          pd.p.setSpeed(pd.v);
         }
-      } else {
-        // pass the player and oncoming people: drift aside (to the right when meeting someone),
-        // slow down when boxed in
-        let target = 0, v = pd.v;
-        const avoid = (oa: number, oc: number, oncoming: boolean) => {
-          const ahead = (oa - pd.t) * pd.dir;
-          const lat = oc - (pd.line + pd.off);
-          if (ahead > -0.3 && ahead < 3.5 && Math.abs(lat) < 0.9) {
-            // keep right: walking +x, your right is +z; walking +z, it is -x
-            const right = (pd.axis === 'x' ? 1 : -1) * pd.dir;
-            const away = oncoming ? right : lat > 0 ? -1 : 1;
-            target = THREE.MathUtils.clamp(pd.off + away * (0.95 - Math.abs(lat)) + away * 0.1, -1.2, 1.2);
-            if (ahead < 0.9) v *= oncoming ? 0.7 : 0.4;
-          }
-        };
-        avoid(along, across, false);
-        for (const o of this.peds) {
-          if (o === pd || o === pd.buddy || o.lead === pd || o.axis !== pd.axis || o.lead) continue;
-          if (Math.abs(o.line - pd.line) > 1.5 || Math.abs(o.t - pd.t) > 3.5) continue;
-          avoid(o.t, o.line + o.off, o.wait <= 0 && o.dir !== pd.dir);
-        }
-        pd.off += THREE.MathUtils.clamp(target - pd.off, -1.0 * dt, 1.0 * dt);
-        pd.t += pd.dir * v * dt;
-        pd.p.setSpeed(v);
-        const turn = THREE.MathUtils.clamp((target - pd.off) * 0.6, -0.4, 0.4) * (pd.axis === 'x' ? -1 : 1) * pd.dir;
-        pd.yaw = yawOf(pd.axis, pd.dir) + turn;
-        pd.p.root.rotation.y = pd.yaw;
-        pd.v0 = v;
-      }
+      } else this.walk(pd, dt, along, across);
       const lineNow = pd.line + pd.off;
-      pd.p.root.position.set(pd.axis === 'x' ? pd.t : lineNow, CURB, pd.axis === 'x' ? lineNow : pd.t);
+      pd.p.root.position.set(pd.axis === 'x' ? pd.t : lineNow, this.groundAt(pd), pd.axis === 'x' ? lineNow : pd.t);
+      pd.p.root.rotation.y = pd.yaw;
       if (pd.buddy) this.follow(pd.buddy, pd);
     }
     for (const pd of this.peds) {
@@ -752,21 +815,122 @@ export class Pedestrians {
       pd.p.setLod(d < 22 ? 0 : 1);
     }
   }
+  /** distance to the next kerb ahead */
+  private nearKerb(pd: Ped) {
+    const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+    const u = pd.t / CP - 0.5;
+    const kNext = pd.dir > 0 ? Math.floor(u) + 1 : Math.ceil(u) - 1;
+    return ((kNext + 0.5) * CP - pd.dir * ch - pd.t) * pd.dir;
+  }
+  /** on the sidewalk the feet stand on the kerb height; in the roadway, on the asphalt */
+  private groundAt(pd: Ped) {
+    const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+    const u = pd.t / CP - 0.5;
+    return Math.abs(pd.t - (Math.round(u) + 0.5) * CP) < ch ? 0 : CURB;
+  }
+  private walk(pd: Ped, dt: number, along: number, across: number) {
+    const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+    const u = pd.t / CP - 0.5;
+    const inRoad = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) < ch;
+    let v = pd.v;
+    if (!inRoad) {
+      // the next kerb ahead, and the crossing signal
+      const kNext = pd.dir > 0 ? Math.floor(u) + 1 : Math.ceil(u) - 1;
+      const kerb = (kNext + 0.5) * CP - pd.dir * ch;
+      const dist = (kerb - pd.t) * pd.dir;
+      const go = walkSignal(pd.axis, this.clock);
+      if (pd.state === 'kerb') {
+        if (go) {
+          pd.wait -= dt;
+          if (pd.wait <= 0) {
+            pd.state = 'walk';
+            pd.p.setActivity('walk', this.rng.range(0, 1));
+          }
+        }
+        if (pd.state === 'kerb') {
+          pd.v0 = 0;
+          return;
+        }
+      } else if (!go && dist < pd.wd + 2.5 && dist > -0.05) {
+        // slow down into the waiting cluster; stop pd.wd back from the kerb
+        v *= THREE.MathUtils.clamp((dist - pd.wd) / 2.5, 0, 1);
+        if (dist - pd.wd < 0.05) {
+          pd.state = 'kerb';
+          pd.wait = this.rng.range(0.2, 1.4); // reaction time once WALK shows
+          pd.p.setActivity(this.rng.chance(0.4) ? 'phone' : 'idle', this.rng.range(0, 3));
+          pd.v0 = 0;
+          return;
+        }
+      }
+    }
+    // pass the player and oncoming people (keep right), go around street furniture
+    let target = 0;
+    const right = (pd.axis === 'x' ? 1 : -1) * pd.dir;
+    const avoid = (oa: number, oc: number, oncoming: boolean) => {
+      const ahead = (oa - pd.t) * pd.dir;
+      const lat = oc - (pd.line + pd.off);
+      if (ahead > -0.3 && ahead < 3.5 && Math.abs(lat) < 0.9) {
+        const away = oncoming ? right : lat > 0 ? -1 : 1;
+        target = THREE.MathUtils.clamp(pd.off + away * (1.0 - Math.abs(lat)), -1.4, 1.4);
+        if (ahead < 0.9) v *= oncoming ? 0.7 : 0.4;
+      }
+    };
+    avoid(along, across, false);
+    for (const o of this.peds) {
+      if (o === pd || o === pd.buddy || o.lead || o.axis !== pd.axis) continue;
+      if (Math.abs(o.line + o.off - pd.line - pd.off) > 1.5 || Math.abs(o.t - pd.t) > 3.5) continue;
+      avoid(o.t, o.line + o.off, o.state === 'walk' && o.dir !== pd.dir);
+    }
+    if (!inRoad) {
+      // street furniture straight ahead: step to whichever side of it keeps us on the sidewalk
+      const l = pd.line + target;
+      const a0 = pd.t, a1 = pd.t + pd.dir * 2.2;
+      const r = 0.34;
+      const [minA, maxA] = a0 < a1 ? [a0, a1] : [a1, a0];
+      const hits = pd.axis === 'x' ? this.grid.query(minA, l - r, maxA, l + r, _rects) : this.grid.query(l - r, minA, l + r, maxA, _rects);
+      if (hits.length) {
+        let lo = Infinity, hi = -Infinity;
+        for (const h of hits) {
+          lo = Math.min(lo, pd.axis === 'x' ? h.minZ : h.minX);
+          hi = Math.max(hi, pd.axis === 'x' ? h.maxZ : h.maxX);
+        }
+        const opts = [lo - r - 0.05, hi + r + 0.05].filter((x) => Math.abs(this.clampLine(pd, x) - x) < 0.01);
+        if (opts.length) target = opts.sort((x, y) => Math.abs(x - l) - Math.abs(y - l))[0] - pd.line;
+        else v *= 0.3;
+      }
+    }
+    target = this.clampLine(pd, pd.line + target) - pd.line;
+    if (inRoad || (pd.state === 'walk' && v > 0 && this.nearKerb(pd) < 3)) {
+      // on the crosswalk: keep within the painted band (0.4–3.4 m in from the kerb line)
+      const h = sideHalf(pd.axis);
+      const a = pd.c + pd.s * (h + 0.6), b = pd.c + pd.s * (h + 3.2);
+      target = THREE.MathUtils.clamp(pd.line + target, Math.min(a, b), Math.max(a, b)) - pd.line;
+    }
+    pd.off += THREE.MathUtils.clamp(target - pd.off, -1.1 * dt, 1.1 * dt);
+    pd.t += pd.dir * v * dt;
+    pd.v0 = v;
+    pd.p.setSpeed(Math.max(v, 0.3));
+    const turn = THREE.MathUtils.clamp((target - pd.off) * 0.6, -0.4, 0.4) * (pd.axis === 'x' ? -1 : 1) * pd.dir;
+    pd.yaw = yawOf(pd.axis, pd.dir) + turn;
+  }
   /** companions walk shoulder to shoulder, or stand facing the leader while talking */
   private follow(f: Ped, l: Ped) {
     const lp = l.p.root.position;
     f.axis = l.axis;
     f.dir = l.dir;
-    if (l.wait > 0) {
-      if (f.p.activity !== 'talk' && f.p.activity !== 'idle') f.p.setActivity(this.rng.chance(0.5) ? 'talk' : 'idle', 1.3);
-      f.p.root.position.set(lp.x + Math.sin(l.yaw) * 0.95, CURB, lp.z + Math.cos(l.yaw) * 0.95);
-      f.p.root.rotation.y = l.yaw + Math.PI;
+    if (l.state !== 'walk' || l.v0 < 0.05) {
+      const talk = l.state === 'stand';
+      if (f.p.activity === 'walk') f.p.setActivity(talk ? 'talk' : 'idle', 1.3);
+      const d = talk ? 0.95 : 0.62;
+      const a = talk ? l.yaw : l.yaw + Math.PI / 2;
+      f.p.root.position.set(lp.x + Math.sin(a) * d, lp.y, lp.z + Math.cos(a) * d);
+      f.p.root.rotation.y = talk ? l.yaw + Math.PI : l.yaw;
     } else {
       if (f.p.activity !== 'walk') f.p.setActivity('walk', 0.3);
-      f.p.setSpeed(l.v0 ?? l.v);
+      f.p.setSpeed(l.v0);
       // to the leader's left
       const left = l.yaw + Math.PI / 2;
-      f.p.root.position.set(lp.x + Math.sin(left) * 0.62, CURB, lp.z + Math.cos(left) * 0.62);
+      f.p.root.position.set(lp.x + Math.sin(left) * 0.62, lp.y, lp.z + Math.cos(left) * 0.62);
       f.p.root.rotation.y = l.yaw;
     }
   }

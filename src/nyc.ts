@@ -176,7 +176,7 @@ export class NycLevel implements Level {
       g.emissiveIntensity = l === 'g' ? 3 : 0.05;
     }
     this.traffic.update(dt, p, time);
-    this.peds.update(dt, p);
+    this.peds.update(dt, p, time, this.nearCols);
     for (const s of this.steam) {
       const ph = ((time * 0.35 + s.userData.ph) % 1);
       s.position.y = s.userData.y + ph * 5;

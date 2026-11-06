@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { Person, Pedestrians, loadPeopleAssets, type Activity } from '../nyc/people';
 import { Rng } from '../rng';
-import { AX, AVE, SW, CURB } from '../nyc/common';
+import { AX, AVE, SW, CURB, SZ, ST } from '../nyc/common';
+import type { Rect } from '../level';
 
 /**
  * ?lab=people — a lineup of pedestrians (walking in place) for close inspection.
@@ -13,6 +14,8 @@ import { AX, AVE, SW, CURB } from '../nyc/common';
 let people: Person[] = [];
 let crowd: Pedestrians | null = null;
 const origin = new THREE.Vector3();
+let labCols: Rect[] = [];
+let labTime = 0;
 const scene: LabScene = {
   name: 'people',
   description: 'Skinned, animated NYC pedestrians',
@@ -28,20 +31,37 @@ const scene: LabScene = {
       group.position.set(-origin.x, 0, -origin.z);
       const walk = new THREE.MeshStandardMaterial({ color: '#8d8a84', roughness: 0.9 });
       const road = new THREE.MeshStandardMaterial({ color: '#2a2b2e', roughness: 0.95 });
+      const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material) => {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+        b.position.set(x, y, z);
+        b.receiveShadow = true;
+        group.add(b);
+        return b;
+      };
+      // the avenue (x = 60) meets a street (z = 32): sidewalks stop at the street's kerbs
+      const sz = SZ / 2;
       for (const s of [-1, 1]) {
-        const sw = new THREE.Mesh(new THREE.BoxGeometry(SW, CURB, 300), walk);
-        sw.position.set(AX / 2 + s * (AVE / 2 + SW / 2), CURB / 2 + 0.002, origin.z);
-        sw.receiveShadow = true;
-        group.add(sw);
+        box(SW, CURB, sz - ST / 2 + 120, AX / 2 + s * (AVE / 2 + SW / 2), CURB / 2, (sz - ST / 2 - 120) / 2, walk);
+        box(SW, CURB, 120, AX / 2 + s * (AVE / 2 + SW / 2), CURB / 2, sz + ST / 2 + 60, walk);
       }
-      const rd = new THREE.Mesh(new THREE.BoxGeometry(AVE, 0.01, 300), road);
-      rd.position.set(AX / 2, 0.006, origin.z);
-      rd.receiveShadow = true;
-      group.add(rd);
+      box(AVE, 0.01, 300, AX / 2, 0.006, origin.z, road);
+      box(80, 0.012, ST, AX / 2, 0.007, sz, road);
+      const paint = new THREE.MeshStandardMaterial({ color: '#e8e8e4', roughness: 0.7 });
+      for (const zs of [-1, 1]) for (let x = AX / 2 - AVE / 2 + 0.5; x < AX / 2 + AVE / 2; x += 1.2) box(0.6, 0.014, 3, x, 0.008, sz + zs * (ST / 2 + 1.9), paint);
+      for (const xs of [-1, 1]) for (let z = sz - ST / 2 + 0.5; z < sz + ST / 2; z += 1.2) box(3, 0.014, 0.6, AX / 2 + xs * (AVE / 2 + 1.9), 0.008, z, paint);
+      // street furniture on the east sidewalk to walk around: tree pits and a newsstand
+      const cols: Rect[] = [];
+      const furn = new THREE.MeshStandardMaterial({ color: '#3a4a3a', roughness: 0.8 });
+      for (const [x, z, w, d, h] of [[69.2, 2, 1.1, 1.1, 0.4], [69.2, 12, 1.1, 1.1, 0.4], [69.2, 20, 1.1, 1.1, 0.4], [70.6, -8, 1.9, 4.6, 2.4], [69.0, 25, 0.5, 0.5, 1.1]]) {
+        box(w, h, d, x, CURB + h / 2, z, furn);
+        cols.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+      }
+      labCols = cols;
+      labTime = Number(params.get('time') ?? 0);
       crowd = new Pedestrians(group, Number(params.get('seed') ?? 1));
       await new Promise((r) => setTimeout(r, 50));
-      crowd.update(0.016, origin);
-      for (let i = 0; i < Math.max(12, Number(params.get('t') ?? 0) * 10); i++) crowd.update(0.1, origin);
+      crowd.update(0.016, origin, labTime, labCols);
+      for (let i = 0; i < Math.max(12, Number(params.get('t') ?? 0) * 10); i++) crowd.update(0.1, origin, (labTime += 0.1), labCols);
       // perf readout for shot.mjs --eval "__peopleStats()": meshes and triangles of the crowd
       (window as unknown as { __peopleStats: () => string }).__peopleStats = () => {
         let meshes = 0, tris = 0, shadow = 0;
@@ -78,7 +98,7 @@ const scene: LabScene = {
   },
   update(dt) {
     for (const p of people) p.update(dt);
-    crowd?.update(dt, origin);
+    crowd?.update(dt, origin, (labTime += dt), labCols);
   },
 };
 export default scene;
