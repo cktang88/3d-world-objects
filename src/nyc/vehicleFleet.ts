@@ -574,6 +574,15 @@ function lampCards(parts: Part[]) {
  * The near LOD of one car (full parts, cut-out wheels), plus its brake-lamp lenses. Geometry and materials are
  * shared; only the paint material is the car's own (shared by every car of that colour).
  */
+const stillCache = new Map<string, THREE.BufferGeometry | null>();
+function staticWheels(p: Prepared) {
+  if (!stillCache.has(p.id)) {
+    const geos = p.wheels.map((w) => w.geo.clone().translate(w.center.x, w.center.y, w.center.z));
+    stillCache.set(p.id, geos.length ? mergeGeometries(geos, false) : null);
+  }
+  return stillCache.get(p.id)!;
+}
+
 export function nearObject(p: Prepared, paint: THREE.Material) {
   const near = new THREE.Group();
   for (const part of p.lod0) {
@@ -590,15 +599,27 @@ export function nearObject(p: Prepared, paint: THREE.Material) {
   pool.userData.owned = false;
   pool.userData.pool = true;
   near.add(pool);
+  // wheels: one merged mesh while the car stands (parked cars), four spinning ones for traffic (userData.spin)
   const wheels: THREE.Object3D[] = [];
+  const spinGroup = new THREE.Group();
+  spinGroup.visible = false;
   for (const w of p.wheels) {
     const m = new THREE.Mesh(w.geo, WHEEL_MAT);
     m.position.copy(w.center);
     m.castShadow = false;
     m.userData.owned = false;
-    near.add(m);
+    spinGroup.add(m);
     wheels.push(m);
   }
+  near.add(spinGroup);
+  const still = staticWheels(p);
+  if (still) {
+    const m = new THREE.Mesh(still, WHEEL_MAT);
+    m.userData.owned = false;
+    near.add(m);
+    near.userData.wheelsStill = m;
+  }
+  near.userData.wheelsSpin = spinGroup;
   let brake: THREE.Mesh | null = null;
   if (p.brake) {
     brake = new THREE.Mesh(p.brake, BRAKE_MAT);
@@ -611,7 +632,7 @@ export function nearObject(p: Prepared, paint: THREE.Material) {
 // ---------------------------------------------------------------- instanced mid/far LODs
 
 /** distances (m): near LOD inside NEAR, instanced mid LOD to MID (with shadows), instanced far LOD beyond */
-export const FLEET_LOD = { NEAR: 15, MID: 40 };
+export const FLEET_LOD = { NEAR: 12, MID: 40, SHADOW: 25 };
 
 const MID_PAINT = new THREE.MeshPhysicalMaterial({ color: '#fff', metalness: 0.45, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.08, side: THREE.DoubleSide, name: 'car-mid-paint' });
 const MID_REST = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, side: THREE.DoubleSide, name: 'car-mid' });
@@ -695,7 +716,8 @@ export class FleetInstances {
       const p = ready.get(id)!;
       const mk = (level: 1 | 2, paint: boolean) => {
         const g = merged(p, level, paint);
-        return g ? new Batch(this.root, g, level === 1 ? (paint ? MID_PAINT : MID_REST) : paint ? FAR_PAINT : FAR_REST, level === 1, paint) : null;
+        // mid instances cast no shadow themselves: cars within SHADOW cast through the depth-only proxies
+        return g ? new Batch(this.root, g, level === 1 ? (paint ? MID_PAINT : MID_REST) : paint ? FAR_PAINT : FAR_REST, false, paint) : null;
       };
       // shadow proxies: near cars cast their shadow from the mid LOD (drawn depth-only, invisible in the main pass)
       const sh = (paint: boolean) => {
@@ -735,14 +757,21 @@ export class FleetInstances {
       const d = pos.distanceTo(eye);
       const isNear = d < FLEET_LOD.NEAR;
       e.near.visible = isNear;
+      if (isNear) {
+        const spin = !!e.obj.userData.spin;
+        if (e.near.userData.wheelsSpin) e.near.userData.wheelsSpin.visible = spin;
+        if (e.near.userData.wheelsStill) e.near.userData.wheelsStill.visible = !spin;
+      }
       const b = this.set(e.id);
       // lamps for every car, near or not: headlights + tail lights at night, brake lights when braking
       if (lit) b.head?.push(e.obj.matrixWorld, e.color);
       const tail = (lit ? 1.6 * night : 0) + (e.obj.userData.braking ? 2.4 : 0);
       if (tail > 0.02) b.tail?.push(e.obj.matrixWorld, TAIL_C.setRGB(tail, tail * 0.06, tail * 0.03));
-      if (isNear) {
+      if (d < FLEET_LOD.SHADOW) {
         b.shP?.push(e.obj.matrixWorld, e.color);
         b.shR?.push(e.obj.matrixWorld, e.color);
+      }
+      if (isNear) {
         c.near++;
         continue;
       }

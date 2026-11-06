@@ -258,8 +258,9 @@ function standin(color: string, len: number, wid: number, tall: boolean): THREE.
   let s = standinCache.get(key);
   if (!s) {
     const g = new THREE.Group();
-    const body = mat(color, { rough: 0.35, metal: 0.4 });
-    const black = mat('#111', { rough: 0.8 });
+    // one roughness/metalness for every part so the bake gives a single mesh (one draw call per stand-in)
+    const body = mat(color, { rough: 0.5, metal: 0.3 });
+    const black = mat('#111', { rough: 0.5, metal: 0.3 });
     const h = tall ? 1.85 : 1.45;
     B(g, body, wid, h * 0.45, len, 0, 0.3, 0);
     B(g, M2.glass, wid * 0.92, h * 0.4, len * 0.55, 0, 0.3 + h * 0.45, tall ? 0.2 : 0.1);
@@ -270,6 +271,7 @@ function standin(color: string, len: number, wid: number, tall: boolean): THREE.
         t.position.y = 0.34;
       }
     s = bake(g);
+    s.traverse((o) => (o.castShadow = false)); // a stand-in for a few seconds: not worth the shadow cascades
     standinCache.set(key, s);
   }
   const c = s.clone();
@@ -277,7 +279,7 @@ function standin(color: string, len: number, wid: number, tall: boolean): THREE.
   c.traverse((o) => (o.userData.owned = false));
   return c;
 }
-const M2 = { glass: mat('#1e2a33', { rough: 0.15, metal: 0.4 }) };
+const M2 = { glass: mat('#1e2a33', { rough: 0.5, metal: 0.3 }) };
 
 /**
  * A parked/showcase car for other areas (dealership lots, kerbs): the same detailed LOD model as street traffic
@@ -383,6 +385,7 @@ export class Traffic {
             ? 'cab'
             : 'sedan';
     const obj = carMesh(kind, r);
+    obj.userData.spin = !parked; // moving traffic shows its four spinning wheels (parked cars one merged mesh)
     this.group.add(obj);
     const c: Car = {
       obj, axis: slot.axis, dir: 1, line: 0, lineTo: 0, t: 0, v: 0, vmax: parked ? 0 : r.range(ave ? 8.5 : 6.5, ave ? 12.5 : 10),

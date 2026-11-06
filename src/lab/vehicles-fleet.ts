@@ -37,6 +37,7 @@ const scene: LabScene = {
         o.add(brake);
       }
       for (const w of wheels) w.rotation.x = Number(params.get('spin') ?? 0);
+      o.userData.spin = params.has('spin');
       o.position.x = (i - (ids.length - 1) / 2) * 2.8;
       group.add(o);
       fleetInstances.register(o, id, paint.color, near);
