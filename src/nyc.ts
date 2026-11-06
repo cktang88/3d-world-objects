@@ -212,6 +212,7 @@ export class NycLevel implements Level {
     for (const p of ch.portals) {
       p.box.translate(new THREE.Vector3(ox, 0, oz));
       p.returnPos?.add(new THREE.Vector3(ox, 0, oz));
+      if (p.door) { p.door.pos.add(new THREE.Vector3(ox, 0, oz)); p.door.hole?.translate(new THREE.Vector3(ox, 0, oz)); } // seamless.ts
     }
     this.group.add(ch.group);
     this.chunks.set(k, ch);

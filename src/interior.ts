@@ -5,7 +5,7 @@ import { box, mat, glow, footprint, rectBox3, blob } from './build';
 import { paintingTex, signTex } from './textures';
 import { BIOMES, ROLE_BIOMES } from './biomes';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
-import { disposeTree, overlaps, rect } from './level';
+import { disposeTree, finishBuilding, overlaps, rect } from './level';
 import { getTimeOfDay } from './lighting';
 import { Kit } from './rooms/kit';
 import { M } from './rooms/mats';
@@ -209,7 +209,11 @@ export class InteriorLevel implements Level {
   private panels: 'tall' | 'wainscot' | 'none' = 'none';
   private pal: { wood: THREE.Material; dark: THREE.Material; fabric: THREE.Material; accent: THREE.Material[]; metal: THREE.Material; door: THREE.Material; cab: THREE.Material; counter: THREE.Material };
 
-  constructor(private desc: Extract<LevelDesc, { kind: 'interior' }>) {
+  /** seamless.ts: the doorway you come in by, and the construction left to do when staged */
+  doorway?: Level['doorway'];
+  staging?: Iterator<unknown>;
+
+  constructor(private desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean } = {}) {
     this.rng = new Rng(hashN(desc.seed, desc.floor));
     this.name = desc.floor > 0 ? `${desc.name} · floor ${desc.floor + 1}` : desc.name;
     const b = BIOMES[desc.biome] ?? BIOMES.town;
@@ -232,7 +236,8 @@ export class InteriorLevel implements Level {
       cab: r.pick([M.painted('#f1eee6'), M.painted('#c9cfc6'), M.painted('#2f3d4a'), M.painted('#d9d2c2'), M.oak('#e8d8c0')]),
       counter: r.pick([M.marble('#ffffff'), M.marble('#ffffff'), M.marble('#5a5a5a'), M.oak('#c9a070')]),
     };
-    this.generate();
+    this.staging = this.generate();
+    if (!opts.staged) finishBuilding(this);
   }
 
   colliders() {
@@ -257,7 +262,7 @@ export class InteriorLevel implements Level {
 
   // ------------------------------------------------------------------ layout
 
-  private generate() {
+  private *generate() {
     const r = this.rng;
     const style = this.style;
     const big = style === 'museum' || style === 'office' || style === 'shop';
@@ -322,6 +327,7 @@ export class InteriorLevel implements Level {
     }
     this.spawn.pos.set(exitX, 0, bounds.z1 - 1.2);
     this.spawn.yaw = 0;
+    this.doorway = { pos: new THREE.Vector3(exitX, 0, bounds.z1), yaw: 0 };
 
     // room types: big rooms get the main types, the smallest the bathroom (and a small kitchen)
     const types = STYLE_ROOMS[style] ?? STYLE_ROOMS.house;
@@ -410,6 +416,7 @@ export class InteriorLevel implements Level {
       this.use(rm);
       this.floorAndCeiling(rm);
     }
+    yield;
 
     // lights: one warm ceiling light per room, plus one shadow-casting light that follows you
     sorted.forEach((rm, i) => {
@@ -435,10 +442,12 @@ export class InteriorLevel implements Level {
       this.update(0, this.spawn.pos, 0);
     }
 
-    sorted.forEach((rm) => {
+    for (const rm of sorted) {
+      yield;
       this.use(rm);
       this.furnish(rm, doorZones, rm === stairRoom);
-    });
+    }
+    yield;
 
     for (const c of this.cells) c.kit.finish(c.group);
     this.group.traverse((o) => {

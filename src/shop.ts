@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
+import { finishBuilding } from './level';
 import { mat } from './build';
 import { realScale } from './realscale';
 import { Rng, hashN } from './rng';
@@ -102,8 +103,19 @@ export class ShopLevel implements Level {
    */
   containers: (Container & { generated: boolean; generate: () => void })[] = [];
 
-  constructor(desc: Extract<LevelDesc, { kind: 'interior' }>) {
+  /** seamless.ts: the doorway onto the street, and the shop front to hide when seen from outside */
+  doorway?: Level['doorway'];
+  staging?: Iterator<unknown>;
+  private front: THREE.Object3D | null = null;
+
+  /** staged: leave construction in `staging` (seamless.ts runs it in time slices) */
+  constructor(desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean } = {}) {
     this.name = desc.name;
+    this.staging = this.steps(desc);
+    if (!opts.staged) finishBuilding(this);
+  }
+
+  private *steps(desc: Extract<LevelDesc, { kind: 'interior' }>) {
     const r = new Rng(hashN(desc.seed, 31));
     const type = desc.shop ?? 'deli';
     const layout = LAYOUTS[type] ?? LAYOUTS.deli;
@@ -113,7 +125,10 @@ export class ShopLevel implements Level {
     const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
     const doorX = layout.door?.(W, r) ?? 0;
     this.shell(kit, st, doorX, desc.name, info.colors[0], r);
+    this.doorway = { pos: new THREE.Vector3(doorX, 0, D / 2), yaw: 0, hide: this.front ? [this.front] : [] };
+    yield;
     layout.build(kit, r, st, { doorX, name: desc.name, color: info.colors[0] });
+    yield;
     this.env = { ...this.env, ...st.env };
     // merge static fixtures into a handful of meshes
     const baked = bake(kit.stat);
@@ -182,6 +197,7 @@ export class ShopLevel implements Level {
     }
     // shop front: windows onto the street and the door
     k.at(0, D / 2, Math.PI);
+    const frontFrame = k.stat.children[k.stat.children.length - 1];
     const pane = mat('#dfeaf2', { emissive: '#e8f0f6', ei: 0.9, rough: 0.1 });
     const frame = mat('#2a2a2a', { metal: 0.4, rough: 0.5 });
     const dx = -doorX; // frame is turned round
@@ -198,6 +214,13 @@ export class ShopLevel implements Level {
     k.face(lit(textTex('EXIT', '#0c5a2a', '#e8ffe8', { w: 256, h: 96 })), 0.42, 0.16, dx, 2.85, 0.12);
     this.cols.push({ minX: -W / 2, maxX: doorX - 0.8, minZ: D / 2 - 0.1, maxZ: D / 2 + 1 });
     this.cols.push({ minX: doorX + 0.8, maxX: W / 2, minZ: D / 2 - 0.1, maxZ: D / 2 + 1 });
+    // baked on its own: seamless.ts hides it while the shop is seen through the street door
+    k.stat.remove(frontFrame);
+    const fg = new THREE.Group();
+    fg.add(frontFrame);
+    this.front = bake(fg);
+    this.front.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = false) : null));
+    this.group.add(this.front);
     // name on the back wall
     if (st.banner !== false) {
       k.at(0, -D / 2 + 0.11);

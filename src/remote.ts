@@ -94,8 +94,11 @@ function loadParsed(e: RemoteEntry, prio: number): Promise<ParsedObject> {
   return p;
 }
 
+/** while n > 0, clearQueue() does nothing (seamless.ts disposing a cached level in the background) */
+export const queueHold = { n: 0 };
 /** Drop queued (not yet started) loads, e.g. when leaving a room. */
 export function clearQueue() {
+  if (queueHold.n > 0) return;
   for (const j of queue.splice(0)) j.reject(new Error('cancelled'));
 }
 

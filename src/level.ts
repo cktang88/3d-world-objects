@@ -31,6 +31,13 @@ export interface Portal {
   returnYaw?: number;
   /** relative size of the thing being entered (for the scale counter) */
   shrink?: number;
+  /**
+   * seamless doors (src/seamless.ts): the doorway in world space. `pos` is a point on the
+   * threshold at floor level, `yaw` the player yaw of someone walking IN through it. `see`: the
+   * door/windows are glass, so the prebuilt level is shown behind it; `hole` is the world box of
+   * glass (fake-interior shader) to cut away while the real interior shows.
+   */
+  door?: { pos: THREE.Vector3; yaw: number; see?: boolean; hole?: THREE.Box3 };
 }
 
 export interface Env {
@@ -59,6 +66,28 @@ export interface Level {
   portals(): Portal[];
   update(dt: number, player: THREE.Vector3, time: number): void;
   dispose(): void;
+  /**
+   * seamless doors (src/seamless.ts): the level's own entry doorway (threshold point at floor
+   * level, yaw of the player walking in). `hide` lists objects (e.g. the shop front wall seen from
+   * outside) to hide while the level is shown through a street door. Optional: without it the
+   * 'back' portal (its box centre and returnYaw) is used.
+   */
+  doorway?: { pos: THREE.Vector3; yaw: number; hide?: THREE.Object3D[] };
+  /**
+   * staged construction (src/seamless.ts): a level built with `{ staged: true }` leaves the rest
+   * of its construction here; each next() does one slice (a room, a fixture run). Whoever built
+   * it must drain it (seamless.ts does so within a per-frame ms budget) before using the level.
+   */
+  staging?: Iterator<unknown>;
+}
+
+/** run a staged level's remaining construction at once */
+export function finishBuilding<T extends Level>(lv: T): T {
+  if (lv.staging) {
+    while (!lv.staging.next().done);
+    lv.staging = undefined;
+  }
+  return lv;
 }
 
 export function rect(cx: number, cz: number, w: number, d: number): Rect {
