@@ -112,6 +112,7 @@ export interface Part {
   double: boolean;
 }
 export interface Prepared {
+  id: string;
   lod0: Part[];
   lod1: Part[];
 }
@@ -122,7 +123,7 @@ export function loadFleet(id: string): Promise<Prepared | null> {
   if (!p) {
     const base = `${import.meta.env.BASE_URL}assets/vehicles/${id}`;
     p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`)])
-      .then(([a, b]) => ({ lod0: prepare(a.scene, id), lod1: prepare(b.scene, id) }))
+      .then(([a, b]) => ({ id, lod0: prepare(a.scene, id), lod1: prepare(b.scene, id) }))
       .catch((e) => {
         console.warn('vehicle', id, e);
         return null;
@@ -266,8 +267,64 @@ function prepare(root: THREE.Object3D, id: string): Part[] {
   return parts;
 }
 
-/** Build one car object from prepared parts: a THREE.LOD (near, far) sharing everything but the paint. */
-export function fleetObject(p: Prepared, paint: THREE.Material, far = 26): THREE.LOD {
+/** average colour of a texture (for the single-material distant LOD) */
+const avgCache = new WeakMap<THREE.Texture, THREE.Color>();
+function textureAverage(t: THREE.Texture): THREE.Color {
+  let c = avgCache.get(t);
+  if (!c) {
+    c = new THREE.Color(0.5, 0.5, 0.5);
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 1;
+      const g = cv.getContext('2d')!;
+      g.drawImage(t.image as CanvasImageSource, 0, 0, 1, 1);
+      const d = g.getImageData(0, 0, 1, 1).data;
+      c.setRGB(d[0] / 255, d[1] / 255, d[2] / 255, THREE.SRGBColorSpace);
+    } catch {
+      /* image not decodable here: keep grey */
+    }
+    avgCache.set(t, c);
+  }
+  return c;
+}
+
+/** the far-far LOD: the far parts merged into one vertex-coloured mesh with this car's paint baked in */
+const LOD2_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.25, name: 'car-lod2' });
+const lod2Cache = new Map<string, THREE.BufferGeometry>();
+function lod2Geometry(p: Prepared, paint: THREE.Material): THREE.BufferGeometry {
+  const key = `${p.id}|${paint.uuid}`;
+  let geo = lod2Cache.get(key);
+  if (!geo) {
+    const geos: THREE.BufferGeometry[] = [];
+    for (const part of p.lod1) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', part.geo.getAttribute('position'));
+      g.setAttribute('normal', part.geo.getAttribute('normal'));
+      g.setIndex(part.geo.index);
+      const n = g.getAttribute('position').count;
+      let col: THREE.BufferAttribute;
+      const src = part.geo.getAttribute('color') as THREE.BufferAttribute | undefined;
+      if (src && part.mat !== 'paint') col = src;
+      else {
+        const m = (part.mat === 'paint' ? paint : part.mat) as THREE.MeshStandardMaterial;
+        const c = m.color.clone();
+        if (m.map) c.multiply(textureAverage(m.map));
+        const arr = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) c.toArray(arr, i * 3);
+        col = new THREE.BufferAttribute(arr, 3);
+      }
+      g.setAttribute('color', col);
+      geos.push(g);
+    }
+    geo = mergeGeometries(geos, false) ?? new THREE.BufferGeometry();
+    geo.computeBoundingSphere();
+    lod2Cache.set(key, geo);
+  }
+  return geo;
+}
+
+/** Build one car object: a THREE.LOD (near, far, one-draw-call far-far) sharing everything but the paint. */
+export function fleetObject(p: Prepared, paint: THREE.Material, far = 26, farther = 70): THREE.LOD {
   const lod = new THREE.LOD();
   const level = (parts: Part[], shadow: boolean) => {
     const g = new THREE.Group();
@@ -282,5 +339,9 @@ export function fleetObject(p: Prepared, paint: THREE.Material, far = 26): THREE
   };
   lod.addLevel(level(p.lod0, true), 0);
   lod.addLevel(level(p.lod1, true), far);
+  const m2 = new THREE.Mesh(lod2Geometry(p, paint), LOD2_MAT);
+  m2.castShadow = true;
+  m2.userData.owned = false;
+  lod.addLevel(m2, farther);
   return lod;
 }

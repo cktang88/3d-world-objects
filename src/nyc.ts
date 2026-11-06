@@ -402,7 +402,7 @@ export class NycLevel implements Level {
         const car = carMesh(rng.chance(0.15) ? 'cab' : 'sedan', rng);
         car.position.set(x, 0, z);
         car.rotation.y = (run.axis === 'x' ? Math.PI / 2 : 0) + (rng.chance(0.5) ? Math.PI : 0);
-        stat.add(car);
+        group.add(car); // not baked: the car swaps in its detailed LOD model once loaded
         colliders.push(run.axis === 'x' ? rect(x, z, 4.6, 1.9) : rect(x, z, 1.9, 4.6));
       }
     }
