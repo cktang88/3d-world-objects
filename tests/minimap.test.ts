@@ -1,7 +1,9 @@
 /** Minimap (src/minimap.ts + the NYC source): deterministic tiles, correct player mapping, capped cache, throttled redraws. */
-import { test, expect, near } from './qa';
-import { Minimap, TileCache, worldToMap, registerMinimapSource, setSurfaceFactory, HUD_HZ, MAX_TILES, type Ctx2D, type Surface } from '../src/minimap';
+import { test, expect, near, none, fmt } from './qa';
+import { Minimap, TileCache, worldToMap, largeToWorld, worldToLarge, registerMinimapSource, setSurfaceFactory, HUD_HZ, MAX_TILES, type Ctx2D, type Surface } from '../src/minimap';
 import { nycMinimapSource } from '../src/nyc/minimap-nyc';
+import { districtAt, walkable } from '../src/nyc/districts';
+import { AX, SZ, BX, BZ, LX, LZ } from '../src/nyc/common';
 
 /** a 2D context that records every call and property write (for hashing what a tile paints) */
 function recorder(log: string[]): Ctx2D {
@@ -56,14 +58,79 @@ test(`the HUD redraws at most ${HUD_HZ} times a second, and not at all when the 
   const level = {};
   registerMinimapSource((l) => (l === level ? nycMinimapSource : null));
   const pos = { x: 49.8, z: 9 };
-  for (let i = 0; i < 180; i++) m.update(level, pos, 0, i / 60); // 3 s standing still
-  expect(m.stats.draws === 1, `${m.stats.draws} draws while standing still (want 1)`);
-  for (let i = 0; i < 180; i++) { pos.z -= 0.08; m.update(level, pos, 0.001 * i, 3 + i / 60); } // 3 s walking
-  expect(m.stats.draws <= 1 + 3 * HUD_HZ + 1, `${m.stats.draws} draws in 3 s of walking`);
-  expect(m.stats.draws >= 3 * HUD_HZ * 0.8, `only ${m.stats.draws} draws while walking`);
+  for (let i = 0; i < 180; i++) m.update(level, pos, 0, i / 60); // 3 s standing still: tiles fill in one per draw, then nothing
+  const filled = m.stats.draws;
+  expect(filled <= 12, `${filled} draws to fill the view`);
+  for (let i = 0; i < 180; i++) m.update(level, pos, 0, 3 + i / 60);
+  expect(m.stats.draws === filled, `${m.stats.draws - filled} more draws while standing still (want 0)`);
+  for (let i = 0; i < 180; i++) { pos.z -= 0.08; m.update(level, pos, 0.001 * i, 6 + i / 60); } // 3 s walking
+  expect(m.stats.draws - filled <= 3 * HUD_HZ + 1, `${m.stats.draws} draws in 3 s of walking`);
+  expect(m.stats.draws - filled >= 3 * HUD_HZ * 0.8, `only ${m.stats.draws} draws while walking`);
   expect(m.cache.size <= MAX_TILES, 'cache over its cap');
   // a level without a source shows nothing and draws nothing
   const before = m.stats.draws;
   m.update({}, pos, 0, 10);
   expect(m.stats.draws === before, 'drew a map for a level with no source');
+});
+
+test('large map: click -> world round-trips with world -> map', () => {
+  for (const [x, z] of [[0, 0], [529.8, -320], [-310, -128], [12.5, -7.25]]) {
+    const [sx, sy] = worldToLarge(x, z, 100, -50, 0.75, 960, 540);
+    const [wx, wz] = largeToWorld(sx, sy, 100, -50, 0.75, 960, 540);
+    near(wx, x, 1e-9, 'x'); near(wz, z, 1e-9, 'z');
+  }
+});
+
+test('teleport spots are walkable, on a sidewalk or path, never in a building or the roadway', () => {
+  const bad: string[] = [];
+  let n = 0;
+  for (let z = -7 * SZ; z <= 3 * SZ; z += 13.7)
+    for (let x = -4 * AX; x <= 7 * AX; x += 17.3) {
+      const to = nycMinimapSource.snap!(x, z);
+      if (!to) { bad.push(`${fmt(x)},${fmt(z)}: no spot`); continue; }
+      n++;
+      const cx = Math.round(to.x / AX), cz = Math.round(to.z / SZ), lx = to.x - cx * AX, lz = to.z - cz * SZ;
+      const d = districtAt(cx, cz);
+      if (!walkable(to.x, to.z)) bad.push(`${fmt(x)},${fmt(z)} -> ${fmt(to.x)},${fmt(to.z)} not walkable`);
+      else if (!d.open && Math.abs(lx) < LX && Math.abs(lz) < LZ) bad.push(`${fmt(x)},${fmt(z)} -> inside a ${d.kind} block`);
+      else if (!d.open && (Math.abs(lx) > BX || Math.abs(lz) > BZ)) bad.push(`${fmt(x)},${fmt(z)} -> in the roadway`);
+      else if (Math.hypot(to.x - x, to.z - z) > (walkable(x, z) ? 40 : 200)) bad.push(`${fmt(x)},${fmt(z)} -> ${fmt(Math.hypot(to.x - x, to.z - z))} m away`);
+    }
+  expect(n > 300, `only ${n} spots`);
+  none(bad, 'bad teleport spots');
+});
+
+test('a click on a showcase marker lands in that block, facing the showcase', () => {
+  const m = new Minimap();
+  m.headless = surface(960, 540);
+  const level = {};
+  registerMinimapSource((l) => (l === level ? nycMinimapSource : null));
+  let went: [number, number, number] | null = null;
+  m.onTeleport = (x, z, yaw) => (went = [x, z, yaw]);
+  m.update(level, { x: 300, z: -200 }, 0, 0);
+  m.cycle(); // large map, centred on the player
+  m.update(level, { x: 300, z: -200 }, 0, 0.1);
+  const bad: string[] = [];
+  let tried = 0;
+  for (const l of nycMinimapSource.labels!(-100, -500, 700, 100).filter((l) => l.kind === 'showcase')) {
+    const { ppm, W, H } = m.large;
+    const [sx, sy] = worldToLarge(l.x, l.z, 300, -200, ppm, W, H);
+    if (sx < 0 || sy < 0 || sx > W || sy > H) continue;
+    went = null;
+    m.mode = 'large';
+    m.update(level, { x: 300, z: -200 }, 0, 1 + tried); // redraw: markers in place
+    m.clickLarge(sx, sy);
+    tried++;
+    if (!went) { bad.push(`${l.text}: no teleport`); continue; }
+    const [x, z, yaw] = went as [number, number, number];
+    const cx = Math.round(l.x / AX), cz = Math.round(l.z / SZ);
+    if (Math.abs(x - cx * AX) > AX / 2 + 0.01 || Math.abs(z - cz * SZ) > SZ / 2 + 0.01) bad.push(`${l.text} at ${cx},${cz}: landed at ${fmt(x)},${fmt(z)} (outside its block)`);
+    if (!walkable(x, z)) bad.push(`${l.text}: landed on an unwalkable spot`);
+    // facing the block's centre (yaw 0 looks -z)
+    const want = Math.atan2(-(cx * AX - x), -(cz * SZ - z));
+    if (Math.abs(Math.atan2(Math.sin(yaw - want), Math.cos(yaw - want))) > 0.05) bad.push(`${l.text}: not facing its showcase`);
+    if (m.mode !== 'hud') bad.push('the large map stayed open after a teleport');
+  }
+  expect(tried >= 5, `only ${tried} markers clicked`);
+  none(bad, 'marker teleports');
 });

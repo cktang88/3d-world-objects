@@ -1,5 +1,5 @@
 import { AX, SZ, AVE, ST, BX, BZ, LX, LZ } from './common';
-import { districtAt, roadOpen, PIER_SHORE, type DKind } from './districts';
+import { districtAt, roadOpen, walkable, PIER_SHORE, type DKind } from './districts';
 import { parkFeature } from './district-park';
 import type { Ctx2D, MapLabel, MinimapSource } from '../minimap';
 
@@ -111,6 +111,45 @@ function drawBlock(g: Ctx2D, cx: number, cz: number) {
   void sw;
 }
 
+/**
+ * The nearest walkable outdoor spot to a clicked point: the middle of a sidewalk (2.2 m out from the
+ * shopfronts, clear of kerb furniture), a park walk or the Mall, the riverside esplanade. Faces along
+ * the street, or toward `face` (a showcase) when given.
+ */
+export function snapToWalk(x: number, z: number, face?: { x: number; z: number }): { x: number; z: number; yaw: number } {
+  let best: { x: number; z: number; yaw: number; d: number } | null = null;
+  const consider = (px: number, pz: number, yaw: number) => {
+    if (!walkable(px, pz)) return;
+    const d = Math.hypot(px - x, pz - z);
+    if (!best || d < best.d) best = { x: px, z: pz, yaw, d };
+  };
+  const ccx = Math.round(x / AX), ccz = Math.round(z / SZ);
+  for (let cz = ccz - 1; cz <= ccz + 1; cz++)
+    for (let cx = ccx - 1; cx <= ccx + 1; cx++) {
+      const d = districtAt(cx, cz), ox = cx * AX, oz = cz * SZ;
+      const lx = Math.max(-BX + 1, Math.min(BX - 1, x - ox)), lz = Math.max(-BZ + 1, Math.min(BZ - 1, z - oz));
+      const mid = LX + 2.2, midZ = LZ + 2.2; // the sidewalk line, as at the spawn
+      const sideOk = (e: '+x' | '-x' | '+z' | '-z') => !d.open || roadOpen(cx, cz, e);
+      if (sideOk('+x')) consider(ox + mid, oz + lz, 0);
+      if (sideOk('-x')) consider(ox - mid, oz + lz, 0);
+      if (sideOk('+z')) consider(ox + lx, oz + midZ, Math.PI / 2);
+      if (sideOk('-z')) consider(ox + lx, oz - midZ, Math.PI / 2);
+      if (d.open === 'park') {
+        // the Mall and the walks on the old road lines
+        if (!roadOpen(cx, cz, '+x')) consider(ox + AX / 2 - 3, oz + lz, 0);
+        if (!roadOpen(cx, cz, '-x')) consider(ox - AX / 2 + 3, oz + lz, 0);
+        if (!roadOpen(cx, cz, '+z')) consider(ox + lx, oz + SZ / 2 - 1.5, Math.PI / 2);
+        if (!roadOpen(cx, cz, '-z')) consider(ox + lx, oz - SZ / 2 + 1.5, Math.PI / 2);
+      }
+      if (d.kind === 'pier') consider(ox + (PIER_SHORE - 3.5) * (d.waterSide ?? 1), oz + lz, 0);
+    }
+  const b = best as { x: number; z: number; yaw: number } | null;
+  const out = b ?? { x: 49.8, z: 9, yaw: 0 };
+  // face the showcase when given (yaw 0 looks -z)
+  if (face) out.yaw = Math.atan2(-(face.x - out.x), -(face.z - out.z));
+  return { x: out.x, z: out.z, yaw: out.yaw };
+}
+
 export const nycMinimapSource: MinimapSource & { addChunk(cx: number, cz: number, hs: { rect: { minX: number; maxX: number; minZ: number; maxZ: number } }[] | undefined): void } = {
   tileSize: 128,
   drawTile(g, tx, tz, px) {
@@ -146,6 +185,16 @@ export const nycMinimapSource: MinimapSource & { addChunk(cx: number, cz: number
         if (sc) out.push({ x: cx * AX, z: cz * SZ + SZ / 5, text: sc, kind: 'showcase' });
       }
     return out;
+  },
+  snap(x, z, marker) {
+    // a marker: on the nearest sidewalk or path of the showcase's own block, looking at it
+    if (marker) return snapToWalk(marker.x, marker.z, { x: Math.round(marker.x / AX) * AX, z: Math.round(marker.z / SZ) * SZ });
+    return snapToWalk(x, z);
+  },
+  describe(x, z) {
+    const cx = Math.round(x / AX), cz = Math.round(z / SZ);
+    const sc = showcaseName(cx, cz);
+    return `${districtAt(cx, cz).name}${sc ? ' · ' + sc : ''}`;
   },
   addChunk(cx, cz, hs) {
     if (!hs) return;

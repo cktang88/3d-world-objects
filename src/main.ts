@@ -903,6 +903,9 @@ ready.then(() => {
   frame();
 });
 
+// [minimap] a click on the large map teleports the player (the same path the e2e journeys use)
+minimap.onTeleport = (x, z, yaw) => player.place(new THREE.Vector3(x, 0, z), yaw);
+
 Object.assign(window, {
   __world: { seam, vert, renderer, lighting, weather, scene, camera, gtao, bloom, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode,
     // scripts/e2e: read-only views of the journey state

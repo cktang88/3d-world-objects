@@ -16,6 +16,8 @@
  *     drawTile(g, tx, tz, px): void;                           // paint world [tx*T,(tx+1)*T]×[tz*T,(tz+1)*T] into px×px
  *     version?(tx, tz): number;                                // bump to repaint a tile (new data arrived)
  *     labels?(x0, z0, x1, z1): MapLabel[];                     // upright text / showcase markers in a world rect
+ *     snap?(x, z, marker?): {x, z, yaw} | null;                // large-map click: where to teleport
+ *     describe?(x, z): string;                                 // hover text
  *     hidden?: boolean;                                        // e.g. inside a building: hide the map
  *   }
  *
@@ -39,6 +41,10 @@ export interface MinimapSource {
   drawTile(g: Ctx2D, tx: number, tz: number, px: number): void;
   version?(tx: number, tz: number): number;
   labels?(x0: number, z0: number, x1: number, z1: number): MapLabel[];
+  /** a click on the large map: the walkable spot to teleport to (null: not here) */
+  snap?(x: number, z: number, marker?: MapLabel): { x: number; z: number; yaw: number } | null;
+  /** a short name for the hovered place (district, showcase) */
+  describe?(x: number, z: number): string;
   hidden?: boolean;
 }
 type Resolver = (level: unknown) => MinimapSource | null;
@@ -46,6 +52,14 @@ const resolvers: Resolver[] = [];
 /** a level type registers how to map itself (first resolver that returns a source wins) */
 export function registerMinimapSource(r: Resolver) {
   resolvers.push(r);
+}
+
+/** large map: screen <-> world for a view centred on (vx, vz) at `ppm` px per metre in a W x H canvas */
+export function largeToWorld(sx: number, sy: number, vx: number, vz: number, ppm: number, W: number, H: number): [number, number] {
+  return [vx + (sx - W / 2) / ppm, vz + (sy - H / 2) / ppm];
+}
+export function worldToLarge(x: number, z: number, vx: number, vz: number, ppm: number, W: number, H: number): [number, number] {
+  return [W / 2 + (x - vx) * ppm, H / 2 + (z - vz) * ppm];
 }
 
 export const TILE_PX = 256;
@@ -131,6 +145,35 @@ export class Minimap {
   private sourceOf = new WeakMap<object, MinimapSource | null>();
   /** for qa: no DOM, just count and paint into the given surface */
   headless: Surface | null = null;
+  /** teleport hook (main.ts: the same path the e2e journeys use) */
+  onTeleport: ((x: number, z: number, yaw: number) => void) | null = null;
+  private hover: { x: number; z: number } | null = null;
+  /** the large map's last scale (canvas px per metre) and size, for clicks */
+  large = { ppm: 1, W: 1, H: 1, k: 1 };
+  private markers: { l: MapLabel; sx: number; sy: number }[] = [];
+
+  /**
+   * A click on the large map at canvas pixel (sx, sy): snap to a walkable spot (a showcase marker
+   * within 14 px wins and the player faces it), teleport, back to the HUD. Returns where it went.
+   */
+  clickLarge(sx: number, sy: number) {
+    const src = this.src;
+    if (!src?.snap) return null;
+    const { ppm, W, H, k } = this.large;
+    const [wx, wz] = largeToWorld(sx, sy, this.view.x, this.view.z, ppm, W, H);
+    let mk: MapLabel | undefined, md = 14 * k;
+    for (const m of this.markers) {
+      const d = Math.hypot(m.sx - sx, m.sy - sy);
+      if (m.l.kind === 'showcase' && d < md) (md = d), (mk = m.l);
+    }
+    const to = src.snap(wx, wz, mk);
+    if (!to) return null;
+    this.onTeleport?.(to.x, to.z, to.yaw);
+    this.mode = 'hud';
+    this.last.t = -1;
+    this.show();
+    return to;
+  }
 
   cycle() {
     this.mode = this.mode === 'hud' ? 'large' : this.mode === 'large' ? 'off' : 'hud';
@@ -157,7 +200,7 @@ export class Minimap {
     this.pos.z = pos.z;
     this.show();
     if (!src || src.hidden || this.mode === 'off') return;
-    const moved = Math.hypot(pos.x - this.last.x, pos.z - this.last.z) > 0.25 || Math.abs(yaw - this.last.yaw) > 0.015 || Number.isNaN(this.last.x);
+    const moved = this.pending || Math.hypot(pos.x - this.last.x, pos.z - this.last.z) > 0.25 || Math.abs(yaw - this.last.yaw) > 0.015 || Number.isNaN(this.last.x);
     if (this.mode === 'large') {
       // on pan/zoom at once; for the player's own arrow, a few times a second
       if (this.view.dirty || (moved && time - this.last.t > 0.25)) {
@@ -202,10 +245,26 @@ export class Minimap {
       b.id = 'minimap-large';
       document.body.appendChild(b);
       let drag: { x: number; y: number } | null = null;
-      b.addEventListener('pointerdown', (e) => ((drag = { x: e.clientX, y: e.clientY }), b.setPointerCapture(e.pointerId)));
-      b.addEventListener('pointerup', () => (drag = null));
+      let down: { x: number; y: number; t: number; moved: number } | null = null;
+      const k = () => Math.min(2, devicePixelRatio || 1);
+      b.addEventListener('pointerdown', (e) => {
+        drag = { x: e.clientX, y: e.clientY };
+        down = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
+        b.setPointerCapture(e.pointerId);
+      });
+      b.addEventListener('pointerup', (e) => {
+        // a click, not a pan: little movement and a short press -> go there
+        if (down && down.moved < 6 && performance.now() - down.t < 500) this.clickLarge(e.clientX * k(), e.clientY * k());
+        drag = null;
+        down = null;
+      });
       b.addEventListener('pointermove', (e) => {
-        if (!drag) return;
+        const { ppm, W, H } = this.large;
+        const [hx, hz] = largeToWorld(e.clientX * k(), e.clientY * k(), this.view.x, this.view.z, ppm, W, H);
+        this.hover = { x: hx, z: hz };
+        this.view.dirty = true;
+        if (down) down.moved = Math.max(down.moved, Math.hypot(e.clientX - down.x, e.clientY - down.y));
+        if (!drag || (down && down.moved < 6)) return;
         this.view.x -= (e.clientX - drag.x) / this.view.ppm;
         this.view.z -= (e.clientY - drag.y) / this.view.ppm;
         drag = { x: e.clientX, y: e.clientY };
@@ -222,14 +281,18 @@ export class Minimap {
   }
 
   /** blit the tiles covering a world rect into g with the current transform (paints at most `budget` new tiles) */
+  /** a tile in view was left unpainted (budget): draw again next time even if nothing moved */
+  private pending = false;
   private blit(g: Ctx2D, src: MinimapSource, x0: number, z0: number, x1: number, z1: number, budget: number) {
     const T = src.tileSize;
     let painted = 0, n = 0;
+    this.pending = false;
     for (let tz = Math.floor(z0 / T); tz <= Math.floor(z1 / T); tz++)
       for (let tx = Math.floor(x0 / T); tx <= Math.floor(x1 / T); tx++) {
-        const surf = this.cache.get(src, tx, tz, painted < budget);
         const before = this.cache.painted;
+        const surf = this.cache.get(src, tx, tz, painted < budget);
         if (surf) g.drawImage(surf as unknown as CanvasImageSource, tx * T, tz * T, T, T);
+        else this.pending = true;
         painted += this.cache.painted - before;
         n++;
       }
@@ -251,7 +314,8 @@ export class Minimap {
     g.scale(ppm, ppm);
     g.translate(-pos.x, -pos.z);
     const reach = (R / ppm) * 1.45;
-    this.blit(g, src, pos.x - reach, pos.z - reach, pos.x + reach, pos.z + reach, 2);
+    // paint at most one new tile per HUD draw (the rest fill in over the next draws)
+    this.blit(g, src, pos.x - reach, pos.z - reach, pos.x + reach, pos.z + reach, 1);
     // upright labels for the special blocks in view
     g.setTransform(1, 0, 0, 1, 0, 0);
     if (src.labels) {
@@ -319,11 +383,14 @@ export class Minimap {
     this.view.dirty = false;
     void n;
     g.setTransform(1, 0, 0, 1, 0, 0);
-    const toS = (x: number, z: number): [number, number] => [W / 2 + (x - this.view.x) * ppm, H / 2 + (z - this.view.z) * ppm];
+    this.large = { ppm, W, H, k };
+    this.markers = [];
+    const toS = (x: number, z: number): [number, number] => worldToLarge(x, z, this.view.x, this.view.z, ppm, W, H);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     for (const l of src.labels?.(x0, z0, x1, z1) ?? []) {
       const [sx, sy] = toS(l.x, l.z);
+      this.markers.push({ l, sx, sy });
       if (l.kind === 'district') {
         g.font = `700 ${Math.round(13 * k)}px system-ui, sans-serif`;
         g.fillStyle = 'rgba(0,0,0,.6)';
@@ -359,10 +426,29 @@ export class Minimap {
     g.fill();
     g.stroke();
     g.restore();
+    // the hover crosshair with the place's name and coordinates
+    if (this.hover) {
+      const [hx, hy] = toS(this.hover.x, this.hover.z);
+      g.strokeStyle = 'rgba(255,255,255,.9)';
+      g.lineWidth = 1.2 * k;
+      g.beginPath();
+      g.moveTo(hx - 12 * k, hy);
+      g.lineTo(hx + 12 * k, hy);
+      g.moveTo(hx, hy - 12 * k);
+      g.lineTo(hx, hy + 12 * k);
+      g.stroke();
+      g.font = `500 ${Math.round(12 * k)}px system-ui, sans-serif`;
+      g.textAlign = 'left';
+      const txt = `${src.describe?.(this.hover.x, this.hover.z) ?? ''}  (${Math.round(this.hover.x)}, ${Math.round(this.hover.z)})`;
+      g.fillStyle = 'rgba(0,0,0,.6)';
+      g.fillText(txt, hx + 15 * k, hy - 13 * k);
+      g.fillStyle = '#fff';
+      g.fillText(txt, hx + 14 * k, hy - 14 * k);
+    }
     g.font = `500 ${Math.round(12 * k)}px system-ui, sans-serif`;
     g.fillStyle = 'rgba(255,255,255,.8)';
     g.textAlign = 'left';
-    g.fillText('M: close map · wheel: zoom · drag: pan', 16 * k, H - 18 * k);
+    g.fillText('M: close map · click: go there · wheel: zoom · drag: pan', 16 * k, H - 18 * k);
     this.done(t0);
   }
 
