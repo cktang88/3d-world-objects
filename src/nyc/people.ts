@@ -387,7 +387,7 @@ function shoeGeo(upper: string, sole: string, len: number, boot: boolean) {
     geo.setAttribute('color', new THREE.BufferAttribute(a, 3));
     return geo;
   };
-  g = mergeGeometries([paint(up.toNonIndexed(), upper), paint(so.toNonIndexed(), sole)])!;
+  g = mergeGeometries([paint(up.toNonIndexed(), upper), paint(so.index ? so.toNonIndexed() : so, sole)])!;
   shoeGeos.set(k, g);
   return g;
 }
