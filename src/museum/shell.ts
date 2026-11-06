@@ -10,6 +10,7 @@ import { textPlane, SANS, SERIF } from './text';
 
 const T = 0.3;
 const CORR = 2.4;
+const glassWall = new THREE.MeshStandardMaterial({ color: '#dfeff5', roughness: 0.05, transparent: true, opacity: 0.16, depthWrite: false });
 
 export function floorMaterial(k: Floor): THREE.Material {
   switch (k) {
@@ -48,7 +49,7 @@ export function buildShell(lv: MuseumBase, p: Plan, st: Style) {
   const { W, D, Hw } = p;
   const g = lv.group;
   const dark = st.dark;
-  const wallM = st.arch === 'machine' && p.wallColor === '#8c5a44' ? brick() : st.outdoor && st.arch === 'openair' ? brick() : mat(p.wallColor, { rough: 0.92 });
+  const wallM = st.arch === 'glasshouse' ? brick() : st.arch === 'machine' && p.wallColor === '#8c5a44' ? brick() : st.outdoor && st.arch === 'openair' ? brick() : mat(p.wallColor, { rough: 0.92 });
   const trim = mat(st.trim, { rough: 0.6 });
   // floor
   g.add(floorPlane(floorMaterial(p.floorKind), W, D, 0, 0, -D / 2));
@@ -70,8 +71,21 @@ export function buildShell(lv: MuseumBase, p: Plan, st: Style) {
   for (const [k, wl] of Object.entries(walls) as [Wall, (typeof walls)['N']][]) {
     const ds = p.doors.filter((d) => d.wall === k).sort((a, b) => a.at - b.at);
     const cc = wl.c + (wl.out * T) / 2;
-    const seg = (s0: number, s1: number, y0: number, y1: number) => {
+    const seg = (s0: number, s1: number, y0: number, y1: number): void => {
       if (s1 - s0 < 0.01 || y1 - y0 < 0.01) return;
+      if (st.arch === 'glasshouse' && y0 < 0.9 && y1 > 1.2) {
+        // a low brick plinth and glazing above, on white mullions
+        seg(s0, s1, y0, 0.9);
+        const gl = glassWall;
+        if (wl.axis === 'z') lv.bx(gl, s1 - s0, y1 - 0.9, 0.04, (s0 + s1) / 2, 0.9, cc);
+        else lv.bx(gl, 0.04, y1 - 0.9, s1 - s0, cc, 0.9, (s0 + s1) / 2);
+        const white = mat('#f7f7f5', { rough: 0.5 });
+        for (let s = s0; s <= s1 + 0.01; s += Math.max(0.5, (s1 - s0) / Math.max(1, Math.round((s1 - s0) / 1.5)))) {
+          if (wl.axis === 'z') lv.bx(white, 0.08, y1 - 0.9, 0.12, s, 0.9, cc);
+          else lv.bx(white, 0.12, y1 - 0.9, 0.08, cc, 0.9, s);
+        }
+        return;
+      }
       if (wl.axis === 'z') lv.bx(wallM, s1 - s0, y1 - y0, T, (s0 + s1) / 2, y0, cc);
       else lv.bx(wallM, T, y1 - y0, s1 - s0, cc, y0, (s0 + s1) / 2);
     };

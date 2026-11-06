@@ -193,7 +193,7 @@ function barrier(c: Ctx, kind: Barrier, f: Frame, w: number, d: number) {
 // ---------------------------------------------------------------- floor displays
 
 /** Big things: on the floor or a low platform at full size, with a barrier round it. */
-export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, barrierKind: Barrier): Unit {
+export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, barrierKind: Barrier, angle = 0): Unit {
   const a = along(m);
   const big = Math.max(a.w, a.d);
   const st = c0.st;
@@ -204,12 +204,15 @@ export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, 
   const bw = pw + bOff * 2, bd = pd + bOff * 2;
   const cradle = st.arch === 'maritime' && m.real.y < big;
   const lift = cradle ? Math.min(0.6, 0.12 * m.real.y + 0.2) : 0;
+  // turned platforms (motor halls) take up their rotated bounding box
+  const cs = Math.abs(Math.cos(angle)), sn = Math.abs(Math.sin(angle));
+  const fw = bw * cs + bd * sn, fd = bw * sn + bd * cs;
   return {
-    type: 'platform', place: 'floor', w: bw, d: bd + 1.0, h: ph + lift + m.real.y, items: [m], hero,
+    type: 'platform', place: 'floor', w: fw, d: fd + 1.0, h: ph + lift + m.real.y, items: [m], hero,
     focus: new THREE.Vector3(0, ph + lift + m.real.y * 0.5, -0.5), glow: Math.max(pw, pd) * 0.62,
     build(c, f) {
       const lv = c.lv;
-      const o = f.sub(0, -0.5);
+      const o = f.sub(0, -0.5, angle);
       if (ph > 0) {
         lv.bx(c.m.plinth, pw, ph, pd, 0, 0, 0, o);
         lv.bx(c.m.plinthAlt, pw + 0.04, 0.02, pd + 0.04, 0, ph - 0.02, 0, o);
@@ -220,8 +223,12 @@ export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, 
       }
       lv.exhibit(m, o, 0, ph + lift, 0, a.rot, { prio: c.prio() });
       barrier(c, barrierKind, o, bw, bd);
-      lv.col(o, 0, 0, bw + 0.1, bd + 0.1);
-      lectern(c, f, Math.min(bw / 2 - 0.3, 1.2), bd / 2 - 0.5 + 0.55 + 0.1, [m], hero);
+      if (angle) {
+        // a turned rectangle: cover it with a few axis-aligned boxes along its length
+        const n = Math.max(2, Math.ceil(bw / Math.max(1, bd)));
+        for (let i = 0; i < n; i++) lv.col(o, -bw / 2 + (bw * (i + 0.5)) / n, 0, bw / n + 0.1, bd + 0.1);
+      } else lv.col(o, 0, 0, bw + 0.1, bd + 0.1);
+      lectern(c, f, Math.min(fw / 2 - 0.3, 1.2), fd / 2 - 0.5 + 0.55 + 0.1, [m], hero);
     },
   };
 }

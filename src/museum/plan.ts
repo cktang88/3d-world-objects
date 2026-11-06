@@ -15,7 +15,7 @@ export type Kind = 'hang' | 'floor' | 'medium' | 'flat' | 'mount' | 'small' | 't
 export function classify(m: Measured, st: Style, r: Rng): Kind {
   const { x, y, z } = m.real;
   const L = Math.max(x, z), thin = Math.min(x, z);
-  if (st.hang && L >= 1.5 && L <= 80 && y < L * 0.7 && /aircraft|spacecraft/.test(m.entry.family)) return 'hang';
+  if (st.hang && L >= 1.5 && L <= 26 && y <= 6 && y < L * 0.7 && /aircraft|spacecraft/.test(m.entry.family)) return 'hang';
   if (L > 1.9 || y > 2.0) return 'floor';
   if (st.mount && thin <= 0.22 * Math.max(L, y) && thin <= 0.3 && y >= 0.25 && L >= 0.3 && y <= 2.0 && r.chance(0.85)) return 'mount';
   if (y <= 0.25 && L <= 2.3) return 'flat';
@@ -46,7 +46,9 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
     buckets.medium = [];
   }
   for (const m of buckets.hang) units.push(hang(m, r.range(-0.12, 0.12)));
-  for (const m of buckets.floor) units.push(platform({ st, r }, m, false, barrier));
+  // motor halls sometimes turn the cars to the visitor, alternately left and right (Petersen)
+  const turn = st.arch === 'motor' && r.chance(0.6) ? r.range(0.25, 0.45) : 0;
+  buckets.floor.forEach((m, i) => units.push(platform({ st, r }, m, false, barrier, turn * (i % 2 ? 1 : -1))));
   for (const m of buckets.mount) units.push(mount(m));
 
   // medium things: stepped risers, plinth landscapes or single plinths
@@ -80,7 +82,9 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   }
   let rest = table;
   while (rest.length) {
-    const t = tableCase(rest, r.pick([1.8, 2.4, 3.0]));
+    const n = r.int(4, 8);
+    const t = tableCase(rest.slice(0, n), r.pick([1.2, 1.8, 2.4]));
+    t.rest.push(...rest.slice(n));
     if (!t.unit.items.length) {
       main.push(...t.rest);
       break;
