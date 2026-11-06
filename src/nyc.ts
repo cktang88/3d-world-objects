@@ -4,6 +4,7 @@ import { signalPole, nameSign, lampPost, tree, hydrant, subway, newsBoxes, steam
 import { getNight, onTimeChange } from './lighting';
 import { groundBase, groundDetails, GM } from './nyc/ground';
 import { carMesh, Traffic } from './nyc/vehicles';
+import { busStop, noParking } from './nyc/vehicleBusStop';
 import { Pedestrians } from './nyc/people';
 import { CityVis } from './nyc/occlusion'; // [vis] chunk visibility / occlusion / HLOD (WP2)
 export { avenueName, streetName };
@@ -384,6 +385,7 @@ export class NycLevel implements Level {
         if (!rng.chance(run.ave ? 0.85 : 0.8)) continue; // Manhattan kerbs are nearly full
         const x = run.axis === 'x' ? t : lane;
         const z = run.axis === 'x' ? lane : t;
+        if (noParking(ctx.cx, ctx.cz, x, z)) continue; // the bus stop at the spawn (vehicleBusStop.ts)
         if (rng.chance(0.18)) {
           const e = pickModel('vehicle', rng);
           if (e && Math.max(e.size[0], e.size[2]) * normScale(e) < 7) {
@@ -399,6 +401,7 @@ export class NycLevel implements Level {
         colliders.push(run.axis === 'x' ? rect(x, z, 4.6, 1.9) : rect(x, z, 1.9, 4.6));
       }
     }
+    if (ctx.cx === 0 && ctx.cz === 0) busStop(group, colliders); // the spawn kerb is a bus stop (vehicleBusStop.ts)
     // litter baskets, mailbox, meters, bags, shelters, sheds, manholes (streetprops.ts)
     streetExtras({ stat, rng, colliders, near, village, noSheds: spawnView(ctx.cx, ctx.cz) }); // [districts] noSheds: the spawn view
     // a few sand3d props on the sidewalks (benches, planters, statues) — all enterable worlds

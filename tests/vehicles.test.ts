@@ -88,3 +88,17 @@ test('the signal plan has an all-red clearance between phases', () => {
   expect(clear >= 1.5, `only ${fmt(clear)} s of all-red in the ${CYCLE} s cycle`);
 });
 
+
+test('the spawn kerb is a clear bus stop: no parked car within it', async () => {
+  const { nycChunk, collect } = await import('./world');
+  const { SPAWN_BUS_STOP: s } = await import('../src/nyc/vehicleBusStop');
+  const c = nycChunk(20261105, 0, 0);
+  const zone = { minX: BX + 0.2, maxX: BX + 2.2, minZ: s.z0, maxZ: s.z1 };
+  const inZone = (x: number, z: number) => x > zone.minX && x < zone.maxX && z > zone.minZ && z < zone.maxZ;
+  const parked = collect(c.group, (o) => !!o.userData.model);
+  expect(parked.length > 10, `only ${parked.length} parked cars in the spawn block (the test would prove nothing)`);
+  const cars = parked.filter((o) => inZone(o.position.x, o.position.z));
+  none(cars.map((o) => `${o.userData.model} at ${fmt(o.position.x)},${fmt(o.position.z)}`), 'parked cars in the spawn bus stop');
+  const blocks = c.colliders.filter((r) => r.maxX > zone.minX && r.minX < zone.maxX && r.maxZ > zone.minZ && r.minZ < zone.maxZ);
+  none(blocks.map((r) => `${fmt(r.minX)}..${fmt(r.maxX)} x ${fmt(r.minZ)}..${fmt(r.maxZ)}`), 'colliders in the spawn bus stop');
+});
