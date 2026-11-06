@@ -115,3 +115,28 @@ Filament's material guide (https://google.github.io/filament/Materials.html) —
   Metal012 (aluminium), Metal049B (chrome smudges), Metal048B (brass, fingerprints), Metal058A (copper
   smudge), Metal029 (powder-coat paint), Plastic010, Plastic013B (glossy, scratched), Rubber004,
   Porcelain002. Pages: https://ambientcg.com/view?id=<id>.
+
+## What was built (and what we learned)
+
+- `src/materials.ts`: per-kind `MeshPhysicalMaterial` (table `KINDS`), shader injection sampling
+  diff/normal/ARM once per fragment. Triplanar (whiteout normals) for streamed USD parts, metric
+  UVs for rebuilt GLBs. Texture roughness is applied as a deviation from the set's mean roughness
+  on top of sand3d's roughness (a ratio blew up on polished sets). Procedural micro bump is in
+  metres and fades out by `fwidth` (it produced 2x2-pixel-quad speckle before).
+- **Bug found**: `scripts/rebuild.py` used `scene.unit_settings.scale_length` (always 1) as
+  metres per Blender unit, but sand3d models in millimetres (`sand3d._core.MM`), so every rebuilt
+  GLB had UVs 1000x too dense and the photo textures averaged to their mean colour (no grain).
+  Fixed in the script; existing GLBs are detected at load (UV span vs mesh size) and rescaled.
+- Quantized (meshopt) GLBs put a node scale on every part: triplanar positions are multiplied by
+  the model matrix's column lengths so texture density is metric.
+- **Vertex AO bake** (`rebuild.py --bake`): works and costs ~10 s/object on CPU, +10% GLB size.
+  sand3d parts interpenetrate, so vertices buried inside another part bake black and darken
+  their whole face; those are clamped to 0.6 (a joint crease). **Edge wear from vertex convexity
+  does not work on low-poly parts** (a box's corners are all convex, so the mask covers whole
+  faces); it is implemented but off by default (`setEdgeWear`). A per-object lightmap UV and a
+  small baked texture would be needed for proper edge wear/curvature.
+- Labs: `?lab=mat-board` (`&kinds=`, `&dbg=1..5`, `&dust=`, `&uv=1`), `?lab=mat-model`
+  (`&ids=`, `&bake=0`, `&wear=1`, `&dust=`).
+- Cost: triplanar = 12 texture lookups per fragment (diff/nor/ARM ×3 + detail ×3), 21 with texture
+  bombing (fabric, velvet, leather, rubber, concrete); UV mode 4 (7). Physical features only where
+  enabled. The full board (24 kinds × 3 shapes) compiles 28 programs, draw calls unchanged.
