@@ -36,6 +36,9 @@ const XW_IN = 3.6, XW_OUT = -0.5; // band from kerb-3.6 to kerb+0.5 along the ke
 /** stop bar: distance before the crosswalk, width */
 const STOP_GAP = 0.3, STOP_W = 0.45;
 
+/** layout constants (metres), for qa tests and other modules */
+export const GROUND = { FLAG, CR, CW, RO, RW, RL, RF, RLIP, XW_IN, XW_OUT, STOP_GAP, STOP_W };
+
 /** true if a box (centre x,z, size w×d, chunk-local) touches a corner ramp — for props placement */
 export function onRamp(x: number, z: number, w = 0, d = 0) {
   const ax = Math.abs(x), az = Math.abs(z);
@@ -479,6 +482,8 @@ float gWear() {
 `;
 
 class QuadBuf {
+  /** every quad's footprint and atlas rect, kept for tests */
+  rects: { x0: number; z0: number; x1: number; z1: number; r: readonly number[] }[] = [];
   pos: number[] = [];
   nor: number[] = [];
   uv: number[] = [];
@@ -490,6 +495,7 @@ class QuadBuf {
    */
   quad(x0: number, z0: number, x1: number, z1: number, y: number, r: readonly number[], W: number, H: number, up: 'x' | '-x' | 'z' | '-z' = '-z', c?: THREE.Color, yFn?: (x: number, z: number) => number) {
     const u0 = r[0] / W, u1 = (r[0] + r[2]) / W, vTop = 1 - r[1] / H, vBot = 1 - (r[1] + r[3]) / H;
+    this.rects.push({ x0, z0, x1, z1, r });
     const corners: [number, number][] = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
     const b = this.pos.length / 3;
     for (const [x, z] of corners) {
@@ -606,6 +612,20 @@ function markings(q: QuadBuf, cx: number, cz: number) {
       q.quad(Math.min(xb, xb - sx * STOP_W), Math.min(sz * (BZ + 0.3), stz), Math.max(xb, xb - sx * STOP_W), Math.max(sz * (BZ + 0.3), stz), Y, S, W, H, '-z', WHITE);
     }
   }
+}
+
+/** the paint quads of one chunk (chunk-local), labelled by legend, for qa tests */
+export function markingsPlan(cx: number, cz: number) {
+  const q = new QuadBuf();
+  markings(q, cx, cz);
+  const name = (r: readonly number[]) => (Object.keys(MK) as (keyof typeof MK)[]).find((k) => MK[k] === r) ?? 'other';
+  return q.rects.map((t) => ({ kind: name(t.r), x0: Math.min(t.x0, t.x1), x1: Math.max(t.x0, t.x1), z0: Math.min(t.z0, t.z1), z1: Math.max(t.z0, t.z1) }));
+}
+
+/** the curb profile as built (positions), for qa tests */
+export function curbPositions() {
+  curbGeo ??= curbGeometry();
+  return curbGeo.getAttribute('position') as THREE.BufferAttribute;
 }
 
 // ---------------------------------------------------------------- curb and ramps
