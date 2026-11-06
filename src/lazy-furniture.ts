@@ -328,6 +328,15 @@ export function cutOpenings(f: Front, bands: Band[]): number {
 
 /** the material and colour of the front at (x, y): the frontmost triangle's material, its texel there */
 export function frontMaterialAt(f: Front, x: number, y: number): THREE.MeshStandardMaterial | null {
+  const s = frontSampleAt(f, x, y);
+  return s ? colourOf(s.material, s.uv) : null;
+}
+
+/**
+ * The model's own material at (x, y) of its front and the uv there: give a replacement front that
+ * material with every uv set to this one and it shows exactly that paint, lit as the model is.
+ */
+export function frontSampleAt(f: Front, x: number, y: number): { material: THREE.MeshStandardMaterial; uv?: THREE.Vector2; lum: number } | null {
   const i = Math.floor((x - f.x0) / f.cell), j = Math.floor((y - f.y0) / f.cell);
   const k = i >= 0 && j >= 0 && i < f.nx && j < f.ny ? f.tri[j * f.nx + i] : -1;
   if (k < 0) return null;
@@ -350,7 +359,8 @@ export function frontMaterialAt(f: Front, x: number, y: number): THREE.MeshStand
   const l1 = ((cx - bx) * (y - by) - (cy - by) * (x - bx)) / area, l2 = ((ax - cx) * (y - cy) - (ay - cy) * (x - cx)) / area, l3 = 1 - l1 - l2;
   const uvA = g.getAttribute('uv');
   const uv = uvA ? new THREE.Vector2(l1 * uvA.getX(a) + l2 * uvA.getX(b) + l3 * uvA.getX(c), l1 * uvA.getY(a) + l2 * uvA.getY(b) + l3 * uvA.getY(c)) : undefined;
-  return colourOf(best, uv);
+  const col = colourOf(best, uv).color;
+  return { material: best, uv, lum: col.r * 0.3 + col.g * 0.59 + col.b * 0.11 };
 }
 
 /** a plain material in the colour of the model's (largest) material, or of `src` at uv */
@@ -556,4 +566,19 @@ export function fillCompartment(seed: number, w: number, h: number, d: number, t
     }
   }
   return g;
+}
+
+/** paint a replacement front with the model's own material at one uv (every vertex there) */
+export function paintWith(o: THREE.Object3D, from: THREE.Material, sample: { material: THREE.Material; uv?: THREE.Vector2 }) {
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh || m.material !== from) return;
+    const n = m.geometry.getAttribute('position').count;
+    if (sample.uv) {
+      const uv = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) { uv[i * 2] = sample.uv.x; uv[i * 2 + 1] = sample.uv.y; }
+      m.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    }
+    m.material = sample.material;
+  });
 }

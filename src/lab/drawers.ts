@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { InteriorLevel } from '../interior';
 import { Lazy, type LazyContainer } from '../lazy';
+import { readFront } from '../lazy-furniture';
 
 /**
  * ?lab=drawers — an apartment's library dresser (or nightstand) with a drawer pulled out and its
@@ -35,27 +36,39 @@ const scene: LabScene = {
     );
     const level = lv;
     const p0 = pick;
-    // the library model streams in (then libDrawerSet refits the drawers): wait, then open the way E does
-    // until the piece's first drawers are replaced by the refitted ones (or &wait= ms, default 60 s)
-    const originals = found.filter((c) => c.obj.position.distanceTo(pick!.obj.position) < 1.5);
+    // the library model streams in; the openings are cut when you come close (lazy.ts prepare): wait for
+    // the model (&wait= ms cap, default 60 s), then do what walking up to it does, then open (&open=)
+    const prep = (pick as C & { prepare?: (() => LazyContainer[] | null) & { ready?: () => boolean } }).prepare;
     const t0 = performance.now(), cap = Number(params.get('wait') ?? 60000);
-    const refitted = () => new Promise<void>((res) => {
-      const poll = () => (originals.every((c) => !c.obj.parent) || performance.now() - t0 > cap ? res() : setTimeout(poll, 300));
+    const loaded = () => new Promise<void>((res) => {
+      const poll = () => (!prep?.ready || prep.ready() || performance.now() - t0 > cap ? res() : setTimeout(poll, 300));
       poll();
     });
-    return refitted().then(() => {
+    return loaded().then(() => {
       const lazy = new Lazy();
       const cam = new THREE.PerspectiveCamera();
       lazy.update(0.1, cam, level);
       const opened: LazyContainer[] = [];
-      // after the refit: aim at the piece's own (refitted) drawers and doors; &open=doors|drawers|all
       const which = params.get('open');
-      if (which) {
+      if (which && prep) {
+        // the refitted drawers and doors: &open=doors|drawers|all|none
+        const made = prep() ?? [];
+        // the read timed again, warmed up (the first one in a page includes the JIT): window.__drawers.warmMs
+        let holder: THREE.Object3D | null = null;
+        level.group.traverse((o) => { if (o.userData.attribution && o.position.distanceTo(p0.obj.position) < 1.0) holder = o; });
+        if (holder) {
+          const h = holder as THREE.Object3D;
+          const box = new THREE.Box3().setFromObject(h.children[0]).applyMatrix4(h.matrixWorld.clone().invert());
+          const size = box.getSize(new THREE.Vector3()).toArray();
+          const ms: number[] = [];
+          for (let i = 0; i < 5; i++) ms.push(readFront(h.children[0], h, size).ms);
+          (window as unknown as { __warmMs: number[] }).__warmMs = ms.map((x) => +x.toFixed(2));
+        }
         rays.length = 0;
-        for (const c of (level as unknown as { containers: (C & { door?: THREE.Object3D })[] }).containers) {
-          if (!c.obj.parent || c.obj.position.distanceTo(p0.obj.position) > 1.5) continue;
-          if (which === 'none' || (which === 'doors' && !c.door) || (which === 'drawers' && !c.drawer)) continue;
-          rays.push(new THREE.Ray(c.obj.localToWorld(new THREE.Vector3(c.size.x * 0.25, c.size.y / 2, 1.0)), c.obj.getWorldDirection(new THREE.Vector3()).negate()));
+        for (const c of made) {
+          if (which === 'none' || (which === 'doors' && !c.spec.door) || (which === 'drawers' && !c.spec.drawer)) continue;
+          lazy.toggle(c);
+          opened.push(c);
         }
       }
       for (const ray of rays) {

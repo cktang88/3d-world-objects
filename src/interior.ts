@@ -13,7 +13,7 @@ import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
-import { readFront, detectDrawers, cutOpenings, compartment, frontMaterialAt, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
+import { readFront, detectDrawers, cutOpenings, compartment, frontSampleAt, paintWith, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
 import { adoptContainer, type LazyContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
@@ -1246,9 +1246,8 @@ export class InteriorLevel implements Level {
       // four spots per front (off the centre line, where the knob is), the upper median by brightness:
       // one dark texel or a shadow baked into the texture must not paint the whole door
       const paints = bands.map((b) => {
-        const ms = [[-0.3, 0.25], [0.3, 0.25], [-0.3, 0.75], [0.3, 0.75]].map(([fx, fy]) => frontMaterialAt(front, b.x + b.w * fx, b.y + b.h * fy)).filter((m): m is THREE.MeshStandardMaterial => !!m);
-        const lum = (m: THREE.MeshStandardMaterial) => m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
-        ms.sort((x, y) => lum(x) - lum(y));
+        const ms = [[-0.3, 0.25], [0.3, 0.25], [-0.3, 0.75], [0.3, 0.75]].map(([fx, fy]) => frontSampleAt(front, b.x + b.w * fx, b.y + b.h * fy)).filter((m) => !!m);
+        ms.sort((x, y) => x.lum - y.lum);
         return ms[Math.min(ms.length - 1, Math.floor(ms.length / 2))] ?? null;
       });
       // cut the fronts out of the model, and put real drawers / doors and compartments in the holes
@@ -1274,9 +1273,10 @@ export class InteriorLevel implements Level {
         }
       }
       // fronts and doors in the paint of the model's own front there
+      // (the model's own material, every uv on that texel: the same paint, lit the same way)
       entries.forEach((e, i) => {
-        const mat = paints[i];
-        if (mat) (e.drawer ?? e.door)?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
+        const p = paints[i], mover = e.drawer ?? e.door;
+        if (p && mover) paintWith(mover, wood, p);
       });
       note.totalMs = +(performance.now() - t0).toFixed(1);
       note.cut = cut;
