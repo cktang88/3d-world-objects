@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Env, Level, Portal, Rect } from '../level';
 import { rect } from '../level';
-import { loadRemote, animate, disposeModel, clearQueue, isRebuilt, DATASET_LABEL, type RemoteModel } from '../remote';
+import { loadRemote, animate, disposeModel, clearQueue, isRebuilt, reprioritize, DATASET_LABEL, type RemoteModel } from '../remote';
 import { trackForDetail } from '../detail';
 import type { Measured } from './sizes';
 import { fmtDims } from './text';
@@ -119,6 +119,8 @@ interface Slot {
   model?: RemoteModel;
   spin: number;
   placeholder: THREE.Mesh;
+  /** its download went through the load queue (remote.ts) */
+  queued?: boolean;
   /** library scans: which detail is shown, and whether a swap is under way */
   q?: 'low' | 'full';
   swapping?: boolean;
@@ -127,9 +129,7 @@ interface Slot {
 /** full-detail scans (~150k faces, 2k textures) only for the nearest few */
 const FULL_SCANS = 3;
 
-const phMat = new THREE.MeshBasicMaterial({ color: '#ffe9b0', wireframe: true, transparent: true, opacity: 0.35 });
-const phGeo = new THREE.IcosahedronGeometry(0.5, 1);
-// a soft, unit-sized stand-in for a hero still streaming (a rounded frustum reads as "something big here")
+// a soft, unit-sized stand-in for an exhibit still streaming (a rounded frustum reads as "something big here")
 const standInGeo = new THREE.CylinderGeometry(0.3, 0.5, 1, 24, 1);
 const standInMat = new THREE.MeshStandardMaterial({ color: '#c9bfae', roughness: 0.6, metalness: 0.2, transparent: true, opacity: 0.35, depthWrite: false });
 
@@ -402,7 +402,29 @@ export abstract class MuseumBase implements Level {
     });
   }
 
+  /**
+   * Download order: a room built ahead (a doorway prebuild, seamless.ts) queues its exhibits at once,
+   * nearest its entrance first, but behind everything of the room you are in (+1000); walking in
+   * moves what is still queued to the front (remote.ts reprioritize).
+   */
+  private entered = false;
+  protected loadPrio(at: THREE.Vector3) {
+    return (this.entered ? 0 : 1000) + Math.hypot(at.x, at.z);
+  }
+  private enterRoom() {
+    this.entered = true;
+    for (const s of this.slots) {
+      if (s.model) continue;
+      const e = s.m.entry;
+      const pr = this.loadPrio(s.at);
+      reprioritize(e.id, pr);
+      reprioritize(`${e.id}#usda`, pr);
+    }
+  }
+
   update(dt: number, player: THREE.Vector3, time: number) {
+    // seamless.ts gives a previewed room the player in its own frame (outside: z > 0)
+    if (!this.entered && player.z < -0.3) this.enterRoom();
     this.steerSpots(dt, this.group.worldToLocal(_pl.copy(player)));
     if (++this.tick % 30 === 0) this.scanDetail(player);
     if (this.tick % 15 === 0) this.cullOutside(player);
@@ -652,18 +674,11 @@ export abstract class MuseumBase implements Level {
     holder.addEventListener('childadded', (ev) => normalizeExhibit((ev as unknown as { child: THREE.Object3D }).child));
     holder.position.copy(at);
     holder.rotation.y = f.rot + rot;
-    // heroes (progressive) get a stand-in of their real size while they stream; others a small spinner
-    const hero = !!opts.progressive;
-    const placeholder = new THREE.Mesh(hero ? standInGeo : phGeo, hero ? standInMat : phMat);
-    if (hero) {
-      placeholder.scale.set(m.real.x * 0.9, m.real.y * 0.9, m.real.z * 0.9);
-      placeholder.position.y = m.real.y * 0.45;
-      placeholder.userData.still = true;
-    } else {
-      const ph = Math.min(m.real.x, m.real.y, m.real.z, 0.4);
-      placeholder.scale.setScalar(Math.max(0.03, ph));
-      placeholder.position.y = Math.min(m.real.y / 2, 0.5);
-    }
+    // a stand-in of its real size while it streams: the room reads furnished, not as empty plinths
+    const placeholder: THREE.Mesh = new THREE.Mesh(standInGeo, standInMat);
+    placeholder.scale.set(m.real.x * 0.9, m.real.y * 0.9, m.real.z * 0.9);
+    placeholder.position.y = m.real.y * 0.45;
+    placeholder.userData.still = true;
     holder.add(placeholder);
     this.group.add(holder);
     const slot: Slot = { m, holder, at, spin: opts.spin ?? 0, placeholder };
@@ -684,7 +699,8 @@ export abstract class MuseumBase implements Level {
       inspect: m.library ? undefined : e,
     });
     e.attribution = `${fmtDims(m.real)} · shown at actual size${Math.abs(m.k - 1) > 0.01 ? ' · rescaled from the source to a realistic size' : ''}`;
-    const got0 = m.model ? Promise.resolve(m.model) : m.load ? m.load() : loadRemote(e, { prio: opts.prio ?? 0, shadows: false });
+    slot.queued = !m.model && !m.load; // (a model loaded while measuring is handed over: nothing to queue)
+    const got0 = m.model ? Promise.resolve(m.model) : m.load ? m.load() : loadRemote(e, { prio: this.loadPrio(at), shadows: false });
     m.model = undefined; // hand over ownership
     // a rebuilt GLB whose proportions are not the object's (another pose, a partial rebuild) is
     // replaced by the object built from its own USDA, which is what the room was planned for
@@ -693,7 +709,7 @@ export abstract class MuseumBase implements Level {
       : got0.then((mod) => {
           if (!isRebuilt(e.id) || proportionsMatch(mod.object, m.raw)) return mod;
           disposeModel(mod.object);
-          return loadRemote({ ...e, id: `${e.id}#usda` }, { prio: opts.prio ?? 0, shadows: false });
+          return loadRemote({ ...e, id: `${e.id}#usda` }, { prio: this.loadPrio(at), shadows: false });
         });
     const p = got
       .then((mod) => {

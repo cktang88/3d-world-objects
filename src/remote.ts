@@ -283,13 +283,48 @@ function trimGlb() {
     p.then((r) => disposeObject(r.scene, { allGeometry: true, allMaterials: true }), () => undefined);
   }
 }
-function loadRebuilt(e: RemoteEntry) {
+// [museum] rebuilt GLB downloads: at most GLB_CONC at once, the most urgent (lowest prio) first, so a
+// prebuilt room's dozens of models do not crowd out the room you are in (reprioritize on entering)
+const GLB_CONC = 4;
+let glbActive = 0;
+const glbWait: { id: string; prio: number; go: () => void }[] = [];
+function pumpGlb() {
+  while (glbActive < GLB_CONC && glbWait.length) {
+    glbWait.sort((a, b) => a.prio - b.prio);
+    glbWait.shift()!.go();
+  }
+}
+function glbSlot(id: string, prio: number): Promise<() => void> {
+  return new Promise((res) => {
+    glbWait.push({ id, prio, go: () => {
+      glbActive++;
+      res(() => {
+        glbActive--;
+        pumpGlb();
+      });
+    } });
+    pumpGlb();
+  });
+}
+/** [museum] a queued (not started) load becomes more or less urgent */
+export function reprioritize(id: string, prio: number) {
+  const q = queuedJob.get(id);
+  if (q) q.job.prio = prio;
+  for (const w of glbWait) if (w.id === id) w.prio = prio;
+}
+/** [museum] the priority of a queued load (qa), undefined if not queued */
+export function queuedPrio(id: string): number | undefined {
+  return queuedJob.get(id)?.job.prio ?? glbWait.find((w) => w.id === id)?.prio;
+}
+
+function loadRebuilt(e: RemoteEntry, prio = 0) {
   let p = glbCache.get(e.id);
   if (p) {
     glbCache.delete(e.id);
     glbCache.set(e.id, p); // LRU bump
   } else {
-    p = gltf()!.loadAsync(`${import.meta.env.BASE_URL}rebuilt/${e.id}.glb`).then((g) => {
+    const url = `${import.meta.env.BASE_URL}rebuilt/${e.id}.glb`;
+    p = glbSlot(e.id, prio).then((done) => gltf()!.loadAsync(url).finally(done)).then((g) => {
       enhanceTree(g.scene);
       let tris = 0;
       g.scene.traverse((o) => {
@@ -314,7 +349,7 @@ export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: bool
   if (opts.signal?.aborted) return Promise.reject(aborted());
   // prefer the UV-mapped rebuild (static objects only: joints come from the USD)
   if (rebuilt.has(e.id) && !e.joints && gltf()) {
-    const p = loadRebuilt(e);
+    const p = loadRebuilt(e, opts.prio ?? 0);
     return p.then((r): RemoteModel | Promise<RemoteModel> => {
       if (glbCache.get(e.id) !== p) return loadRemote(e, opts); // freed while we waited: load it afresh
       // safety net: a rebuild whose size or axes disagree with its source USDA is not used

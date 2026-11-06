@@ -49,7 +49,7 @@ export const STYLES: Record<Arch, Style> = {
   }),
   // Petersen / Mercedes-Benz / Making the Modern World: dark hall, cars on low platforms, spotlit
   motor: S({
-    arch: 'motor', walls: ['#55595f', '#5e5449', '#3f4f5e', '#6a6158'], floors: ['concrete', 'terrazzo'], ceilings: ['truss', 'flat'], dark: true, height: [6.5, 9], aspect: [1.0, 1.8],
+    arch: 'motor', walls: ['#55595f', '#5e5449', '#3f4f5e', '#6a6158'], floors: ['concrete', 'terrazzo'], ceilings: ['truss', 'flat'], dark: true, height: [6.5, 9], aspect: [0.7, 1.2],
     barrier: ['rope', 'glass', 'edge'], plinth: ['#e9e7e2', '#202224', '#7a7f85'], trim: '#55595e', ink: '#f2efe8', small: ['vitrine', 'wallcase'], medium: ['plinth', 'riser'], hang: false, mount: true,
     caseFrame: '#1a1a1a', light: '#fff4e6', hemi: 0.7,
   }),

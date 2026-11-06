@@ -458,3 +458,30 @@ test('exhibit sides: a closed box is front-sided, an open sheet stays double-sid
   expect(isOpen(new THREE.PlaneGeometry(1, 1, 4, 4)), 'an open sheet counted as closed');
   expect(!isOpen(new THREE.SphereGeometry(1, 16, 12)), 'a sphere counted as open');
 });
+
+test('exhibit loads: a room built ahead (doorway prebuild) has its loads queued before you enter, behind the current room, nearest the door first; walking in moves them to the front', async () => {
+  await loadMuseum();
+  const { queuedPrio } = await import('../src/remote');
+  // no workers in Node: a silent stand-in keeps the parses queued, so their order can be read
+  const g0 = globalThis as unknown as { Worker?: unknown };
+  const had = g0.Worker;
+  if (!had) g0.Worker = class { onmessage = null; postMessage() {} terminate() {} };
+  const g = new GalleryLevel({ kind: 'gallery', theme: 2453, page: 1 });
+  await Promise.race([g.built, settle(8000)]);
+  // (library and Smithsonian objects come through their own loaders)
+  const all = (g as unknown as { slots: { m: { entry: { id: string } }; queued?: boolean; at: THREE.Vector3 }[] }).slots;
+  const slots = all.filter((x, i) => x.queued && all.findIndex((y) => y.m.entry.id === x.m.entry.id) === i);
+  const before = slots.map((x) => ({ d: Math.hypot(x.at.x, x.at.z), p: queuedPrio(x.m.entry.id) }));
+  const queued = before.filter((x) => x.p !== undefined);
+  expect(slots.length > 0, 'no exhibits');
+  expect(queued.length === slots.length, `${slots.length - queued.length} of ${slots.length} exhibit loads not queued before entering`);
+  expect(queued.every((x) => x.p! >= 1000), 'a room built ahead must queue behind the current room');
+  const byPrio = [...queued].sort((a, b) => a.p! - b.p!);
+  expect(byPrio.every((x, i) => i === 0 || x.d >= byPrio[i - 1].d - 1e-6), 'loads are not nearest-to-the-door first');
+  g.update(0.016, new THREE.Vector3(0, 1.6, -2), 0);
+  const after = slots.map((x) => queuedPrio(x.m.entry.id)).filter((x) => x !== undefined);
+  expect(after.every((x) => x! < 1000), 'walking in did not move the room\'s loads to the front');
+  console.log(`     ${queued.length} loads queued at build (prio ${Math.round(byPrio[0].p!)}..${Math.round(byPrio[byPrio.length - 1].p!)}), after entering ${Math.round(Math.min(...(after as number[])))}..`);
+  g.dispose();
+  if (!had) delete g0.Worker;
+});

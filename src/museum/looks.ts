@@ -196,6 +196,16 @@ export function prewarm(): THREE.Group {
         if (tex) slots(m).map = neutralTex('map');
         both(m);
       }
+  // a room seen through a doorway glows a little (base.ts previewFill: an emissive copy of each shell
+  // material, its map as the emissive map): those variants of the shell's surface sets
+  for (const set of [['map'], ['map', 'normalMap', 'roughnessMap'], ['map', 'normalMap', 'roughnessMap', 'aoMap'], ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap']]) {
+    for (const glow of [false, true]) {
+      const m = new THREE.MeshStandardMaterial();
+      for (const k of set) slots(m)[k] = neutralTex(k);
+      if (glow) slots(m).emissiveMap = slots(m).map;
+      mats.push(m);
+    }
+  }
   // the shell's see-through materials (case glass, label and glow planes) first met in later rooms
   mats.push(new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.1, depthWrite: false }));
   mats.push(new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));

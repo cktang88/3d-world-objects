@@ -319,7 +319,7 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   const sorted = [...others].sort((a, b) => b.d - a.d);
   const rows: Unit[][] = [];
   for (const u of sorted) {
-    const row = rows.find((rw) => rw.reduce((s, x) => s + x.w + gapX, 0) + u.w <= Wf && Math.max(...rw.map((x) => x.d)) < u.d * 2.2);
+    const row = rows.find((rw) => rw.reduce((s, x) => s + x.w + gapX, 0) + u.w <= Wf && Math.max(...rw.map((x) => x.d)) < u.d * 3);
     if (row) row.push(u);
     else rows.push([u]);
   }
@@ -414,7 +414,7 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   };
 
   for (let it = 0; it < 60; it++) {
-    let proposed = exitDoors(W, D, exits, big, r.fork(it), intimate);
+    let proposed = exitDoors(W, D, exits, big, r.fork(it < 6 ? 0 : it), intimate);
     let placed = placeRows(W, D, proposed.filter((d) => d.wall === 'N'));
     if (!placed && proposed.some((d) => d.wall === 'N')) {
       // a wide display does not fit beside the north doorway's corridor: move the doorway towards a
