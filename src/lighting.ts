@@ -155,6 +155,35 @@ let activeCsm: CSM | null = null;
  * it would cast nothing at all there.
  */
 let proxiesPresent = false;
+
+// [perf] scene-graph changes anywhere (add / attach) queue the added subtrees, so per-frame work (CSM material
+// wrapping, caster tagging, light and far-proxy lists) only looks at what is new instead of walking the scene
+let pendingAdds: THREE.Object3D[] = [];
+let pendingOverflow = false;
+{
+  const P = THREE.Object3D.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+  for (const k of ['add', 'attach']) {
+    const f = P[k];
+    P[k] = function (this: THREE.Object3D, ...a: unknown[]) {
+      if (!pendingOverflow) {
+        for (const o of a) if (o && (o as THREE.Object3D).isObject3D) pendingAdds.push(o as THREE.Object3D);
+        if (pendingAdds.length > 50000) {
+          pendingOverflow = true; // nobody is draining (no lighting running): fall back to a full scan later
+          pendingAdds = [];
+        }
+      }
+      return f.apply(this, a);
+    };
+  }
+}
+/** what traverseVisible would visit: visible itself and up the chain, and attached under `root` */
+function drawn(o: THREE.Object3D, root: THREE.Object3D) {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+    if (!p.visible) return false;
+    if (p === root) return true;
+  }
+  return false;
+}
 function applyCascadeHook(csm: CSM | null) {
   if (!csm) return;
   const n = csm.lights.length;
@@ -729,6 +758,13 @@ export class Lighting {
   private loadToken = 0;
   private frame = 0;
   private csmWraps = 0;
+  // [perf] cached scene scan for setupCsmMaterials
+  private scanFrame = -1e9;
+  private listed = new WeakSet<THREE.Object3D>();
+  private scanWrap = true;
+  private scanFar: number | null = null;
+  private lightList: THREE.Light[] = [];
+  private proxyList: THREE.Object3D[] = [];
   // time of day: the light is a blend from -> to over TRANSITION_S, the sky a crossfade srcA -> srcB
   private from: Preset = PRESETS.day;
   private to: Preset = PRESETS.day;
@@ -1360,22 +1396,25 @@ export class Lighting {
     u.near.value = this.camera.near;
     u.far.value = Math.min(this.camera.far, csm.maxFar);
     const fade = csm.fade;
-    // only what will be drawn this frame needs it (hidden things are wrapped when they show up)
-    const n = this.lightCount;
-    n.point = n.spot = n.pointShadow = n.spotShadow = 0;
+    // [perf] no per-frame walk of the whole scene: newly added subtrees are visited once (wrap materials, tag
+    // casters, list lights and far-proxy casters); each frame re-checks only the listed lights' and proxies'
+    // visibility (removed ones no longer reach the scene), so the light count and the LIGHT_BUDGET padding
+    // stay exact frame by frame
     const farOnly = cascadeHook.farOnly;
-    let proxies = false;
-    this.scene.traverseVisible((o) => {
+    const visit = (o: THREE.Object3D) => {
       if ((o as THREE.Light).isLight) {
-        if (o.parent !== this.padGroup) {
-          const k = this.kindOf(o as THREE.Light);
-          if (k) n[k]++;
+        if (o.parent !== this.padGroup && !this.listed.has(o)) {
+          this.listed.add(o);
+          this.lightList.push(o as THREE.Light);
         }
         return;
       }
       const mats = (o as THREE.Mesh).material;
       if ((o as THREE.Mesh).isMesh && o.castShadow && o.userData.casterR === undefined) tagCaster(o as THREE.Mesh);
-      if (farOnly !== null && !proxies && o.castShadow && o.layers.isEnabled(farOnly)) proxies = true;
+      if (farOnly !== null && o.castShadow && o.layers.isEnabled(farOnly) && !this.listed.has(o)) {
+        this.listed.add(o);
+        this.proxyList.push(o);
+      }
       if (!mats || !wrap) return;
       for (const m of Array.isArray(mats) ? mats : [mats]) {
         if (!(m as THREE.MeshStandardMaterial).isMeshStandardMaterial && !(m as THREE.MeshLambertMaterial).isMeshLambertMaterial && !(m as THREE.MeshPhongMaterial).isMeshPhongMaterial) continue;
@@ -1400,7 +1439,34 @@ export class Lighting {
         this.csmMats.add(m);
         this.csmWraps++;
       }
-    });
+
+    };
+    if (pendingOverflow || this.frame - this.scanFrame >= 120 || this.scanWrap !== wrap || this.scanFar !== farOnly) {
+      // full walk: at start, after a wrap/cascade-layer change, and every 120 frames as a safety net (materials
+      // swapped on existing meshes are not seen by the add hook)
+      pendingOverflow = false;
+      pendingAdds = [];
+      this.scanFrame = this.frame;
+      this.scanWrap = wrap;
+      this.scanFar = farOnly;
+      this.lightList.length = 0;
+      this.proxyList.length = 0;
+      this.listed = new WeakSet();
+      this.scene.traverse(visit);
+    } else if (pendingAdds.length) {
+      // lights/proxies removed since keep their list entry until the next full walk; drawn() skips them
+      const list = pendingAdds;
+      pendingAdds = [];
+      for (const r of list) r.traverse(visit);
+    }
+    const n = this.lightCount;
+    n.point = n.spot = n.pointShadow = n.spotShadow = 0;
+    for (const l of this.lightList) {
+      if (!drawn(l, this.scene)) continue;
+      const k = this.kindOf(l);
+      if (k) n[k]++;
+    }
+    const proxies = this.proxyList.some((o) => drawn(o, this.scene));
     if (proxies !== proxiesPresent) {
       proxiesPresent = proxies;
       applyCascadeHook(this.csm);

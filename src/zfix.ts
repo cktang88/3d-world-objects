@@ -90,29 +90,33 @@ interface Owner {
 
 class Soup {
   owners: Owner[] = [];
-  /** per triangle: a b c (9), n (3), d, area -> 14 floats */
-  f: number[] = [];
-  owner: number[] = [];
-  face: number[] = [];
+  /** per triangle: a b c (9), n (3), d, area -> 14 floats ([perf] growable typed arrays) */
+  f = new Float64Array(14 * 1024);
+  owner = new Int32Array(1024);
+  face = new Int32Array(1024);
+  count = 0;
   floorDown = true;
-  push(o: number, fi: number, a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, minArea: number) {
-    _u.subVectors(b, a);
-    _v.subVectors(c, a);
-    _n.crossVectors(_u, _v);
-    const l = _n.length();
+  /** a triangle from world-space corners */
+  push(o: number, fi: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, minArea: number) {
+    const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
     if (l / 2 < minArea) return;
-    _n.divideScalar(l);
-    if (this.floorDown && _n.y < -0.99 && Math.max(a.y, b.y, c.y) < 0.02) return;
-    this.f.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, _n.x, _n.y, _n.z, _n.dot(a), l / 2);
-    this.owner.push(o);
-    this.face.push(fi);
-  }
-  get count() {
-    return this.owner.length;
+    nx /= l; ny /= l; nz /= l;
+    if (this.floorDown && ny < -0.99 && Math.max(ay, by, cy) < 0.02) return;
+    if (this.count === this.owner.length) {
+      const f = new Float64Array(this.f.length * 2); f.set(this.f); this.f = f;
+      const ow = new Int32Array(this.owner.length * 2); ow.set(this.owner); this.owner = ow;
+      const fa = new Int32Array(this.face.length * 2); fa.set(this.face); this.face = fa;
+    }
+    const k = this.count * 14, F = this.f;
+    F[k] = ax; F[k + 1] = ay; F[k + 2] = az; F[k + 3] = bx; F[k + 4] = by; F[k + 5] = bz; F[k + 6] = cx; F[k + 7] = cy; F[k + 8] = cz;
+    F[k + 9] = nx; F[k + 10] = ny; F[k + 11] = nz; F[k + 12] = nx * ax + ny * ay + nz * az; F[k + 13] = l / 2;
+    this.owner[this.count] = o;
+    this.face[this.count] = fi;
+    this.count++;
   }
 }
-const _u = new THREE.Vector3(), _v = new THREE.Vector3(), _n = new THREE.Vector3();
-const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 
 function nameOf(o: THREE.Object3D) {
@@ -143,12 +147,24 @@ function addGeometry(soup: Soup, oi: number, g: THREE.BufferGeometry, W: THREE.M
   const p = g.getAttribute('position') as THREE.BufferAttribute;
   const ix = g.index;
   const n = Math.min(ix ? ix.count : p.count, start + count);
+  const e = W.elements;
+  // [perf] plain float positions are read straight from the array; anything else through getX/Y/Z
+  const raw = (p as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute || p.normalized || p.itemSize !== 3 ? null : (p.array as ArrayLike<number>);
+  const I = ix ? (ix.array as ArrayLike<number>) : null;
+  const w = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const corner = (vi: number, o: number) => {
+    let x, y, z;
+    if (raw) { x = raw[vi * 3]; y = raw[vi * 3 + 1]; z = raw[vi * 3 + 2]; }
+    else { x = p.getX(vi); y = p.getY(vi); z = p.getZ(vi); }
+    w[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
+    w[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+    w[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  };
   for (let f = start; f + 2 < n; f += 3) {
-    const i0 = ix ? ix.getX(f) : f, i1 = ix ? ix.getX(f + 1) : f + 1, i2 = ix ? ix.getX(f + 2) : f + 2;
-    _a.fromBufferAttribute(p, i0).applyMatrix4(W);
-    _b.fromBufferAttribute(p, i1).applyMatrix4(W);
-    _c.fromBufferAttribute(p, i2).applyMatrix4(W);
-    soup.push(oi, f, _a, _b, _c, minArea);
+    corner(I ? I[f] : f, 0);
+    corner(I ? I[f + 1] : f + 1, 3);
+    corner(I ? I[f + 2] : f + 2, 6);
+    soup.push(oi, f, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], minArea);
   }
 }
 
@@ -207,18 +223,24 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
   const minOv = opts.minOverlap ?? 0.004;
   const same = opts.sameMesh ?? true;
   const F = soup.f;
-  // bucket key: quantised normal (1/64) and plane offset (res)
-  const buckets = new Map<number, number[]>();
+  // bucket key: quantised normal (1/64) and plane offset (res). [perf] Buckets are runs of a key-sorted index
+  // (no per-bucket arrays or sets); a key -> run map serves the neighbour and backing look-ups.
   const nq = (x: number) => Math.round(x * 64) + 64;
-  for (let t = 0; t < soup.count; t++) {
+  const nt = soup.count;
+  const keys = new Float64Array(nt);
+  for (let t = 0; t < nt; t++) {
     const o = t * 14;
     const nk = (nq(F[o + 9]) * 129 + nq(F[o + 10])) * 129 + nq(F[o + 11]);
-    const dk = Math.floor(F[o + 12] / res);
-    const key = nk * 2 ** 26 + (dk + 2 ** 25);
-    let l = buckets.get(key);
-    if (!l) buckets.set(key, (l = []));
-    l.push(t);
+    keys[t] = nk * 2 ** 26 + (Math.floor(F[o + 12] / res) + 2 ** 25);
   }
+  const sorted = new Uint32Array(nt);
+  for (let t = 0; t < nt; t++) sorted[t] = t;
+  sorted.sort((p, q) => keys[p] - keys[q]);
+  const runStart: number[] = [], runKey: number[] = [];
+  for (let i = 0; i < nt; i++) if (i === 0 || keys[sorted[i]] !== keys[sorted[i - 1]]) { runStart.push(i); runKey.push(keys[sorted[i]]); }
+  runStart.push(nt);
+  const runOf = new Map<number, number>();
+  for (let r = 0; r < runKey.length; r++) runOf.set(runKey[r], r);
   const proj = (t: number, axis: number, out: Float64Array, off: number) => {
     const o = t * 14;
     const i0 = axis === 0 ? 1 : 0, i1 = axis === 2 ? 1 : 2;
@@ -256,10 +278,10 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
     // the backing surface may stand a little behind (bands and brackets sit 5 mm off their wall): up to ~1 cm
     const dk0 = Math.floor(-F[o + 12] / res), span = Math.ceil((opts.backGap ?? 0.011) / res);
     for (let dk = dk0 - span; dk <= dk0 + 1; dk++) {
-      const l = buckets.get(nk * 2 ** 26 + (dk + 2 ** 25));
-      if (!l) continue;
-      for (let i = 0; i < l.length && i < 4000; i++) {
-        const q = l[i] * 14;
+      const r = runOf.get(nk * 2 ** 26 + (dk + 2 ** 25));
+      if (r === undefined) continue;
+      for (let i = runStart[r]; i < runStart[r + 1] && i < runStart[r] + 4000; i++) {
+        const q = sorted[i] * 14;
         // centroid inside triangle q (same-side test with q's normal)
         let inside = true;
         for (let e = 0; e < 3 && inside; e++) {
@@ -274,26 +296,34 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
     }
     return false;
   };
-  for (const [key, l0] of buckets) {
+  const list: number[] = [];
+  for (let r = 0; r < runKey.length; r++) {
     // this bucket plus the next one along the normal (faces straddling a bucket boundary)
-    const l1 = buckets.get(key + 1);
-    const list = l1 ? l0.concat(l1) : l0;
-    if (list.length < 2) continue;
+    const key = runKey[r];
+    const r1 = r + 1 < runKey.length && runKey[r + 1] === key + 1 ? r + 1 : -1;
+    const end = r1 >= 0 ? runStart[r1 + 1] : runStart[r + 1];
+    if (end - runStart[r] < 2) continue; // [perf] a lone face: nothing to pair (most planes of a scan)
+    list.length = 0;
+    for (let i = runStart[r]; i < end; i++) list.push(sorted[i]);
+    const l1 = r1 >= 0;
     const o0 = list[0] * 14;
     const ax = Math.abs(F[o0 + 9]) > Math.abs(F[o0 + 10]) ? (Math.abs(F[o0 + 9]) > Math.abs(F[o0 + 11]) ? 0 : 2) : Math.abs(F[o0 + 10]) > Math.abs(F[o0 + 11]) ? 1 : 2;
-    // sweep and prune on the first projected axis
-    const iu = ax === 0 ? 1 : 0;
+    // sweep and prune on the first projected axis, bounding-box early-out on the second
+    const iu = ax === 0 ? 1 : 0, iv = ax === 2 ? 1 : 2;
     const lo = (t: number) => Math.min(F[t * 14 + iu], F[t * 14 + 3 + iu], F[t * 14 + 6 + iu]);
     const hi = (t: number) => Math.max(F[t * 14 + iu], F[t * 14 + 3 + iu], F[t * 14 + 6 + iu]);
-    const order = list.slice().sort((p, q) => lo(p) - lo(q));
-    const fromL0 = new Set(l1 ? l0 : []);
+    const vlo = (t: number) => Math.min(F[t * 14 + iv], F[t * 14 + 3 + iv], F[t * 14 + 6 + iv]);
+    const vhi = (t: number) => Math.max(F[t * 14 + iv], F[t * 14 + 3 + iv], F[t * 14 + 6 + iv]);
+    const order = list.length > 2 ? list.slice().sort((p, q) => lo(p) - lo(q)) : lo(list[0]) <= lo(list[1]) ? [list[0], list[1]] : [list[1], list[0]];
+    const inL0 = (t: number) => keys[t] === key;
     const active: number[] = [];
     for (const t of order) {
       const tl = lo(t);
       for (let k = active.length - 1; k >= 0; k--) if (hi(active[k]) < tl + minOv) active.splice(k, 1);
       for (const s of active) {
         // across the two buckets only pairs with one face in each (same-bucket pairs come from their own bucket)
-        if (l1 && fromL0.has(s) === fromL0.has(t)) continue;
+        if (l1 && inL0(s) === inL0(t)) continue;
+        if (Math.min(vhi(s), vhi(t)) - Math.max(vlo(s), vlo(t)) < minOv) continue;
         const os = soup.owner[s], ot = soup.owner[t];
         if (os === ot && !same) continue;
         if (os === ot && soup.face[s] === soup.face[t]) continue;
