@@ -1397,18 +1397,27 @@ export class FloorLevel implements Level, VCore {
         if (H > d.Hc) k.box(m.hallWall, hw, H - d.Hc, T, 0, d.Hc, z0 - T / 2);
       }
     }
+    // the street wall and door in their own group: hidden while the lobby is seen through the
+    // building's glass from the street (seamless.ts doorway.hide; the facade is the wall then)
+    this.kit = new Kit();
+    const fk = this.kit;
     this.wallLine('z', z1, -lw / 2 - T, lw / 2 + T, 1, H, [{ a: -door / 2, b: door / 2, top: 2.5, solid: true }], m.hallWall);
     // the street door (glass in a dark frame), seen from inside
-    k.at(0, 0, z1, Math.PI, () => {
-      k.box(M.black(), door, 0.06, 0.06, 0, 2.44, 0);
-      for (const sx of [-1, 1]) k.box(M.black(), 0.06, 2.5, 0.06, sx * (door / 2 - 0.03), 0, 0);
-      k.box(M.black(), 0.04, 2.44, 0.05, 0, 0, 0);
-      k.box(M.glass(), door - 0.1, 2.3, 0.01, 0, 0.1, 0);
-      k.box(M.brass(), 0.03, 0.3, 0.03, -0.12, 1.0, -0.04);
-      k.box(M.brass(), 0.03, 0.3, 0.03, 0.12, 1.0, -0.04);
+    fk.at(0, 0, z1, Math.PI, () => {
+      fk.box(M.black(), door, 0.06, 0.06, 0, 2.44, 0);
+      for (const sx of [-1, 1]) fk.box(M.black(), 0.06, 2.5, 0.06, sx * (door / 2 - 0.03), 0, 0);
+      fk.box(M.black(), 0.04, 2.44, 0.05, 0, 0, 0);
+      fk.box(M.glass(), door - 0.1, 2.3, 0.01, 0, 0.1, 0);
+      fk.box(M.brass(), 0.03, 0.3, 0.03, -0.12, 1.0, -0.04);
+      fk.box(M.brass(), 0.03, 0.3, 0.03, 0.12, 1.0, -0.04);
     });
+    const front = new THREE.Group();
+    front.name = 'street-wall';
+    fk.finish(front);
+    this.group.add(front);
+    this.kit = k;
     yield;
-    this.doorway = { pos: new THREE.Vector3(0, 0, z1), yaw: 0 };
+    this.doorway = { pos: new THREE.Vector3(0, 0, z1), yaw: 0, hide: [front] };
     this.spawn.pos.set(0, 0, z1 - 1.1);
     this.spawn.yaw = 0;
     this.ports.push({

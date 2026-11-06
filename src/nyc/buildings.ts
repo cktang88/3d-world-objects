@@ -96,7 +96,7 @@ function instanceUnits(roots: THREE.Object3D[], parent: THREE.Object3D, shadow: 
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh || (mesh.geometry !== unitBox && mesh.geometry !== unitCyl) || mesh.userData.tint) return;
       const sm = mesh.material as THREE.MeshStandardMaterial;
-      if (!sm.isMeshStandardMaterial || sm.map || sm.transparent || (sm.emissive && sm.emissive.getHex() !== 0 && sm.emissiveIntensity > 0)) return;
+      if (!sm.isMeshStandardMaterial || sm.map || sm.userData.pbr || sm.transparent || (sm.emissive && sm.emissive.getHex() !== 0 && sm.emissiveIntensity > 0)) return;
       const rough = Math.round(sm.roughness * 2) / 2, metal = sm.metalness >= 0.4 ? 0.6 : 0;
       let gk = mesh.geometry === unitBox ? 'b' : 'c';
       if (gk === 'b') {
@@ -1093,7 +1093,7 @@ export function doorsOverlap(a: THREE.Box3, b: THREE.Box3, p?: { returnPos?: THR
   return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) > 0.3 && Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) > 0.3;
 }
 
-function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean, addr: string, floors: number, type: BType, style: string) {
+function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean, addr: string, floors: number, type: BType, style: string, glass?: { u0: number; u1: number; y1: number; z: number }) {
   const entry = F.at(u, 0, out);
   // a narrow building's street door can land on its own shop door: keep the shop's (qa: door portals do not overlap)
   if (ctx.portals.some((p) => doorsOverlap(p.box, F.boxOf(u - 1.1, u + 1.1, out - 1.2, out + 1.2, 0, 3), p))) return;
@@ -1106,10 +1106,83 @@ function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean
     // vertical.ts hook: walk-ups, pre-war, office and loft buildings open onto their lobby (floors with stairs and lifts); brownstones keep their interior
     target: buildingDesc(type, style, hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), addr, floors) ?? { kind: 'interior', seed: hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), name: addr, style, floor: 0, floors: Math.min(floors, 40), biome: 'town' },
     // seamless.ts: the door in the facade (solid, so not seen through): E puts you just inside it
-    door: { pos: F.at(u, 0, 0), yaw: F.yawOut() + Math.PI },
+    door: glass
+      ? (() => {
+          // seamless.ts: the lobby glass is cut away and the prebuilt lobby (src/rooms/vertical.ts) shows behind it
+          const r = F.rectOf(glass.u0, glass.u1, glass.z - 0.05, glass.z + 0.05);
+          return { pos: F.at(u, 0, 0), yaw: F.yawOut() + Math.PI, see: true, hole: new THREE.Box3(new THREE.Vector3(r.minX, 0, r.minZ), new THREE.Vector3(r.maxX, glass.y1, r.maxZ)) };
+        })()
+      : { pos: F.at(u, 0, 0), yaw: F.yawOut() + Math.PI },
   });
   ctx.doors.push(F.at(u, 0, SW));
 }
+
+/**
+ * A tower's double-height lobby front (references: Lever House, Seagram, 590 Madison): polished
+ * granite piers, tall glass in slim steel mullions with a transom, the lit lobby behind (the
+ * entrance-hall cell of the shop-glass atlas, cuttable so seamless.ts shows the real lobby through
+ * it), and on the front a revolving door (glass drum, steel canopy and floor ring, four glass
+ * wings) with the building number in steel letters on the canopy.
+ */
+function towerLobby(ctx: BCtx, F: Face, isFront: boolean, lobby: number, finM: THREE.Material, addr: string, floors: number, front: Side) {
+  const { rng, colliders } = ctx;
+  const granite = surface('marble', [0.9, lobby], { color: rng.pick(['#3a3836', '#5a5652', '#2a2c2e', '#7a746c']), roughness: 0.18, envMapIntensity: 0.9 });
+  const mull = mat('#3a3e42', { rough: 0.35, metal: 0.8 });
+  const np = Math.max(2, Math.round(F.len / 6));
+  for (let k = 0; k <= np; k++) B(F.g, granite, 0.9, lobby, 0.5, -F.len / 2 + 0.45 + ((F.len - 0.9) * k) / np, 0, 0.0);
+  B(F.g, granite, F.len, 0.9, 0.55, 0, lobby - 0.9, 0.02);
+  const gz = -0.25 + REVEAL;
+  const transom = 3.4;
+  const holeU: [number, number] = [Infinity, -Infinity];
+  for (let k = 0; k < np; k++) {
+    const u0 = -F.len / 2 + 0.9 + ((F.len - 0.9) * k) / np, u1 = -F.len / 2 + ((F.len - 0.9) * (k + 1)) / np;
+    const bw = u1 - u0;
+    // glass: the lobby behind (one pane up to the transom, one above)
+    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, 0.05, gz)), bw, transom - 0.05, 15, 9, 0.4 + k * 0.07, 1);
+    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, transom + 0.08, gz)), bw, lobby - 0.9 - transom - 0.08, 15, 9, 0.6 + k * 0.07, 1);
+    holeU[0] = Math.min(holeU[0], u0);
+    holeU[1] = Math.max(holeU[1], u1);
+    // slim steel mullions every ~1.5 m, a transom bar, a sill
+    const nm = Math.max(1, Math.round(bw / 1.5));
+    for (let i = 1; i < nm; i++) B(F.f, mull, 0.06, lobby - 0.9, 0.14, u0 + (bw * i) / nm, 0, gz + 0.07, false);
+    B(F.f, mull, bw, 0.1, 0.16, (u0 + u1) / 2, transom - 0.02, gz + 0.06, false);
+    B(F.f, mull, bw, 0.06, 0.2, (u0 + u1) / 2, 0, gz + 0.08, false);
+  }
+  if (!isFront) return;
+  // revolving door: glass drum half out of the facade, steel canopy and floor ring, four glass wings
+  const R = 1.1, cz = 0.55, H = 2.4;
+  const steel = mat('#b9bcbf', { rough: 0.25, metal: 0.9 });
+  const glass = revolvingGlass();
+  C(F.g, steel, R + 0.12, 0.32, 0, H, cz);
+  C(F.f, mat('#5a5e62', { rough: 0.4, metal: 0.8 }), R + 0.04, 0.02, 0, 0, cz, false);
+  for (const side of [-1, 1]) {
+    // curved glass on the two sides, open front and back
+    const a0 = side > 0 ? Math.PI * 0.22 : Math.PI * 1.22;
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(R, R, H, 20, 1, true, a0, Math.PI * 0.56), glass);
+    drum.position.set(0, H / 2, cz);
+    F.f.add(drum);
+    for (const a of [a0, a0 + Math.PI * 0.56]) B(F.f, steel, 0.06, H, 0.06, Math.sin(a) * R, 0, cz + Math.cos(a) * R, false);
+  }
+  // wings at 45°, a steel post and push bars
+  C(F.f, steel, 0.05, H, 0, 0, cz, false);
+  for (const a of [Math.PI / 4, -Math.PI / 4]) {
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(2 * R - 0.08, H - 0.1, 0.02), glass);
+    wing.position.set(0, H / 2, cz);
+    wing.rotation.y = a;
+    F.f.add(wing);
+    for (const y of [0.04, H - 0.06, 1.05]) {
+      const bar = B(F.f, steel, 2 * R - 0.08, y === 1.05 ? 0.04 : 0.06, y === 1.05 ? 0.05 : 0.04, 0, y, cz, false);
+      bar.rotation.y = a;
+    }
+  }
+  // the building number in steel letters on the canopy face, and a name over the transom
+  ctx.text.add(F.m, addr.split(' ')[0], 0, H + 0.08, cz + R + 0.13, 0.2, 1.6, '#e4e6e8', 0, 'paint');
+  ctx.text.add(F.m, addr.toUpperCase(), 0, lobby - 0.62, 0.3, 0.32, Math.min(F.len * 0.5, 9), '#d8dadc', 0, 'paint');
+  portalDoor(ctx, F, 0, 1.6, front === 'N' || front === 'S', addr, floors, 'tower', 'office', { u0: holeU[0], u1: holeU[1], y1: transom, z: gz });
+  colliders.push(F.rectOf(-1.25, 1.25, 0, cz + R + 0.1));
+}
+let revGlass: THREE.MeshStandardMaterial | null = null;
+const revolvingGlass = () => (revGlass ??= new THREE.MeshStandardMaterial({ color: '#cfdde2', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
 
 /** glass tower with setbacks: curtain wall, mullion fins, a double-height lobby and a crown */
 function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Material, tint: string, addr: string) {
@@ -1118,7 +1191,7 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
   const lobby = 7.2;
   const h = lobby + floors * 3.6;
   const finM = mat(rng.pick(['#8a9096', '#b8bcc0', '#3a3e42', '#6a6258']), { rough: 0.35, metal: 0.8 });
-  const stoneBase = mat(rng.pick(['#2a2c2e', '#8a8680', '#c9c4b8']), { rough: 0.4, metal: 0.1 });
+  rng.pick(['#2a2c2e', '#8a8680', '#c9c4b8']); // (the lobby stone: towerLobby picks its own; keeps the rng sequence)
   const curtain = rng.chance(0.6);
   const spandrelHex = rng.pick(['#2a3138', '#3a4048', '#1e2428', '#4a5058', '#5a5650']);
   const spandrel = mat(spandrelHex, { rough: 0.25, metal: 0.7 });
@@ -1150,28 +1223,7 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
       F.wall(curtain ? spandrel : panelM, y0, y + th, curtain ? undefined : panelTint);
       for (let k = 0; k <= nf; k++) B(k % 4 ? F.f : F.g, finM, 0.08, y + th - y0, k % 4 ? 0.12 : 0.3, -F.len / 2 + (k * F.len) / nf, y0, k % 4 ? 0.06 : 0.15, false);
       for (let yy = y0 + 3.6; yy < y + th - 0.5; yy += 3.6) B(F.f, finM, F.len, 0.12, 0.05, 0, yy - 0.06, 0.025, false);
-      if (t === 0) {
-        // lobby: tall glass between stone piers
-        const np = Math.max(2, Math.round(F.len / 6));
-        for (let k = 0; k <= np; k++) B(F.g, stoneBase, 0.9, lobby, 0.5, -F.len / 2 + 0.45 + ((F.len - 0.9) * k) / np, 0, 0.0);
-        B(F.g, stoneBase, F.len, 0.9, 0.55, 0, lobby - 0.9, 0.02);
-        for (let k = 0; k < np; k++) {
-          const u0 = -F.len / 2 + 0.9 + ((F.len - 0.9) * k) / np, u1 = -F.len / 2 + ((F.len - 0.9) * (k + 1)) / np;
-          ctx.win.add({
-            m: F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, 0.05, -0.25 + REVEAL)), w: u1 - u0, h: lobby - 1.0, trim: 'none', sash: 'store',
-            trimColor: new THREE.Color('#888'), revealColor: new THREE.Color('#555'), sashColor: new THREE.Color('#3a3e42'), lit: 1, blind: 0, curtains: 0, depth: 12, muntins: 0,
-          });
-        }
-        if (s === front) {
-          // revolving door drum and a name on the canopy
-          const dc = F.at(0, 0, 0.9);
-          void dc;
-          C(F.g, mat('#c9ccce', { rough: 0.1, metal: 0.9 }), 1.1, 2.6, 0, 0, 0.6);
-          B(F.g, finM, 4.5, 0.25, 2.4, 0, 3.6, 1.2);
-          portalDoor(ctx, F, 0, 1.6, front === 'N' || front === 'S', addr, floors, 'tower', 'office');
-          colliders.push(F.rectOf(-1.2, 1.2, 0, 1.8));
-        }
-      }
+      if (t === 0) towerLobby(ctx, F, s === front, lobby, finM, addr, floors, front);
     }
     hullTiers.push({ rect: { ...rr }, y0: y, y1: y + th });
     roof(stat, rr, y + th);
