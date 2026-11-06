@@ -37,3 +37,17 @@ Text sources: Elliman "pre-war features" (https://www.elliman.com/de-de/insider/
 **Clutter that sells it**: books stacked on coffee tables and in shelves (rows of spines in mixed colours), a bowl/vase, mugs, a plant on the sill, framed pictures above sofa/bed, towels in bathrooms, pots on the stove.
 
 **Lighting**: warm key light (2700-3000 K) from ceiling fixtures plus cooler daylight glow from windows; table lamps visible as glowing shades.
+
+## Built (src/interior.ts, src/rooms/)
+
+Lab: `/?lab=interior-room&style=apartment|house|office&seed=N&room=<type|index>&end=0|1` (or `&corner=0-3`, `&view=plan`).
+`&settle=10000` gives library models time to stream before a screenshot.
+
+| Room | Screenshot | Matches reference |
+|---|---|---|
+| Pre-war living room | `img/interiors-living.jpg` | #1, #7: sofa facing TV, coffee table, rug, end tables + lamps, bookcase, radiators under double-hung windows, crown + baseboard |
+| Brownstone parlour (house) | `img/interiors-brownstone.jpg` | #3-6: marble mantel + gilt mirror at the end, picture rail, stair, dining half |
+| Galley / one-wall kitchen | `img/interiors-kitchen.jpg` | #5: shaker cabinets, uppers, subway backsplash, range + hood, fridge, schoolhouse pendant |
+| Bathroom | `img/interiors-bathroom.jpg` | #9: subway wainscot with cap, hex mosaic floor, clawfoot tub, pedestal sink + mirror, towel bar |
+| Bedroom | `img/interiors-bedroom.jpg` | #2: bed centred on a wall, nightstands + lamps, painting over the headboard, door leaf open against the wall |
+| Office | `img/interiors-office.jpg` | #11-15: drop ceiling with troffers, benching desks with monitors, glass meeting-room partitions, carpet tile |
