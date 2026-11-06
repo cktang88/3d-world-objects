@@ -3,7 +3,7 @@ import type { LabScene } from '../lab';
 import { InteriorLevel } from '../interior';
 
 /**
- * ?lab=interior-room&style=apartment&seed=N&floor=0&room=K&corner=C
+ * ?lab=interior-room&style=apartment&seed=N&floor=0&room=K&corner=C (default: from one end, &end=0|1)
  * One whole InteriorLevel. The camera stands in room K (index by size, default the largest, or a
  * type: living, kitchen, bedroom, bathroom, office, ...) at eye height in corner C (0-3), looking
  * across it. &view=plan looks straight down with the ceiling hidden.
@@ -35,6 +35,13 @@ const scene: LabScene = {
       });
       group.userData.cam = new THREE.Vector3(0.01, 34, 0.01);
       group.userData.look = new THREE.Vector3(0, 0, 0);
+    } else if (!params.has('corner')) {
+      // stand at the middle of one end of the room's long axis, looking down its length
+      const end = params.get('end') === '1' ? 1 : -1;
+      const long = room.x1 - room.x0 >= room.z1 - room.z0;
+      const hx = (room.x1 - room.x0) / 2 - 0.8, hz = (room.z1 - room.z0) / 2 - 0.8;
+      group.userData.cam = new THREE.Vector3(cx + (long ? end * hx : 0.3), 1.6, cz + (long ? 0.3 : end * hz));
+      group.userData.look = new THREE.Vector3(cx - (long ? end * hx : 0), 1.0, cz - (long ? 0 : end * hz));
     } else {
       group.userData.cam = new THREE.Vector3(cx + sx * ((room.x1 - room.x0) / 2 - 0.4), 1.6, cz + sz * ((room.z1 - room.z0) / 2 - 0.4));
       group.userData.look = new THREE.Vector3(cx - sx * 0.8, 1.05, cz - sz * 0.8);
