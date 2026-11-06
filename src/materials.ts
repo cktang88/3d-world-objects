@@ -240,7 +240,7 @@ uniform sampler2D uTriDetail; // procedural height
 uniform vec3 uTriMean;
 uniform float uTriRoughMean;
 uniform float uTriScale, uProcScale, uTriStrength, uTriBump, uTriRough, uTriDark;
-uniform float uDiffMix, uArmMix, uNorMix, uWear, uBakeAo, uDust, uDbg;
+uniform float uDiffMix, uArmMix, uNorMix, uWear, uWearAll, uBakeAo, uDust, uDbg;
 
 float triHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float triNoise(vec2 p) {
@@ -338,7 +338,7 @@ vec4 triDiff, triArm; vec3 triNorO; float triH;
 float triWear = 0.0;
 #ifdef TRI_BAKE
   // convex edges, broken up by the texture so the wear is patchy
-  triWear = smoothstep(0.58, 0.85, vTriBake.g + (triH - 0.5) * 0.25 + (triArm.g - uTriRoughMean) * 0.4) * uWear * min(uBakeAo, 1.0);
+  triWear = smoothstep(0.58, 0.85, vTriBake.g + (triH - 0.5) * 0.25 + (triArm.g - uTriRoughMean) * 0.4) * uWear * uWearAll * min(uBakeAo, 1.0);
 #endif
 float triProc = mix(1.0, mix(uTriDark, 1.0, triH), uTriStrength);
 vec3 triPhoto = clamp(triDiff.rgb / max(uTriMean, vec3(0.02)), 0.0, 3.0);
@@ -453,6 +453,7 @@ interface KindUniforms {
   uBakeAo: { value: number };
   uDust: { value: number };
   uDbg: { value: number };
+  uWearAll: { value: number };
 }
 function pixel(r: number, g: number, b: number) {
   const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
@@ -464,10 +465,18 @@ const armNeutral = pixel(255, 128, 0);
 const flatNormal = pixel(128, 128, 255);
 
 /** shared by every material: baked AO strength and dust on upward faces */
-const globals = { uBakeAo: { value: 1 }, uDust: { value: 0 }, uDbg: { value: 0 } };
+const globals = { uBakeAo: { value: 1 }, uWearAll: { value: 0 }, uDust: { value: 0 }, uDbg: { value: 0 } };
 /** Strength of the ambient occlusion baked into rebuilt objects (0 = ignore the bake). */
 export function setBakeStrength(v: number) {
   globals.uBakeAo.value = v;
+}
+/**
+ * Edge wear from the baked convexity, 0..1. Off by default: per-vertex convexity interpolates
+ * across whole faces on low-poly parts (a box's sides all read as "edge"), so it only looks right
+ * on densely bevelled meshes. A real edge mask needs a per-object lightmap UV + texture.
+ */
+export function setEdgeWear(v: number) {
+  globals.uWearAll.value = v;
 }
 /** Debug view: 0 off, 1 albedo, 2 roughness, 3 view normal, 4 detail height, 5 bake (AO, convexity, wear). */
 export function setMaterialDebug(v: number) {
@@ -566,6 +575,8 @@ function physical(m: THREE.MeshStandardMaterial, kind: string, spec: KindSpec): 
     p.sheen = spec.sheen;
     p.sheenRoughness = spec.sheenRough ?? 0.5;
     p.sheenColor.copy(m.color).lerp(new THREE.Color(1, 1, 1), kind === 'velvet' ? 0.35 : 0.15);
+    // velvet: the pile hides the dye face-on (dark) and lights up at grazing angles (sheen)
+    if (kind === 'velvet') p.color.multiplyScalar(0.6);
   }
   if (spec.spec !== undefined) p.specularIntensity = spec.spec;
   if (spec.ior) p.ior = spec.ior;
