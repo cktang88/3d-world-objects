@@ -35,7 +35,7 @@ export function parkFeature(cx: number, cz: number): ParkFeature {
 }
 
 const G = CURB + 0.02; // lawn level
-const TREES: Species[] = ['oak', 'plane', 'locust', 'oak', 'ginkgo', 'pear'];
+const TREES: Species[] = ['oak', 'plane', 'locust', 'oak', 'ginkgo']; // variant 0 only: each new tree model costs a build
 
 /**
  * Trees go into batches of one model each, at most 30 trees: streettrees' per-group batched
@@ -104,7 +104,7 @@ export function buildPark(c: OpenCtx) {
     const tx = s * (AX / 2 - 8.2);
     const ex = s * (AX / 2 - 6.9);
     for (let z = inner.minZ + 4; z < inner.maxZ - 2; z += 9) {
-      plant('oak', 1, tx, G, z + r.range(-0.4, 0.4), r);
+      plant('oak', 0, tx, G, z + r.range(-0.4, 0.4), r);
       colliders.push(rect(tx, z, 0.7, 0.7));
     }
     // settees backed against the lawn fence, facing the promenade, lamps between
@@ -151,7 +151,7 @@ export function buildPark(c: OpenCtx) {
   for (let i = 0; i < 160 && planted < 26; i++) {
     const x = r.range(inner.minX + 3, inner.maxX - 3), z = r.range(inner.minZ + 3, inner.maxZ - 3);
     if (!free(x, z, 5)) continue;
-    plant(sp[planted % 3], r.int(0, 2), x, G, z, r);
+    plant(sp[planted % 3], 0, x, G, z, r);
     colliders.push(rect(x, z, 0.7, 0.7));
     busy.push(rect(x, z, 3.2, 3.2));
     planted++;

@@ -275,6 +275,15 @@ export function updateShowcases(p: THREE.Vector3) {
   }
 }
 
+/** the registered slots under a root (for qa tests) */
+export function slotsUnder(root: THREE.Object3D) {
+  return slots.filter((s) => {
+    let o: THREE.Object3D | null = s.holder;
+    while (o && o !== root) o = o.parent;
+    return o === root;
+  }).map((s) => s.spec);
+}
+
 /** stats for the labs */
 export function showcaseStats() {
   return { slots: slots.length, shown: slots.filter((s) => s.state === 'shown').length, failed: slots.filter((s) => s.state === 'failed').length, loading, tris: shownTris };
