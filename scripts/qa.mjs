@@ -55,6 +55,7 @@ const SRC_MAP = [
   [/^src\/rooms\/vertical/, ['vertical']],
   [/^src\/nyc\/vehicle/, ['vehicles']],
   [/^src\/(meshlod|meshlod-core)\.ts$|^src\/vendor\/meshopt|^scripts\/(build_vehicles\.mjs|lib\/simplify-doc\.mjs)$|^public\/assets\/vehicles\//, ['meshlod', 'vehicles']],
+  [/^src\/(minimap|nyc\/minimap-nyc)\.ts$/, ['minimap']],
   [/^src\/nyc\/district/, ['districts']],
   [/^src\/nyc\/common\.ts$/, ['nyc', 'people', 'vehicles', 'districts']],
   [/^src\/nyc\/buildings-shop\.ts$/, ['nyc', 'buildings', 'shop']],

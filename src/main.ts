@@ -1,5 +1,6 @@
 // ?fast=1 / ?notex=1 / ?post=0 / ?shadows=0 (src/flags.ts): first, so modules that read location.search see them
 import { FLAGS, stripTextures } from './flags';
+import { minimap } from './minimap'; // [minimap]
 import { mark, timed } from './boot'; // boot stage marks (scripts/boot.mjs)
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -616,6 +617,7 @@ addEventListener('keydown', (e) => {
       goBack().then(() => (transitioning = false));
     }
   } else if (e.code === 'KeyC') toggleCredits();
+  else if (e.code === 'KeyM') minimap.cycle(); // [minimap] minimap → large map → off
   else if (e.code === 'KeyG') {
     quality = quality === 'ultra' ? 'high' : quality === 'high' ? 'low' : 'ultra';
     applyQuality();
@@ -739,6 +741,7 @@ function frame() {
     const active = started || coarse;
     player.update(dt, seam.colliders(level.colliders(player.pos), player.pos), !active || infoOpen);
     level.update(dt, player.pos, time);
+    minimap.update(level, player.pos, player.yaw, time); // [minimap] 2D overlay, throttled, no WebGL
     const walked = seam.update(dt, level, player.pos); // seamless.ts: prebuild, previews, walking through doors
     if (active && walked.enter) enter(walked.enter);
     else if (active && walked.exit && !transitioning) {

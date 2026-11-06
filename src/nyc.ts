@@ -22,6 +22,8 @@ import { disposeTree, rect } from './level';
 import { BIOMES } from './biomes';
 // [districts] neighbourhoods: building/shop mix, open spaces, showcase objects (src/nyc/district*.ts)
 import { districtAt, SPAWN, spawnView } from './nyc/districts';
+import { nycMinimapSource } from './nyc/minimap-nyc'; // [minimap]
+import { registerMinimapSource } from './minimap';
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
 
 // ---------------------------------------------------------------- static geometry baking
@@ -196,6 +198,7 @@ export class NycLevel implements Level {
     this.group.add(ch.group);
     this.chunks.set(k, ch);
     this.vis.add(cx, cz, ch.group, ch.hulls); // [vis]
+    nycMinimapSource.addChunk(cx, cz, ch.hulls); // [minimap] building footprints for the map tiles
   }
 
   // ------------------------------------------------------------ one block
@@ -450,3 +453,6 @@ function objectPortal(e: ModelEntry, x: number, z: number, size: THREE.Vector3, 
   };
 }
 
+
+// [minimap] the NYC level maps itself (src/minimap.ts, src/nyc/minimap-nyc.ts)
+registerMinimapSource((l) => (l instanceof NycLevel ? nycMinimapSource : null));
