@@ -7,7 +7,7 @@ xformOps and each mesh's `extent`, and unions the transformed extent boxes. The 
 skipped. Output: public/museum/s/<shard>.json  {theme: [[x, y, z] or 0, ...]} in the order of t/<shard>.json, in Y-up axes (metres, raw
 source size: the runtime still applies realScale).
 
-    python3 scripts/build_sizes.py [--workers 48] [--cache /path/sizes.jsonl] [--limit N]
+    python3 scripts/build_sizes.py [--workers 16] [--minutes 14] [--cache /path/sizes.jsonl] [--limit N]
 
 Resumable: finished ids are appended to the cache file and skipped on the next run.
 """
@@ -216,10 +216,11 @@ def compact(v):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--workers', type=int, default=48)
+    ap.add_argument('--workers', type=int, default=16)
     ap.add_argument('--cache', default=os.path.join(ROOT, '.sizes-cache.jsonl'))
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('--write-only', action='store_true')
+    ap.add_argument('--minutes', type=float, default=14, help='stop after this long; run again to resume')
     args = ap.parse_args()
 
     shards = {}
@@ -240,7 +241,7 @@ def main():
     todo = [e for es in shards.values() for e in es if e[3] not in done]
     if args.limit:
         todo = todo[: args.limit]
-    print(f'{len(done)} known, {len(todo)} to measure', flush=True)
+    print(time.strftime('%H:%M:%S'), f'{len(done)} known, {len(todo)} to measure', flush=True)
     lock = threading.Lock()
     out = open(args.cache, 'a')
     t0 = time.time()
@@ -256,11 +257,16 @@ def main():
                 out.flush()
                 dt = time.time() - t0
                 if n[0] % 500 == 0:
-                    print(f'{n[0]}/{len(todo)}  {n[0] / dt:.1f}/s  eta {(len(todo) - n[0]) / max(1e-6, n[0] / dt) / 60:.0f} min', flush=True)
+                    print(time.strftime('%H:%M:%S'), f'{n[0]}/{len(todo)}  {n[0] / dt:.1f}/s  eta {(len(todo) - n[0]) / max(1e-6, n[0] / dt) / 60:.0f} min', flush=True)
 
     if not args.write_only:
+        # chunks of at most --minutes, resumable from the cache (house rule: no long jobs)
         with ThreadPoolExecutor(args.workers) as ex:
-            list(ex.map(work, todo))
+            for i in range(0, len(todo), 200):
+                if time.time() - t0 > args.minutes * 60:
+                    print(time.strftime('%H:%M:%S'), f'stopping after {args.minutes} min; run again to resume', flush=True)
+                    break
+                list(ex.map(work, todo[i:i + 200]))
     out.close()
 
     os.makedirs(os.path.join(ROOT, 'public/museum/s'), exist_ok=True)
