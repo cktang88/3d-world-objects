@@ -254,7 +254,8 @@ export class MacroLevel implements Level {
     const dark = this.mode === 'vessel' || this.mode === 'circuit';
     // a room far above / around: warm, dim, a lamp for a sun
     this.env = {
-      skyTop: dark ? '#141210' : '#5a5348', skyBottom: dark ? '#2a2620' : '#b8ab94', stars: false,
+      // the room above: a lit ceiling over an open device, dim over a jar's mouth
+      skyTop: this.mode === 'circuit' ? '#8a9098' : dark ? '#141210' : '#5a5348', skyBottom: this.mode === 'circuit' ? '#c4c8ce' : dark ? '#2a2620' : '#b8ab94', stars: false,
       fog: this.mode === 'circuit' ? '#0e1a14' : dark ? '#1c1814' : '#a89c88', fogNear: this.radius * 0.6, fogFar: this.radius * 3,
       sun: { color: this.mode === 'circuit' ? '#dfe8ff' : '#ffe2b8', intensity: this.mode === 'vessel' ? 1.6 : 2.6, elev: this.mode === 'vessel' ? 78 : 48, azim: 140 },
       hemi: { sky: '#f4e8d6', ground: '#4a3a2a', intensity: this.mode === 'circuit' ? 0.5 : 0.7 }, ambient: 0.08, envIntensity: 0.4, exposure: 1.0,
@@ -564,17 +565,20 @@ export class MacroLevel implements Level {
         }
       }
     // the big ICs: packages the size of blocks with their part number on top, legible from the street
+    let firstIc = { x: 0, z: 0, h: 0 };
     const labels = ['ATMEGA328P', 'STM32F407', 'ESP32-S3', 'LM358N', 'NE555P', '74HC595'];
     const big: [number, number][] = [];
     for (let i = 0; i < 6; i++) {
-      const bx = r.range(-R * 0.6, R * 0.6), bz = r.range(-R * 0.7, R * 0.15);
-      const w = 0.007 * k, d = 0.007 * k, h = Math.max(1.2, 0.0012 * k);
+      // the first one stands just ahead of where you arrive, its part number legible
+      const bx = i === 0 ? 3 : r.range(-R * 0.6, R * 0.6), bz = i === 0 ? R * 0.55 - 11 : r.range(-R * 0.7, R * 0.15);
+      const w = 0.01 * k, d = 0.01 * k, h = Math.max(1.0, 0.0012 * k);
       kit.box(chip, w, h, d, bx, 0, bz);
       for (let p = 0; p < 10; p++) for (const sx of [-1, 1]) {
         kit.box(solder, 0.35, h * 0.35, 1.1, bx - w / 2 + (p + 0.5) * (w / 10), 0, bz + sx * (d / 2 + 0.55));
         kit.box(solder, 1.1, h * 0.35, 0.35, bx + sx * (w / 2 + 0.55), 0, bz - d / 2 + (p + 0.5) * (d / 10));
       }
-      kit.flat(chipLabel(labels[i % labels.length]), w * 0.85, w * 0.21, bx, h + 0.01, bz, 'keep');
+      kit.flat(chipLabel(labels[i % labels.length]), w * 0.9, w * 0.24, bx, h + 0.01, bz, 'keep');
+      if (i === 0) firstIc = { x: bx, z: bz, h };
       kit.sphere(mat('#444444', { rough: 0.4 }), w * 0.04, bx - w * 0.38, h, bz - d * 0.38, 0.2);
       this.cols.push({ minX: bx - w / 2 - 1.2, maxX: bx + w / 2 + 1.2, minZ: bz - d / 2 - 1.2, maxZ: bz + d / 2 + 1.2 });
       big.push([bx, bz]);
@@ -591,11 +595,41 @@ export class MacroLevel implements Level {
       this.cols.push({ minX: hx - hw / 2, maxX: hx + hw / 2, minZ: hz - hw / 2, maxZ: hz + hw / 2 });
       if (hh > tower.h) tower = { x: hx, z: hz, h: hh };
     }
-    // the device's own housing far around, in its colour: the walls of this city
-    const housing = new THREE.MeshStandardMaterial({ color: ownColour(this.desc.source, '#2a2c30'), roughness: 0.5, side: THREE.BackSide });
-    kit.cyl(housing, R * 1.35, R * 1.35, R * 0.9, 0, -0.2, 0, 32, true);
+    // the device's own housing as the distant walls of this city: low panels in its colour (lightened), with
+    // vent slots and panel seams; no roof, the room's light falls in
+    const hc = new THREE.Color(ownColour(this.desc.source, '#5a5e64')).lerp(new THREE.Color('#9aa0a8'), 0.45);
+    const housing = mat('#' + hc.getHexString(), { rough: 0.55, metal: 0.2 });
+    const slot = mat('#1a1c20', { rough: 0.8 });
+    const HW = R * 1.3, HH = 16;
+    for (const [x, z, w, d] of [[0, -HW, HW * 2, 1], [0, HW, HW * 2, 1], [-HW, 0, 1, HW * 2], [HW, 0, 1, HW * 2]] as const) {
+      kit.box(housing, w, HH, d, x, -0.2, z);
+      const along = w > d;
+      for (let t = -HW + 6; t < HW - 6; t += 12) {
+        // a seam between panels and a bank of vent slots
+        if (along) kit.box(slot, 0.25, HH, 1.1, t + 6, -0.2, z);
+        else kit.box(slot, 1.1, HH, 0.25, x, -0.2, t + 6);
+        for (let v = 0; v < 5; v++) {
+          if (along) kit.box(slot, 7, 0.35, 1.1, t, 8 + v * 1.1, z);
+          else kit.box(slot, 1.1, 0.35, 7, x, 8 + v * 1.1, t);
+        }
+      }
+    }
+    // just ahead of where you arrive: an upright TO-220 regulator, its part number printed on its face,
+    // its metal tab above and three legs into the board
+    {
+      const w = 0.01 * k, bh = 0.009 * k, d = 0.0045 * k, lift = 0.003 * k, x = -2, z = this.spawn.pos.z - 10;
+      kit.box(chip, w, bh, d, x, lift, z);
+      kit.box(alu, w, 0.006 * k, 0.0013 * k, x, lift + bh, z - d / 2 + 0.0007 * k);
+      kit.cyl(mat('#1a1c20'), 0.0018 * k, 0.0018 * k, 0.0014 * k, x, lift + bh + 0.002 * k, z - d / 2 + 0.0007 * k, 16);
+      for (const lx of [-1, 0, 1]) kit.box(solder, 0.0008 * k, lift + 0.2, 0.0005 * k, x + lx * 0.00254 * k, 0, z);
+      kit.quad(chipLabel('LM7805CT'), w * 0.85, w * 0.23, x, lift + bh * 0.62, z + d / 2 + 0.02, 0);
+      kit.quad(chipLabel('LM7805CT'), w * 0.85, w * 0.23, x, lift + bh * 0.62, z - d / 2 - 0.02, Math.PI);
+      this.cols.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+      firstIc = { x, z, h: lift + bh * 0.62 };
+    }
     kit.finish(g);
-    this.face(tower.x, tower.z, tower.h * 0.5);
+    void tower;
+    this.face(firstIc.x, firstIc.z, firstIc.h);
     void big;
     yield;
     // LEDs: lit domes on the board, and a chip label or two
