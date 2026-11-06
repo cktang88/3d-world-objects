@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
 import { Rng, hashN } from '../rng';
-import { CURB, AX, SZ, AVE, ST } from './common';
+import { CURB, AX, SZ, AVE, ST, SW } from './common';
 
 /**
  * Pedestrians: skinned, animated people on the sidewalks.
@@ -52,7 +52,14 @@ function pickOutfit(r: Rng, gender: Gender): Outfit {
   const topStyle = r.pick([0, 1, 1, 2, 2, 3, 3, 3, 4]);
   const top = topStyle === 2 ? r.pick(PUFFER) : topStyle === 3 ? r.pick(COAT) : topStyle === 4 ? r.pick([...COAT, '#7a7f86', '#8a2a2a']) : r.pick(SHIRT);
   const bottomStyle = gender === 'female' ? r.pick([0, 0, 1, 3, 3]) : r.pick([0, 0, 0, 1, 1, topStyle === 0 ? 2 : 1]);
-  const bottom = bottomStyle === 0 ? r.pick(JEANS) : bottomStyle === 3 ? r.pick(['#111113', '#18181a', '#2a2a2e']) : r.pick(TROUSERS);
+  // re-pick trousers that would read as a onesie with the top (same hue and brightness)
+  const near = (a: string, b: string) => {
+    const ca = new THREE.Color(a), cb = new THREE.Color(b);
+    return Math.abs(ca.r - cb.r) + Math.abs(ca.g - cb.g) + Math.abs(ca.b - cb.b) < 0.12;
+  };
+  let bottom = '';
+  for (let i = 0; i < 6 && (!bottom || near(bottom, top)); i++)
+    bottom = bottomStyle === 0 ? r.pick(JEANS) : bottomStyle === 3 ? r.pick(['#111113', '#18181a', '#2a2a2e']) : r.pick(TROUSERS);
   const shoe = r.pick(SHOES);
   const light = shoe === '#e8e8e4' || shoe === '#d8d8d4';
   return {
@@ -530,14 +537,23 @@ interface Ped {
   line: number;
   t: number;
   v: number;
-  /** sidestep offset across the walking line (to pass the player) */
+  /** sidestep offset across the walking line (to pass the player and each other) */
   off: number;
   /** standing: seconds left before walking on */
   wait: number;
   tick: number;
   acc: number;
+  /** a companion: walks beside this person, or stands facing them talking */
+  buddy?: Ped;
+  /** set on the companion: the person it follows */
+  lead?: Ped;
+  /** facing (radians) */
+  yaw: number;
+  /** speed this frame */
+  v0?: number;
 }
 const COUNT = 84;
+const yawOf = (axis: 'x' | 'z', dir: number) => (axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI);
 
 export class Pedestrians {
   peds: Ped[] = [];
@@ -556,16 +572,19 @@ export class Pedestrians {
     pd.dir = r.chance(0.5) ? 1 : -1;
     pd.off = 0;
     const standing = ahead ? r.chance(0.3) : r.chance(0.12);
+    // the sidewalk runs from the curb (0) to the building line (SW); keep a little off both
+    const inSw = pd.buddy ? r.range(0.9, SW - 1.6) : r.range(0.8, SW - 0.9);
     if (pd.axis === 'x') {
       const k = Math.round(p.z / SZ - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
-      pd.line = (k + 0.5) * SZ + r.pick([-1, 1]) * (ST / 2 + r.range(0.9, 3.4));
+      pd.line = (k + 0.5) * SZ + r.pick([-1, 1]) * (ST / 2 + inSw);
       pd.t = p.x + (ahead ? r.range(-50, 50) : -pd.dir * r.range(40, 60));
     } else {
       const k = Math.round(p.x / AX - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
-      pd.line = (k + 0.5) * AX + r.pick([-1, 1]) * (AVE / 2 + r.range(0.9, 3.4));
+      pd.line = (k + 0.5) * AX + r.pick([-1, 1]) * (AVE / 2 + inSw);
       pd.t = p.z + (ahead ? r.range(-50, 50) : -pd.dir * r.range(40, 60));
     }
     pd.v = r.range(1.05, 1.5);
+    pd.yaw = yawOf(pd.axis, pd.dir);
     if (standing) {
       // wait at the corner, near the curb, facing across the street
       const crossAxis = pd.axis === 'x' ? 'z' : 'x';
@@ -575,19 +594,21 @@ export class Pedestrians {
       const c = (k + 0.5) * period;
       const side = pd.t > c ? 1 : -1;
       pd.dir = -side;
-      pd.t = c + side * (half + r.range(0.5, 1.6));
-      const lineOff = pd.axis === 'x' ? pd.line - Math.round(pd.line / SZ - 0.5) * SZ : 0;
-      void lineOff;
-      pd.line += r.range(-0.8, 0.8);
-      pd.wait = r.range(6, 30);
-      pd.p.setActivity(r.chance(0.45) ? 'phone' : r.chance(0.3) ? 'talk' : 'idle', r.range(0, 5));
+      pd.t = c + side * (half + r.range(0.5, 1.6) + (pd.buddy ? 1.5 : 0));
+      pd.line += r.range(-0.6, 0.6);
+      pd.wait = r.range(6, 30) + (pd.buddy ? 20 : 0);
+      pd.yaw = yawOf(pd.axis, pd.dir);
+      if (pd.buddy) {
+        pd.p.setActivity('talk', r.range(0, 5));
+        pd.yaw += Math.PI / 2;
+      } else pd.p.setActivity(r.chance(0.5) ? 'phone' : r.chance(0.25) ? 'talk' : 'idle', r.range(0, 5));
+      if (!pd.buddy && pd.p.activity === 'talk') pd.yaw += r.pick([-1, 1]) * r.range(0.8, 2.2);
     } else {
       pd.wait = 0;
       pd.p.setActivity('walk', r.range(0, 5));
       pd.p.setSpeed(pd.v);
     }
-    pd.p.root.rotation.y = pd.axis === 'x' ? (pd.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : pd.dir > 0 ? 0 : Math.PI;
-    if (standing && pd.p.activity === 'talk') pd.p.root.rotation.y += r.pick([-1, 1]) * r.range(0.8, 2.2);
+    pd.p.root.rotation.y = pd.yaw;
   }
   update(dt: number, p: THREE.Vector3) {
     if (!this.assets) return;
@@ -595,38 +616,62 @@ export class Pedestrians {
     while (this.peds.length < COUNT) {
       const person = new Person(this.assets, this.rng);
       this.group.add(person.root);
-      const pd: Ped = { p: person, axis: 'x', dir: 1, line: 0, t: 0, v: 1.3, off: 0, wait: 0, tick: this.peds.length, acc: 0 };
-      this.place(pd, p, true);
+      const pd: Ped = { p: person, axis: 'x', dir: 1, line: 0, t: 0, v: 1.3, off: 0, wait: 0, tick: this.peds.length, acc: 0, yaw: 0 };
+      // about one in five people is out with a companion
+      const prev = this.peds[this.peds.length - 1];
+      if (prev && !prev.lead && !prev.buddy && this.rng.chance(0.25)) {
+        pd.lead = prev;
+        prev.buddy = pd;
+        this.place(prev, p, true);
+      } else this.place(pd, p, true);
       this.peds.push(pd);
     }
     for (const pd of this.peds) {
+      if (pd.lead) continue;
       const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
       if (Math.abs(pd.t - along) > 80 || Math.abs(pd.line - across) > 80) this.place(pd, p, false);
       if (pd.wait > 0) {
         pd.wait -= dt;
         if (pd.wait <= 0) {
+          pd.yaw = yawOf(pd.axis, pd.dir);
+          pd.p.root.rotation.y = pd.yaw;
           pd.p.setActivity('walk', 0);
           pd.p.setSpeed(pd.v);
         }
       } else {
-        // pass the player: step aside if they are just ahead in our lane, slow down if boxed in
-        const ahead = (along - pd.t) * pd.dir;
-        const lat = across - (pd.line + pd.off);
+        // pass the player and oncoming people: drift aside (to the right when meeting someone),
+        // slow down when boxed in
         let target = 0, v = pd.v;
-        if (ahead > -0.5 && ahead < 3.5 && Math.abs(lat) < 1.0) {
-          target = pd.off + (lat > 0 ? lat - 1.0 : lat + 1.0);
-          if (ahead < 1.0) v *= 0.4;
+        const avoid = (oa: number, oc: number, oncoming: boolean) => {
+          const ahead = (oa - pd.t) * pd.dir;
+          const lat = oc - (pd.line + pd.off);
+          if (ahead > -0.3 && ahead < 3.5 && Math.abs(lat) < 0.9) {
+            // keep right: walking +x, your right is +z; walking +z, it is -x
+            const right = (pd.axis === 'x' ? 1 : -1) * pd.dir;
+            const away = oncoming ? right : lat > 0 ? -1 : 1;
+            target = THREE.MathUtils.clamp(pd.off + away * (0.95 - Math.abs(lat)) + away * 0.1, -1.2, 1.2);
+            if (ahead < 0.9) v *= oncoming ? 0.7 : 0.4;
+          }
+        };
+        avoid(along, across, false);
+        for (const o of this.peds) {
+          if (o === pd || o === pd.buddy || o.lead === pd || o.axis !== pd.axis || o.lead) continue;
+          if (Math.abs(o.line - pd.line) > 1.5 || Math.abs(o.t - pd.t) > 3.5) continue;
+          avoid(o.t, o.line + o.off, o.wait <= 0 && o.dir !== pd.dir);
         }
-        target = THREE.MathUtils.clamp(target, -1.2, 1.2);
-        pd.off += THREE.MathUtils.clamp(target - pd.off, -1.2 * dt, 1.2 * dt);
+        pd.off += THREE.MathUtils.clamp(target - pd.off, -1.0 * dt, 1.0 * dt);
         pd.t += pd.dir * v * dt;
         pd.p.setSpeed(v);
-        const yaw = pd.axis === 'x' ? (pd.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : pd.dir > 0 ? 0 : Math.PI;
         const turn = THREE.MathUtils.clamp((target - pd.off) * 0.6, -0.4, 0.4) * (pd.axis === 'x' ? -1 : 1) * pd.dir;
-        pd.p.root.rotation.y = yaw + turn;
+        pd.yaw = yawOf(pd.axis, pd.dir) + turn;
+        pd.p.root.rotation.y = pd.yaw;
+        pd.v0 = v;
       }
       const lineNow = pd.line + pd.off;
       pd.p.root.position.set(pd.axis === 'x' ? pd.t : lineNow, CURB, pd.axis === 'x' ? lineNow : pd.t);
+      if (pd.buddy) this.follow(pd.buddy, pd);
+    }
+    for (const pd of this.peds) {
       // LOD: animate near people every frame, far ones every 2nd / 4th frame; shadows only nearby
       const d = Math.hypot(pd.p.root.position.x - p.x, pd.p.root.position.z - p.z);
       const every = d < 25 ? 1 : d < 50 ? 2 : 4;
@@ -637,6 +682,24 @@ export class Pedestrians {
       }
       pd.p.setShadows(d < 30);
       pd.p.setLod(d < 22 ? 0 : 1);
+    }
+  }
+  /** companions walk shoulder to shoulder, or stand facing the leader while talking */
+  private follow(f: Ped, l: Ped) {
+    const lp = l.p.root.position;
+    f.axis = l.axis;
+    f.dir = l.dir;
+    if (l.wait > 0) {
+      if (f.p.activity !== 'talk' && f.p.activity !== 'idle') f.p.setActivity(this.rng.chance(0.5) ? 'talk' : 'idle', 1.3);
+      f.p.root.position.set(lp.x + Math.sin(l.yaw) * 0.95, CURB, lp.z + Math.cos(l.yaw) * 0.95);
+      f.p.root.rotation.y = l.yaw + Math.PI;
+    } else {
+      if (f.p.activity !== 'walk') f.p.setActivity('walk', 0.3);
+      f.p.setSpeed(l.v0 ?? l.v);
+      // to the leader's left
+      const left = l.yaw + Math.PI / 2;
+      f.p.root.position.set(lp.x + Math.sin(left) * 0.62, CURB, lp.z + Math.cos(left) * 0.62);
+      f.p.root.rotation.y = l.yaw;
     }
   }
 }
