@@ -40,7 +40,7 @@ export interface LibraryEntry {
   /** Smithsonian EDAN record id (fetch full museum metadata from api.si.edu with an api.data.gov key) */
   edan?: string;
   /** model parts with their placement (Smithsonian Voyager packages); url is the first part */
-  parts?: { url: string; unit: number; q?: [number, number, number, number]; t?: [number, number, number] }[];
+  parts?: { url: string; unit: number; q?: [number, number, number, number]; t?: [number, number, number]; lowUrl?: string }[];
 }
 
 export interface LibraryInfo {
@@ -68,9 +68,10 @@ interface RawEntry {
   /** Smithsonian: model rotation (x,y,z,w), metres per unit, multi-part models, EDAN record */
   q?: [number, number, number, number];
   f?: number;
-  parts?: { u: string; f: number; q?: [number, number, number, number]; t?: [number, number, number] }[];
+  parts?: { u: string; f: number; q?: [number, number, number, number]; t?: [number, number, number]; lo?: string }[];
   edan?: string;
   kb?: number;
+  lo?: string;
 }
 interface RawCatalog {
   source: LibrarySource;
@@ -114,9 +115,9 @@ function fill(tpl: string, id: string) {
 
 function toEntry(cat: RawCatalog, e: RawEntry): LibraryEntry {
   const parts = e.parts
-    ? e.parts.map((p) => ({ url: abs(cat.base, p.u), unit: p.f, q: p.q, t: p.t }))
+    ? e.parts.map((p) => ({ url: abs(cat.base, p.u), unit: p.f, q: p.q, t: p.t, lowUrl: p.lo ? abs(cat.base, p.lo) : undefined }))
     : e.f !== undefined || e.q
-      ? [{ url: abs(cat.base, e.u!), unit: e.f ?? 1, q: e.q }]
+      ? [{ url: abs(cat.base, e.u!), unit: e.f ?? 1, q: e.q, lowUrl: e.lo ? abs(cat.base, e.lo) : undefined }]
       : undefined;
   const u = e.u ?? e.parts?.[0]?.u ?? fill(cat.tpl?.u ?? '{id}', e.id);
   const th = e.th ?? (cat.tpl?.th ? fill(cat.tpl.th, e.id) : undefined);
@@ -235,6 +236,8 @@ export interface LoadOptions {
   resolution?: '1k' | '2k' | '4k';
   /** Google Scanned Objects simplified level 1..3 (default 0 = full) */
   lod?: 0 | 1 | 2 | 3;
+  /** 'low': cheap version for distance or crowds (Smithsonian ~20k-face Thumb GLB, GSO lod 2, Poly Haven 1k) */
+  quality?: 'full' | 'low';
   /** cast/receive shadows (default true) */
   shadows?: boolean;
 }
@@ -269,7 +272,8 @@ async function fetchModel(e: LibraryEntry, opts: LoadOptions): Promise<THREE.Obj
   if (e.parts) {
     // Voyager packages: each part carries its own units, rotation and offset
     const g = new THREE.Group();
-    const scenes = await Promise.all(e.parts.map((p) => fetchGlb(p.url)));
+    const low = opts.quality === 'low';
+    const scenes = await Promise.all(e.parts.map((p) => fetchGlb(low && p.lowUrl ? p.lowUrl : p.url)));
     e.parts.forEach((p, i) => {
       const holder = new THREE.Group();
       const sc = scenes[i];
@@ -282,7 +286,8 @@ async function fetchModel(e: LibraryEntry, opts: LoadOptions): Promise<THREE.Obj
     return g;
   }
   let url = e.url;
-  if (e.source === 'gso' && opts.lod) url = url.replace(/objects\/([^/]+)\/\1\.glb$/, `lods/$1/$1_lod${opts.lod}.glb`);
+  const lod = opts.lod ?? (opts.quality === 'low' ? 2 : 0);
+  if (e.source === 'gso' && lod) url = url.replace(/objects\/([^/]+)\/\1\.glb$/, `lods/$1/$1_lod${lod}.glb`);
   return fetchGlb(url);
 }
 
@@ -293,7 +298,7 @@ async function fetchGlb(url: string): Promise<THREE.Object3D> {
 }
 
 function cacheKey(e: LibraryEntry, o: LoadOptions) {
-  return `${e.source}:${e.id}:${o.resolution ?? ''}:${o.lod ?? 0}`;
+  return `${e.source}:${e.id}:${o.resolution ?? ''}:${o.lod ?? 0}:${o.quality ?? 'full'}`;
 }
 
 /**

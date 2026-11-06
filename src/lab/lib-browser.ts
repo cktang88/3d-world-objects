@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
-import { LIBRARY_SOURCES, loadCatalog, loadLibraryModel, searchLibrary, type LibraryEntry, type LibrarySource } from '../libraries';
+import { LIBRARY_SOURCES, loadCatalog, loadLibraryModel, searchLibrary, type LibraryEntry, type LibrarySource, type LoadOptions } from '../libraries';
 
 /**
  * ?lab=lib-browser — models from each third-party library at real scale, one row per source, labelled.
- *   &source=gso&category=shoe&q=mug&n=24&seed=3   one source as a wrapped grid instead
- *   &id=<entry id> with &source=                   one model
+ *   &src=gso&category=shoe&q=mug&n=24&seed=3   one source as a wrapped grid (src: ph, gso, si, kh)
+ *   &src=..&id=<entry id>                       one model
+ *   &detail=low|full   model quality (overview defaults to low for Smithsonian + GSO: software rendering)
  * Small things stand on 0.9 m plinths so they read next to furniture.
  */
 
@@ -27,7 +28,7 @@ async function showcase(src: LibrarySource, n: number): Promise<LibraryEntry[]> 
     const out: LibraryEntry[] = [];
     for (const c of SI_CATS) {
       const hits = await searchLibrary({ source: 'smithsonian', category: c, maxSize: 3, minSize: 0.05, seed: 7 });
-      const one = hits.find((e) => (e.kb ?? 0) < 12000 && !(e.parts && e.parts.length > 4));
+      const one = hits.find((e) => (e.kb ?? 0) < 3000 && !e.parts);
       if (one) out.push(one);
     }
     return out.slice(0, n);
@@ -45,8 +46,8 @@ function label(text: string[], width = 1.2): THREE.Mesh {
   g.fillRect(0, 0, c.width, c.height);
   text.forEach((t, i) => {
     g.fillStyle = i === 0 ? '#ffffff' : '#c8c8c8';
-    g.font = `${i === 0 ? 'bold 30' : '24'}px sans-serif`;
-    g.fillText(t.length > 34 ? t.slice(0, 33) + '…' : t, 12, 42 + i * 64);
+    g.font = `${i === 0 ? 'bold 34' : '28'}px sans-serif`;
+    g.fillText(t.length > 30 ? t.slice(0, 29) + '…' : t, 12, 44 + i * 64);
   });
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -57,14 +58,14 @@ function label(text: string[], width = 1.2): THREE.Mesh {
 
 const plinthMat = new THREE.MeshStandardMaterial({ color: '#e9e6e0', roughness: 0.7 });
 
-async function row(group: THREE.Group, entries: LibraryEntry[], z: number, title: string, wrap = 0) {
+async function row(group: THREE.Group, entries: LibraryEntry[], z: number, title: string, wrap = 0, opts: LoadOptions = {}) {
   const hdr = label([title], 2.4);
   hdr.position.set(-2.2, 0.02, z + 0.4);
   group.add(hdr);
   let x = 0;
   let zz = z;
   let col = 0;
-  const results = await Promise.allSettled(entries.map((e) => loadLibraryModel(e)));
+  const results = await Promise.allSettled(entries.map((e) => loadLibraryModel(e, opts)));
   results.forEach((r, i) => {
     const e = entries[i];
     if (r.status !== 'fulfilled') {
@@ -87,7 +88,7 @@ async function row(group: THREE.Group, entries: LibraryEntry[], z: number, title
     obj.position.y = base;
     cell.add(obj);
     const dims = `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m`;
-    const l = label([e.title, `${e.category} · ${e.licence}`, dims], 0.9);
+    const l = label([e.title, `${e.category} · ${e.licence}`, dims], Math.max(1.1, Math.min(w, 2)));
     l.position.set(0, 0.02, Math.max(size.z, 0.35) / 2 + 0.45);
     cell.add(l);
     cell.position.set(x + w / 2, 0, zz);
@@ -105,15 +106,19 @@ async function row(group: THREE.Group, entries: LibraryEntry[], z: number, title
 const scene: LabScene = {
   name: 'lib-browser',
   description: 'third-party model libraries at real scale: &source=&category=&q=&n=&id=',
-  cam: [9, 7.5, 13],
-  look: [9, 0.5, 2.5],
+  cam: [7, 8, 17],
+  look: [7, 0, 3.5],
   env: 'studio',
   async build({ group, params }) {
-    const src = params.get('source') as LibrarySource | null;
+    // short aliases: scripts/shot.mjs proxies any URL containing 'polyhaven', including this page's own
+    const alias: Record<string, LibrarySource> = { ph: 'polyhaven', si: 'smithsonian', kh: 'khronos', gso: 'gso' };
+    const raw = params.get('src') ?? params.get('source');
+    const src = raw ? (alias[raw] ?? (raw as LibrarySource)) : null;
     const n = Number(params.get('n') ?? 10);
+    const detail = (params.get('detail') ?? undefined) as 'low' | 'full' | undefined;
     if (src && params.get('id')) {
       const e = (await loadCatalog(src)).find((x) => x.id === params.get('id'));
-      if (e) await row(group, [e], 0, `${src}: ${e.title}`);
+      if (e) await row(group, [e], 0, `${src}: ${e.title}`, 0, { quality: detail });
     } else if (src) {
       const hits = await searchLibrary({
         source: src,
@@ -123,11 +128,12 @@ const scene: LabScene = {
         seed: params.has('seed') ? Number(params.get('seed')) : undefined,
         limit: n,
       });
-      await row(group, hits, 0, `${src} ${params.get('category') ?? ''} ${params.get('q') ?? ''}`, Number(params.get('wrap') ?? 8));
+      await row(group, hits, 0, `${src} ${params.get('category') ?? ''} ${params.get('q') ?? ''}`, Number(params.get('wrap') ?? 8), { quality: detail });
     } else {
       const names: Record<LibrarySource, string> = { polyhaven: 'Poly Haven · CC0', gso: 'Google Scanned Objects · CC BY', smithsonian: 'Smithsonian 3D · CC0', khronos: 'Khronos samples · CC0/CC BY' };
       const sources = LIBRARY_SOURCES;
-      await Promise.all(sources.map(async (s, i) => row(group, await showcase(s, n), i * 3.4 - 2, names[s])));
+      const q = (s: LibrarySource) => detail ?? (s === 'smithsonian' || s === 'gso' ? 'low' : 'full');
+      await Promise.all(sources.map(async (s, i) => row(group, await showcase(s, n), i * 3.4 - 2, names[s], 0, { quality: q(s) })));
     }
     const box = new THREE.Box3().setFromObject(group);
     group.userData.bounds = box;

@@ -30,7 +30,7 @@ const curl = (u) =>
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
-await page.route(/huggingface\.co|hf\.co|polyhaven/, async (route) => {
+await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (route) => {
   const buf = await curl(route.request().url());
   if (!buf) return route.abort();
   const s = buf.toString('latin1');

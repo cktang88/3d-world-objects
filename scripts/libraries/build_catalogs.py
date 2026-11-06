@@ -238,6 +238,9 @@ def si_package(pid, title, max_bytes=15e6):
                     hi[k] = max(hi[k], (r[k] + t[k]) * f)
         kb += pick.get('byteSize', 0) // 1024
         part = {'u': f'{pid}/{pick["uri"]}', 'f': f}
+        th = ders.get(('Web3D', 'Thumb'))
+        if th and th['assets'] and th['assets'][0]['uri'].endswith('.glb') and th['assets'][0]['uri'] != pick['uri']:
+            part['lo'] = f'{pid}/{th["assets"][0]["uri"]}'  # ~20k-face 512px version for distance / overviews
         if any(abs(a - b) > 1e-4 for a, b in zip(q, [0, 0, 0, 1])):
             part['q'] = [round(x, 5) for x in q]
         if any(t):
@@ -262,6 +265,8 @@ def si_package(pid, title, max_bytes=15e6):
         if 'q' in parts[0]:
             e['q'] = parts[0]['q']
         e['f'] = parts[0]['f']
+        if 'lo' in parts[0]:
+            e['lo'] = parts[0]['lo']
     else:
         e['parts'] = parts
     if lo[0] < hi[0] and max(hi[k] - lo[k] for k in range(3)) > 0.005:
@@ -300,7 +305,7 @@ def smithsonian():
     meta = {'source': 'smithsonian', 'name': 'Smithsonian 3D (Open Access)', 'licence': 'CC0-1.0',
             'home': 'https://3d.si.edu/', 'credit': 'Smithsonian Institution, Open Access (CC0)', 'base': SI_BASE,
             'tpl': {'th': '3d_package:{id}/scene-image-thumb.jpg'},
-            'note': 'u / parts[].u relative to base; f = metres per model unit; q = model rotation (x,y,z,w); '
+            'note': 'u / parts[].u relative to base; lo = low-poly (Thumb) GLB; f = metres per model unit; q = model rotation (x,y,z,w); '
                     't = part translation in model units; s = real size in metres after rotation; edan = EDAN record id'}
     for c, es in shards.items():
         for e in es:
