@@ -9,6 +9,7 @@ import { Rng, hashN } from '../rng';
 import { CURB, AX, SZ, AVE, ST, SW, CYCLE, lightFor } from './common';
 import { walkable } from './districts'; // [districts]
 import type { Rect } from '../level';
+import { GROUND } from './ground';
 
 /**
  * Pedestrians: skinned, animated people on the sidewalks.
@@ -1437,7 +1438,14 @@ export class Pedestrians {
     const u = pd.t / CP - 0.5;
     // step down / up the kerb over a short stride instead of snapping
     const e = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) - ch;
-    return CURB * THREE.MathUtils.smoothstep(e, -0.18, 0.35);
+    const step = CURB * THREE.MathUtils.smoothstep(e, -0.18, 0.35);
+    // the corner pedestrian ramps (src/nyc/ground.ts): RO from the corner along the kerb, RW wide
+    // (+ RF flares), rising from a RLIP lip at the kerb to the sidewalk over RL
+    const lo = Math.abs(pd.line + pd.off - pd.c) - sideHalf(pd.axis);
+    const w = 1 - THREE.MathUtils.smoothstep(Math.abs(lo - GROUND.RO), GROUND.RW / 2, GROUND.RW / 2 + GROUND.RF);
+    if (w <= 0 || e > GROUND.RL + 0.2) return step;
+    const ramp = e <= 0 ? THREE.MathUtils.lerp(0, GROUND.RLIP, THREE.MathUtils.smoothstep(e, -0.1, 0)) : GROUND.RLIP + (CURB - GROUND.RLIP) * Math.min(1, e / GROUND.RL);
+    return THREE.MathUtils.lerp(step, ramp, w);
   }
   private walk(pd: Ped, dt: number, along: number, across: number) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
