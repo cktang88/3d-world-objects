@@ -699,6 +699,8 @@ function setupTouch() {
 // ---------------------------------------------------------------- loop
 
 const clock = new THREE.Clock();
+const bootTimes: { firstFrame?: number } = {};
+(window as unknown as { __boot: typeof bootTimes }).__boot = bootTimes;
 let time = 0;
 
 let lab: { controls: OrbitControls; level: LabLevel } | null = null;
@@ -795,6 +797,8 @@ function frame() {
     weather.update(dt, player.pos);
     updateDetail(player.pos, mode === 'museum' ? 40 : 30);
     draw();
+    // boot timing (perf checks): the first frame drawn in play, ms since page start
+    if (!bootTimes.firstFrame) bootTimes.firstFrame = Math.round(performance.now());
   }
   requestAnimationFrame(frame);
 }
