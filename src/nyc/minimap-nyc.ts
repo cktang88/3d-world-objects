@@ -150,6 +150,37 @@ export function snapToWalk(x: number, z: number, face?: { x: number; z: number }
   return { x: out.x, z: out.z, yaw: out.yaw };
 }
 
+/** contiguous areas of one district kind (4-neighbour flood fill) within a chunk window; cached */
+let regionKey = '';
+let regionCache: { name: string; cells: [number, number][] }[] = [];
+function regions(cx0: number, cz0: number, cx1: number, cz1: number) {
+  const key = `${cx0},${cz0},${cx1},${cz1}`;
+  if (key === regionKey) return regionCache;
+  const seen = new Set<string>();
+  const out: { name: string; cells: [number, number][] }[] = [];
+  for (let cz = cz0; cz <= cz1; cz++)
+    for (let cx = cx0; cx <= cx1; cx++) {
+      if (seen.has(`${cx},${cz}`)) continue;
+      const kind = districtAt(cx, cz).kind;
+      const cells: [number, number][] = [];
+      const stack: [number, number][] = [[cx, cz]];
+      seen.add(`${cx},${cz}`);
+      while (stack.length) {
+        const [x, z] = stack.pop()!;
+        cells.push([x, z]);
+        for (const [nx, nz] of [[x + 1, z], [x - 1, z], [x, z + 1], [x, z - 1]]) {
+          if (nx < cx0 || nx > cx1 || nz < cz0 || nz > cz1 || seen.has(`${nx},${nz}`) || districtAt(nx, nz).kind !== kind) continue;
+          seen.add(`${nx},${nz}`);
+          stack.push([nx, nz]);
+        }
+      }
+      out.push({ name: districtAt(cx, cz).name, cells });
+    }
+  regionKey = key;
+  regionCache = out;
+  return out;
+}
+
 export const nycMinimapSource: MinimapSource & { addChunk(cx: number, cz: number, hs: { rect: { minX: number; maxX: number; minZ: number; maxZ: number } }[] | undefined): void } = {
   tileSize: 128,
   drawTile(g, tx, tz, px) {
@@ -176,16 +207,36 @@ export const nycMinimapSource: MinimapSource & { addChunk(cx: number, cz: number
   },
   labels(x0, z0, x1, z1) {
     const out: MapLabel[] = [];
-    for (let cz = Math.floor(z0 / SZ); cz <= Math.ceil(z1 / SZ); cz++)
-      for (let cx = Math.floor(x0 / AX); cx <= Math.ceil(x1 / AX); cx++) {
-        const d = districtAt(cx, cz);
-        // a district's name once: on its north-west block (no same district to the west or north)
-        if (d.kind !== 'river' && districtAt(cx - 1, cz).kind !== d.kind && districtAt(cx, cz - 1).kind !== d.kind) out.push({ x: cx * AX, z: cz * SZ - SZ / 4, text: d.name, kind: 'district' });
+    const cx0 = Math.floor(x0 / AX), cx1 = Math.ceil(x1 / AX), cz0 = Math.floor(z0 / SZ), cz1 = Math.ceil(z1 / SZ);
+    // one name per contiguous district area: at its centroid, or at the centroid of its visible
+    // part when that lies off screen (areas are flood-filled within a margin around the view)
+    for (const r of regions(cx0 - 6, cz0 - 6, cx1 + 6, cz1 + 6)) {
+      let sx = 0, sz = 0, n = 0, vx = 0, vz = 0, vn = 0;
+      for (const [cx, cz] of r.cells) {
+        sx += cx; sz += cz; n++;
+        if (cx >= cx0 && cx <= cx1 && cz >= cz0 && cz <= cz1) (vx += cx), (vz += cz), vn++;
+      }
+      if (!vn) continue;
+      let x = (sx / n) * AX, z = (sz / n) * SZ;
+      if (x < x0 || x > x1 || z < z0 || z > z1) (x = (vx / vn) * AX), (z = (vz / vn) * SZ);
+      out.push({ x, z, text: r.name, kind: 'district' });
+    }
+    for (let cz = cz0; cz <= cz1; cz++)
+      for (let cx = cx0; cx <= cx1; cx++) {
         const sc = showcaseName(cx, cz);
         if (sc) out.push({ x: cx * AX, z: cz * SZ + SZ / 5, text: sc, kind: 'showcase' });
       }
     return out;
   },
+  legend: [
+    [TINT.midtown, 'City blocks (tinted by district)'],
+    ['#3a3c40', 'Streets and avenues'],
+    [LAWN, 'Park'],
+    [WATER, 'River'],
+    ['#8d877c', 'Piers'],
+    [APRON, 'Airport apron'],
+    ['dot', 'Showcase: click to go there'],
+  ],
   snap(x, z, marker) {
     // a marker: on the nearest sidewalk or path of the showcase's own block, looking at it
     if (marker) return snapToWalk(marker.x, marker.z, { x: Math.round(marker.x / AX) * AX, z: Math.round(marker.z / SZ) * SZ });

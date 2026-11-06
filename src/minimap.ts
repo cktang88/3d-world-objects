@@ -22,9 +22,12 @@
  *   }
  *
  * Tiles are painted once into offscreen canvases (TILE_PX², LRU, at most MAX_TILES) and only blitted
- * afterwards. The HUD (≈180 px, heading-up) redraws at ≤ 12 Hz and only when the player moved or
- * turned; the large map (north-up, wheel to zoom, drag to pan) redraws on input. Stats:
- * window.__minimap.stats = { tiles, painted, draws, lastMs, avgMs }.
+ * afterwards. The HUD (≈180 px, heading-up) composites the tiles around the player into one map
+ * canvas only after the player moved RECOMPOSITE_M (or a tile filled in); every frame it only turns
+ * and shifts that canvas with a CSS transform (GPU-composited), under a fixed SVG arrow and cone.
+ * The large map (north-up, wheel zoom, drag pan, click to teleport, legend, greedy-placed labels with
+ * a halo) redraws on input. Stats: window.__minimap.stats = { tiles, painted, composites, draws,
+ * lastMs, avgMs (per composite/draw), frameMs (average update() cost per frame) }.
  */
 
 export interface MapLabel {
@@ -35,7 +38,7 @@ export interface MapLabel {
   kind: 'district' | 'showcase' | 'door';
 }
 /** the 2D calls a source may use (a CanvasRenderingContext2D, or a recorder in qa) */
-export type Ctx2D = Pick<CanvasRenderingContext2D, 'fillStyle' | 'strokeStyle' | 'lineWidth' | 'fillRect' | 'strokeRect' | 'beginPath' | 'moveTo' | 'lineTo' | 'closePath' | 'fill' | 'stroke' | 'arc' | 'save' | 'restore' | 'translate' | 'scale' | 'rotate' | 'setTransform' | 'clearRect' | 'drawImage' | 'fillText' | 'font' | 'textAlign' | 'textBaseline' | 'globalAlpha'>;
+export type Ctx2D = Pick<CanvasRenderingContext2D, 'fillStyle' | 'strokeStyle' | 'lineWidth' | 'lineJoin' | 'strokeText' | 'fillRect' | 'strokeRect' | 'beginPath' | 'moveTo' | 'lineTo' | 'closePath' | 'fill' | 'stroke' | 'arc' | 'save' | 'restore' | 'translate' | 'scale' | 'rotate' | 'setTransform' | 'clearRect' | 'drawImage' | 'fillText' | 'font' | 'textAlign' | 'textBaseline' | 'globalAlpha'>;
 export interface MinimapSource {
   tileSize: number;
   drawTile(g: Ctx2D, tx: number, tz: number, px: number): void;
@@ -45,6 +48,8 @@ export interface MinimapSource {
   snap?(x: number, z: number, marker?: MapLabel): { x: number; z: number; yaw: number } | null;
   /** a short name for the hovered place (district, showcase) */
   describe?(x: number, z: number): string;
+  /** the large map's legend: [colour or 'dot', text] */
+  legend?: [string, string][];
   hidden?: boolean;
 }
 type Resolver = (level: unknown) => MinimapSource | null;
@@ -64,8 +69,8 @@ export function worldToLarge(x: number, z: number, vx: number, vz: number, ppm: 
 
 export const TILE_PX = 256;
 export const MAX_TILES = 64;
-/** HUD redraw rate cap (Hz) */
-export const HUD_HZ = 12;
+/** HUD: how often a composite may fill in a missing tile (Hz) */
+export const HUD_HZ = 10;
 /** HUD scale: pixels per metre */
 export const HUD_PPM = 1.0;
 
@@ -132,18 +137,34 @@ export class TileCache {
 
 type Mode = 'hud' | 'large' | 'off';
 
+/** HUD: the composited map canvas is HUD_MAP css px square, recomposited after the player moves this far */
+export const HUD_MAP = 360;
+export const RECOMPOSITE_M = 8;
+
+/** a label's screen box for greedy placement */
+interface Box { x0: number; y0: number; x1: number; y1: number }
+const hit = (a: Box, b: Box) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+
 export class Minimap {
   mode: Mode = 'hud';
   cache = new TileCache();
-  stats = { tiles: 0, painted: 0, draws: 0, lastMs: 0, avgMs: 0 };
+  /** composites: HUD map canvas rebuilt; draws: large-map draws; frameMs: average cost of update() per frame */
+  stats = { tiles: 0, painted: 0, composites: 0, draws: 0, lastMs: 0, avgMs: 0, frameMs: 0, frames: 0 };
   private src: MinimapSource | null = null;
-  private hud: HTMLCanvasElement | null = null;
+  private hudBox: HTMLDivElement | null = null;
+  private hudMap: HTMLCanvasElement | null = null;
+  private hudN: HTMLDivElement | null = null;
+  private hudName: HTMLDivElement | null = null;
   private big: HTMLCanvasElement | null = null;
+  /** where the HUD map canvas is centred (world) and when it was built */
+  private anchor = { x: NaN, z: NaN, t: -1 };
+  /** the CSS transform last written (qa reads it) */
+  hudTransform = '';
   private last = { x: NaN, z: NaN, yaw: NaN, t: -1 };
   private pos = { x: 0, z: 0 };
   private view = { x: 0, z: 0, ppm: 0.5, dirty: true };
   private sourceOf = new WeakMap<object, MinimapSource | null>();
-  /** for qa: no DOM, just count and paint into the given surface */
+  /** for qa: no DOM, composite / draw into this surface */
   headless: Surface | null = null;
   /** teleport hook (main.ts: the same path the e2e journeys use) */
   onTeleport: ((x: number, z: number, yaw: number) => void) | null = null;
@@ -151,6 +172,8 @@ export class Minimap {
   /** the large map's last scale (canvas px per metre) and size, for clicks */
   large = { ppm: 1, W: 1, H: 1, k: 1 };
   private markers: { l: MapLabel; sx: number; sy: number }[] = [];
+  /** a tile in view was left unpainted (paint budget): composite again soon */
+  private pending = false;
 
   /**
    * A click on the large map at canvas pixel (sx, sy): snap to a walkable spot (a showcase marker
@@ -170,7 +193,7 @@ export class Minimap {
     if (!to) return null;
     this.onTeleport?.(to.x, to.z, to.yaw);
     this.mode = 'hud';
-    this.last.t = -1;
+    this.anchor.t = -1;
     this.show();
     return to;
   }
@@ -178,46 +201,51 @@ export class Minimap {
   cycle() {
     this.mode = this.mode === 'hud' ? 'large' : this.mode === 'large' ? 'off' : 'hud';
     this.view.dirty = true;
-    this.last.t = -1;
-    if (this.mode === 'large' && typeof document !== 'undefined') {
+    this.anchor.t = -1;
+    if (this.mode === 'large') {
       this.view.x = this.pos.x;
       this.view.z = this.pos.z;
-      document.exitPointerLock?.();
+      if (typeof document !== 'undefined') document.exitPointerLock?.();
     }
     this.show();
   }
 
-  /** call every frame; draws at most HUD_HZ times a second, and only when something changed */
+  /**
+   * Call every frame. The HUD costs a CSS transform write per frame (the browser composites the
+   * rotation on the GPU); its map canvas is rebuilt only after the player moved RECOMPOSITE_M or a
+   * tile filled in. The large map redraws on pan/zoom/hover, and a few times a second as you move.
+   */
   update(level: unknown, pos: { x: number; z: number }, yaw: number, time: number) {
+    const t0 = performance.now();
     const src = this.resolve(level);
     if (src !== this.src) {
       this.src = src;
       this.cache.clear();
-      this.last.t = -1;
+      this.anchor.t = -1;
       this.view.dirty = true;
     }
     this.pos.x = pos.x;
     this.pos.z = pos.z;
     this.show();
-    if (!src || src.hidden || this.mode === 'off') return;
-    const moved = this.pending || Math.hypot(pos.x - this.last.x, pos.z - this.last.z) > 0.25 || Math.abs(yaw - this.last.yaw) > 0.015 || Number.isNaN(this.last.x);
-    if (this.mode === 'large') {
-      // on pan/zoom at once; for the player's own arrow, a few times a second
-      if (this.view.dirty || (moved && time - this.last.t > 0.25)) {
-        this.last.x = pos.x;
-        this.last.z = pos.z;
-        this.last.yaw = yaw;
-        this.last.t = time;
-        this.drawLarge(src, pos, yaw);
+    if (src && !src.hidden && this.mode !== 'off') {
+      if (this.mode === 'large') {
+        const moved = Math.hypot(pos.x - this.last.x, pos.z - this.last.z) > 0.25 || Math.abs(yaw - this.last.yaw) > 0.02 || Number.isNaN(this.last.x);
+        if (this.view.dirty || (moved && time - this.last.t > 0.25)) {
+          this.last.x = pos.x;
+          this.last.z = pos.z;
+          this.last.yaw = yaw;
+          this.last.t = time;
+          this.drawLarge(src, pos, yaw);
+        }
+      } else {
+        const far = Math.hypot(pos.x - this.anchor.x, pos.z - this.anchor.z) > RECOMPOSITE_M || Number.isNaN(this.anchor.x) || this.anchor.t < 0;
+        if (far || (this.pending && time - this.anchor.t > 1 / HUD_HZ)) this.composite(src, pos, time);
+        this.place(pos, yaw);
       }
-      return;
     }
-    if (!moved || (this.last.t >= 0 && time - this.last.t < 1 / HUD_HZ)) return;
-    this.last.x = pos.x;
-    this.last.z = pos.z;
-    this.last.yaw = yaw;
-    this.last.t = time;
-    this.drawHud(src, pos, yaw);
+    const ms = performance.now() - t0;
+    this.stats.frames++;
+    this.stats.frameMs = +(this.stats.frameMs + (ms - this.stats.frameMs) / Math.min(this.stats.frames, 300)).toFixed(4);
   }
 
   private resolve(level: unknown): MinimapSource | null {
@@ -232,57 +260,106 @@ export class Minimap {
   private show() {
     if (this.headless || typeof document === 'undefined') return;
     const want = !!this.src && !this.src.hidden;
-    if (!this.hud) {
-      this.hud = document.createElement('canvas');
-      this.hud.width = this.hud.height = 180 * Math.min(2, devicePixelRatio || 1);
-      Object.assign(this.hud.style, { position: 'fixed', right: '14px', bottom: '14px', width: '180px', height: '180px', borderRadius: '50%', boxShadow: '0 2px 10px rgba(0,0,0,.45)', border: '2px solid rgba(255,255,255,.75)', pointerEvents: 'none', zIndex: '20' });
-      this.hud.id = 'minimap';
-      document.body.appendChild(this.hud);
+    if (!this.hudBox) this.buildHud();
+    if (!this.big) this.buildLarge();
+    this.hudBox!.style.display = want && this.mode === 'hud' ? 'block' : 'none';
+    this.big!.style.display = want && this.mode === 'large' ? 'block' : 'none';
+  }
+
+  private buildHud() {
+    const box = (this.hudBox = document.createElement('div'));
+    box.id = 'minimap';
+    Object.assign(box.style, { position: 'fixed', right: '14px', bottom: '14px', width: '180px', height: '180px', borderRadius: '50%', overflow: 'hidden', background: '#26343c', boxShadow: '0 2px 10px rgba(0,0,0,.45)', border: '2px solid rgba(255,255,255,.75)', pointerEvents: 'none', zIndex: '20' });
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const map = (this.hudMap = document.createElement('canvas'));
+    map.width = map.height = HUD_MAP * dpr;
+    Object.assign(map.style, { position: 'absolute', left: '0', top: '0', width: `${HUD_MAP}px`, height: `${HUD_MAP}px`, transformOrigin: '0 0', willChange: 'transform' });
+    box.appendChild(map);
+    // the view cone and the arrow never move: a fixed SVG over the turning map
+    box.insertAdjacentHTML('beforeend', `<svg width="180" height="180" viewBox="0 0 180 180" style="position:absolute;left:0;top:0">
+      <path d="M90 90 L${90 + 70 * Math.sin(-0.5)} ${90 - 70 * Math.cos(-0.5)} A70 70 0 0 1 ${90 + 70 * Math.sin(0.5)} ${90 - 70 * Math.cos(0.5)} Z" fill="rgba(255,240,180,.2)"/>
+      <path d="M90 82 L95.5 96 L90 93 L84.5 96 Z" fill="#ffd23f" stroke="#1b1b1b" stroke-width="1.5" stroke-linejoin="round"/></svg>`);
+    const n = (this.hudN = document.createElement('div'));
+    n.textContent = 'N';
+    Object.assign(n.style, { position: 'absolute', left: '84px', top: '2px', width: '12px', textAlign: 'center', font: '700 11px system-ui, sans-serif', color: '#e8463c', textShadow: '0 0 3px #000', transformOrigin: '6px 88px' });
+    box.appendChild(n);
+    const name = (this.hudName = document.createElement('div'));
+    Object.assign(name.style, { position: 'absolute', left: '0', right: '0', bottom: '16px', textAlign: 'center', font: '600 10px system-ui, sans-serif', color: '#fff', textShadow: '0 0 3px #000, 0 0 3px #000' });
+    box.appendChild(name);
+    document.body.appendChild(box);
+  }
+
+  /** rebuild the HUD's map canvas around the player (tiles blitted, at most one new tile painted) */
+  private composite(src: MinimapSource, pos: { x: number; z: number }, time: number) {
+    const t0 = performance.now();
+    const surf = this.headless ?? (this.hudMap as unknown as Surface);
+    const g = surf?.getContext('2d');
+    if (!g) return;
+    const S = surf.width, ppm = (S / HUD_MAP) * HUD_PPM;
+    this.anchor = { x: pos.x, z: pos.z, t: time };
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#26343c';
+    g.fillRect(0, 0, S, S);
+    g.setTransform(ppm, 0, 0, ppm, S / 2 - pos.x * ppm, S / 2 - pos.z * ppm);
+    const half = S / 2 / ppm;
+    this.blit(g, src, pos.x - half, pos.z - half, pos.x + half, pos.z + half, 1);
+    if (this.hudName && src.describe) {
+      const t = src.describe(pos.x, pos.z).split(' · ')[0];
+      if (this.hudName.textContent !== t) this.hudName.textContent = t;
     }
-    if (!this.big) {
-      const b = (this.big = document.createElement('canvas'));
-      Object.assign(b.style, { position: 'fixed', inset: '0', width: '100vw', height: '100vh', zIndex: '30', background: '#1e2b33', cursor: 'grab' });
-      b.id = 'minimap-large';
-      document.body.appendChild(b);
-      let drag: { x: number; y: number } | null = null;
-      let down: { x: number; y: number; t: number; moved: number } | null = null;
-      const k = () => Math.min(2, devicePixelRatio || 1);
-      b.addEventListener('pointerdown', (e) => {
-        drag = { x: e.clientX, y: e.clientY };
-        down = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
-        b.setPointerCapture(e.pointerId);
-      });
-      b.addEventListener('pointerup', (e) => {
-        // a click, not a pan: little movement and a short press -> go there
-        if (down && down.moved < 6 && performance.now() - down.t < 500) this.clickLarge(e.clientX * k(), e.clientY * k());
-        drag = null;
-        down = null;
-      });
-      b.addEventListener('pointermove', (e) => {
-        const { ppm, W, H } = this.large;
-        const [hx, hz] = largeToWorld(e.clientX * k(), e.clientY * k(), this.view.x, this.view.z, ppm, W, H);
-        this.hover = { x: hx, z: hz };
-        this.view.dirty = true;
-        if (down) down.moved = Math.max(down.moved, Math.hypot(e.clientX - down.x, e.clientY - down.y));
-        if (!drag || (down && down.moved < 6)) return;
-        this.view.x -= (e.clientX - drag.x) / this.view.ppm;
-        this.view.z -= (e.clientY - drag.y) / this.view.ppm;
-        drag = { x: e.clientX, y: e.clientY };
-        this.view.dirty = true;
-      });
-      b.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        this.view.ppm = Math.min(4, Math.max(0.12, this.view.ppm * Math.exp(-e.deltaY * 0.0015)));
-        this.view.dirty = true;
-      }, { passive: false });
-    }
-    this.hud.style.display = want && this.mode === 'hud' ? 'block' : 'none';
-    this.big.style.display = want && this.mode === 'large' ? 'block' : 'none';
+    this.stats.composites++;
+    this.done(t0);
+  }
+
+  /** per frame: turn and shift the composited map with a CSS transform (no canvas work) */
+  private place(pos: { x: number; z: number }, yaw: number) {
+    const u0 = HUD_MAP / 2 + (pos.x - this.anchor.x) * HUD_PPM, v0 = HUD_MAP / 2 + (pos.z - this.anchor.z) * HUD_PPM;
+    const tf = `translate(90px,90px) rotate(${yaw.toFixed(4)}rad) translate(${(-u0).toFixed(2)}px,${(-v0).toFixed(2)}px)`;
+    if (tf === this.hudTransform) return;
+    this.hudTransform = tf;
+    if (this.hudMap) this.hudMap.style.transform = tf;
+    if (this.hudN) this.hudN.style.transform = `rotate(${yaw.toFixed(4)}rad)`;
+  }
+
+  private buildLarge() {
+    const b = (this.big = document.createElement('canvas'));
+    Object.assign(b.style, { position: 'fixed', inset: '0', width: '100vw', height: '100vh', zIndex: '30', background: '#1e2b33', cursor: 'crosshair' });
+    b.id = 'minimap-large';
+    document.body.appendChild(b);
+    let drag: { x: number; y: number } | null = null;
+    let down: { x: number; y: number; t: number; moved: number } | null = null;
+    const k = () => Math.min(2, devicePixelRatio || 1);
+    b.addEventListener('pointerdown', (e) => {
+      drag = { x: e.clientX, y: e.clientY };
+      down = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
+      b.setPointerCapture(e.pointerId);
+    });
+    b.addEventListener('pointerup', (e) => {
+      // a click, not a pan: little movement and a short press -> go there
+      if (down && down.moved < 6 && performance.now() - down.t < 500) this.clickLarge(e.clientX * k(), e.clientY * k());
+      drag = null;
+      down = null;
+    });
+    b.addEventListener('pointermove', (e) => {
+      const { ppm, W, H } = this.large;
+      const [hx, hz] = largeToWorld(e.clientX * k(), e.clientY * k(), this.view.x, this.view.z, ppm, W, H);
+      this.hover = { x: hx, z: hz };
+      this.view.dirty = true;
+      if (down) down.moved = Math.max(down.moved, Math.hypot(e.clientX - down.x, e.clientY - down.y));
+      if (!drag || (down && down.moved < 6)) return;
+      this.view.x -= (e.clientX - drag.x) / this.view.ppm;
+      this.view.z -= (e.clientY - drag.y) / this.view.ppm;
+      drag = { x: e.clientX, y: e.clientY };
+      this.view.dirty = true;
+    });
+    b.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.view.ppm = Math.min(4, Math.max(0.12, this.view.ppm * Math.exp(-e.deltaY * 0.0015)));
+      this.view.dirty = true;
+    }, { passive: false });
   }
 
   /** blit the tiles covering a world rect into g with the current transform (paints at most `budget` new tiles) */
-  /** a tile in view was left unpainted (budget): draw again next time even if nothing moved */
-  private pending = false;
   private blit(g: Ctx2D, src: MinimapSource, x0: number, z0: number, x1: number, z1: number, budget: number) {
     const T = src.tileSize;
     let painted = 0, n = 0;
@@ -299,64 +376,23 @@ export class Minimap {
     return n;
   }
 
-  private drawHud(src: MinimapSource, pos: { x: number; z: number }, yaw: number) {
-    const t0 = performance.now();
-    const surf = this.headless ?? (this.hud as unknown as Surface);
-    const g = surf?.getContext('2d');
-    if (!g) return;
-    const W = surf.width, k = W / 180, ppm = HUD_PPM * k, R = W / 2;
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.fillStyle = '#26343c';
-    g.fillRect(0, 0, W, W);
-    // world → screen: centre on the player, heading up
-    g.setTransform(1, 0, 0, 1, R, R);
-    g.rotate(yaw);
-    g.scale(ppm, ppm);
-    g.translate(-pos.x, -pos.z);
-    const reach = (R / ppm) * 1.45;
-    // paint at most one new tile per HUD draw (the rest fill in over the next draws)
-    this.blit(g, src, pos.x - reach, pos.z - reach, pos.x + reach, pos.z + reach, 1);
-    // upright labels for the special blocks in view
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    if (src.labels) {
-      g.font = `600 ${Math.round(10 * k)}px system-ui, sans-serif`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      for (const l of src.labels(pos.x - reach, pos.z - reach, pos.x + reach, pos.z + reach)) {
-        if (l.kind !== 'district') continue;
-        const [sx, sy] = worldToMap(l.x, l.z, pos.x, pos.z, yaw, ppm, R, R);
-        if (Math.hypot(sx - R, sy - R) > R - 14 * k) continue;
-        g.fillStyle = 'rgba(0,0,0,.55)';
-        g.fillText(l.text, sx + k, sy + k);
-        g.fillStyle = '#fff';
-        g.fillText(l.text, sx, sy);
-      }
+  /** text with a dark halo, greedy-placed: returns false (and draws nothing) when it would collide */
+  private label(g: Ctx2D, placed: Box[], text: string, sx: number, sy: number, size: number, color: string, weight = 600) {
+    const w = text.length * size * 0.56, h = size * 1.2;
+    for (const dy of [0, -h, h]) {
+      const b = { x0: sx - w / 2 - 2, y0: sy + dy - h / 2, x1: sx + w / 2 + 2, y1: sy + dy + h / 2 };
+      if (placed.some((p) => hit(p, b))) continue;
+      placed.push(b);
+      g.font = `${weight} ${Math.round(size)}px system-ui, sans-serif`;
+      g.lineWidth = Math.max(2, size / 4);
+      g.strokeStyle = 'rgba(10,16,20,.85)';
+      g.lineJoin = 'round';
+      g.strokeText(text, sx, sy + dy);
+      g.fillStyle = color;
+      g.fillText(text, sx, sy + dy);
+      return true;
     }
-    // the view cone and the player arrow (always pointing up)
-    g.fillStyle = 'rgba(255,240,180,.18)';
-    g.beginPath();
-    g.moveTo(R, R);
-    g.arc(R, R, 70 * k, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5);
-    g.closePath();
-    g.fill();
-    g.fillStyle = '#ffd23f';
-    g.strokeStyle = '#1b1b1b';
-    g.lineWidth = 1.5 * k;
-    g.beginPath();
-    g.moveTo(R, R - 8 * k);
-    g.lineTo(R + 5.5 * k, R + 6 * k);
-    g.lineTo(R, R + 3 * k);
-    g.lineTo(R - 5.5 * k, R + 6 * k);
-    g.closePath();
-    g.fill();
-    g.stroke();
-    // N marker on the rim
-    const [nx, ny] = worldToMap(pos.x, pos.z - 1e3, pos.x, pos.z, yaw, 1, R, R);
-    const a = Math.atan2(ny - R, nx - R);
-    g.fillStyle = '#e8463c';
-    g.font = `700 ${Math.round(11 * k)}px system-ui, sans-serif`;
-    g.fillText('N', R + Math.cos(a) * (R - 10 * k), R + Math.sin(a) * (R - 10 * k));
-    this.done(t0);
+    return false;
   }
 
   private drawLarge(src: MinimapSource, pos: { x: number; z: number }, yaw: number) {
@@ -370,7 +406,7 @@ export class Minimap {
     const g = c.getContext('2d');
     if (!g) return;
     const W = c.width, H = c.height, k = this.headless ? 1 : Math.min(2, devicePixelRatio || 1);
-    // never more tiles than the cache holds: zoom limits keep the view under ~48 tiles
+    // never more tiles than the cache holds: zoom limits keep the view under ~40 tiles
     const T = src.tileSize;
     const minPpm = (k * Math.sqrt((W * H) / (k * k) / 40)) / T;
     const ppm = Math.max(this.view.ppm, minPpm) * k;
@@ -379,49 +415,57 @@ export class Minimap {
     g.fillRect(0, 0, W, H);
     g.setTransform(ppm, 0, 0, ppm, W / 2 - this.view.x * ppm, H / 2 - this.view.z * ppm);
     const x0 = this.view.x - W / 2 / ppm, x1 = this.view.x + W / 2 / ppm, z0 = this.view.z - H / 2 / ppm, z1 = this.view.z + H / 2 / ppm;
-    const n = this.blit(g, src, x0, z0, x1, z1, 64);
-    this.view.dirty = false;
-    void n;
+    this.blit(g, src, x0, z0, x1, z1, 64);
+    this.view.dirty = this.pending;
     g.setTransform(1, 0, 0, 1, 0, 0);
     this.large = { ppm, W, H, k };
     this.markers = [];
     const toS = (x: number, z: number): [number, number] => worldToLarge(x, z, this.view.x, this.view.z, ppm, W, H);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    for (const l of src.labels?.(x0, z0, x1, z1) ?? []) {
+    // labels scale gently with zoom; districts first, then showcase names, greedy (no overlaps)
+    const zoom = ppm / k;
+    const placed: Box[] = [];
+    const labels = src.labels?.(x0, z0, x1, z1) ?? [];
+    // the HUD-sized legend box and the help line are taken first
+    placed.push({ x0: 0, y0: H - 150 * k, x1: 190 * k, y1: H }, { x0: 0, y0: H - 30 * k, x1: W, y1: H });
+    const dSize = Math.max(11, Math.min(20, 15 * Math.sqrt(zoom / 0.5))) * k;
+    for (const l of labels) if (l.kind === 'district') {
       const [sx, sy] = toS(l.x, l.z);
       this.markers.push({ l, sx, sy });
-      if (l.kind === 'district') {
-        g.font = `700 ${Math.round(13 * k)}px system-ui, sans-serif`;
-        g.fillStyle = 'rgba(0,0,0,.6)';
-        g.fillText(l.text, sx + k, sy + k);
-        g.fillStyle = '#ffffff';
-        g.fillText(l.text, sx, sy);
-      } else if (ppm / k > 0.6 || l.kind === 'showcase') {
-        g.fillStyle = l.kind === 'door' ? '#7fd1ff' : '#ffd23f';
-        g.beginPath();
-        g.arc(sx, sy, (l.kind === 'door' ? 2 : 4) * k, 0, Math.PI * 2);
-        g.fill();
-        if (l.kind === 'showcase' && ppm / k > 1.1) { // names only when zoomed in: dots otherwise
-          g.font = `500 ${Math.round(10 * k)}px system-ui, sans-serif`;
-          g.fillStyle = '#ffe9a8';
-          g.fillText(l.text, sx, sy - 10 * k);
-        }
-      }
+      this.label(g, placed, l.text.toUpperCase(), sx, sy, dSize, '#ffffff', 700);
     }
-    // the player
+    for (const l of labels) if (l.kind !== 'district') {
+      const [sx, sy] = toS(l.x, l.z);
+      this.markers.push({ l, sx, sy });
+      g.fillStyle = l.kind === 'door' ? '#7fd1ff' : '#ffd23f';
+      g.strokeStyle = '#1b1b1b';
+      g.lineWidth = 1.2 * k;
+      g.beginPath();
+      g.arc(sx, sy, (l.kind === 'door' ? 2 : 4.5) * k, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      if (l.kind === 'showcase' && zoom > 0.7) this.label(g, placed, l.text, sx, sy - 12 * k, Math.max(10, Math.min(15, 11 * Math.sqrt(zoom))) * k, '#ffe9a8', 500);
+    }
+    // the player, with its view cone
     const [px, py] = toS(pos.x, pos.z);
     g.save();
     g.translate(px, py);
     g.rotate(-yaw);
+    g.fillStyle = 'rgba(255,240,180,.25)';
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.arc(0, 0, 60 * k, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5);
+    g.closePath();
+    g.fill();
     g.fillStyle = '#ffd23f';
     g.strokeStyle = '#111';
     g.lineWidth = 1.5 * k;
     g.beginPath();
-    g.moveTo(0, -10 * k);
-    g.lineTo(7 * k, 8 * k);
+    g.moveTo(0, -11 * k);
+    g.lineTo(7.5 * k, 8 * k);
     g.lineTo(0, 4 * k);
-    g.lineTo(-7 * k, 8 * k);
+    g.lineTo(-7.5 * k, 8 * k);
     g.closePath();
     g.fill();
     g.stroke();
@@ -437,26 +481,40 @@ export class Minimap {
       g.moveTo(hx, hy - 12 * k);
       g.lineTo(hx, hy + 12 * k);
       g.stroke();
-      g.font = `500 ${Math.round(12 * k)}px system-ui, sans-serif`;
-      g.textAlign = 'left';
-      const txt = `${src.describe?.(this.hover.x, this.hover.z) ?? ''}  (${Math.round(this.hover.x)}, ${Math.round(this.hover.z)})`;
-      g.fillStyle = 'rgba(0,0,0,.6)';
-      g.fillText(txt, hx + 15 * k, hy - 13 * k);
-      g.fillStyle = '#fff';
-      g.fillText(txt, hx + 14 * k, hy - 14 * k);
+      const t = `${src.describe?.(this.hover.x, this.hover.z) ?? ''}  (${Math.round(this.hover.x)}, ${Math.round(this.hover.z)})`;
+      this.label(g, [], t, hx + 16 * k + (t.length * 12 * k * 0.56) / 2, hy - 14 * k, 12 * k, '#ffffff', 500);
     }
-    g.font = `500 ${Math.round(12 * k)}px system-ui, sans-serif`;
-    g.fillStyle = 'rgba(255,255,255,.8)';
+    // legend
+    const lg = src.legend ?? [];
     g.textAlign = 'left';
-    g.fillText('M: close map · click: go there · wheel: zoom · drag: pan', 16 * k, H - 18 * k);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = 'rgba(20,28,34,.82)';
+    g.fillRect(12 * k, H - (40 + lg.length * 17 + 18) * k, 170 * k, (lg.length * 17 + 30) * k);
+    lg.forEach(([color, text], i) => {
+      const y = H - (40 + (lg.length - i) * 17) * k;
+      g.fillStyle = color;
+      if (color === 'dot') {
+        g.fillStyle = '#ffd23f';
+        g.beginPath();
+        g.arc(29 * k, y + 6 * k, 4.5 * k, 0, Math.PI * 2);
+        g.fill();
+      } else g.fillRect(22 * k, y, 14 * k, 12 * k);
+      g.fillStyle = '#e8eef2';
+      g.font = `500 ${Math.round(11 * k)}px system-ui, sans-serif`;
+      g.fillText(text, 44 * k, y + 7 * k);
+    });
+    g.font = `500 ${Math.round(12 * k)}px system-ui, sans-serif`;
+    g.fillStyle = 'rgba(255,255,255,.85)';
+    g.fillText('M: close map · click: go there · wheel: zoom · drag: pan', 16 * k, H - 16 * k);
+    this.stats.draws++;
     this.done(t0);
   }
 
   private done(t0: number) {
     const ms = performance.now() - t0;
-    this.stats.draws++;
+    const n = this.stats.composites + this.stats.draws;
     this.stats.lastMs = +ms.toFixed(3);
-    this.stats.avgMs = +(this.stats.avgMs + (ms - this.stats.avgMs) / Math.min(this.stats.draws, 50)).toFixed(3);
+    this.stats.avgMs = +(this.stats.avgMs + (ms - this.stats.avgMs) / Math.min(Math.max(n, 1), 50)).toFixed(3);
     this.stats.tiles = this.cache.size;
     this.stats.painted = this.cache.painted;
   }

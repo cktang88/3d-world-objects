@@ -1,6 +1,6 @@
 /** Minimap (src/minimap.ts + the NYC source): deterministic tiles, correct player mapping, capped cache, throttled redraws. */
 import { test, expect, near, none, fmt } from './qa';
-import { Minimap, TileCache, worldToMap, largeToWorld, worldToLarge, registerMinimapSource, setSurfaceFactory, HUD_HZ, MAX_TILES, type Ctx2D, type Surface } from '../src/minimap';
+import { Minimap, TileCache, worldToMap, largeToWorld, worldToLarge, registerMinimapSource, setSurfaceFactory, MAX_TILES, HUD_MAP, RECOMPOSITE_M, type Ctx2D, type Surface } from '../src/minimap';
 import { nycMinimapSource } from '../src/nyc/minimap-nyc';
 import { districtAt, walkable } from '../src/nyc/districts';
 import { AX, SZ, BX, BZ, LX, LZ } from '../src/nyc/common';
@@ -52,25 +52,66 @@ test(`the tile cache holds at most ${MAX_TILES} tiles and keeps recent ones (LRU
   expect(c.painted > p0, 'a tile with new footprints was not repainted');
 });
 
-test(`the HUD redraws at most ${HUD_HZ} times a second, and not at all when the player stands still`, () => {
+test(`the HUD rebuilds its map only every ${RECOMPOSITE_M} m (or to fill a tile), and only moves a CSS transform per frame`, () => {
   const m = new Minimap();
-  m.headless = surface(180, 180);
+  m.headless = surface(HUD_MAP, HUD_MAP);
   const level = {};
   registerMinimapSource((l) => (l === level ? nycMinimapSource : null));
   const pos = { x: 49.8, z: 9 };
-  for (let i = 0; i < 180; i++) m.update(level, pos, 0, i / 60); // 3 s standing still: tiles fill in one per draw, then nothing
-  const filled = m.stats.draws;
-  expect(filled <= 12, `${filled} draws to fill the view`);
+  for (let i = 0; i < 180; i++) m.update(level, pos, 0, i / 60); // 3 s standing still: tiles fill in one per composite
+  const filled = m.stats.composites;
+  expect(filled <= 16, `${filled} composites to fill the view`);
   for (let i = 0; i < 180; i++) m.update(level, pos, 0, 3 + i / 60);
-  expect(m.stats.draws === filled, `${m.stats.draws - filled} more draws while standing still (want 0)`);
-  for (let i = 0; i < 180; i++) { pos.z -= 0.08; m.update(level, pos, 0.001 * i, 6 + i / 60); } // 3 s walking
-  expect(m.stats.draws - filled <= 3 * HUD_HZ + 1, `${m.stats.draws} draws in 3 s of walking`);
-  expect(m.stats.draws - filled >= 3 * HUD_HZ * 0.8, `only ${m.stats.draws} draws while walking`);
+  expect(m.stats.composites === filled, `${m.stats.composites - filled} more composites while standing still (want 0)`);
+  // 3 s walking north at 4.8 m/s (14.4 m) while turning: at most 2 rebuilds, the transform follows every frame
+  const tfs = new Set<string>();
+  for (let i = 0; i < 180; i++) { pos.z -= 0.08; m.update(level, pos, 0.002 * i, 6 + i / 60); tfs.add(m.hudTransform); }
+  expect(m.stats.composites - filled <= 3, `${m.stats.composites - filled} composites in 3 s of walking`);
+  expect(tfs.size >= 170, `the CSS transform changed only ${tfs.size} times in 180 frames`);
+  // the transform keeps the player at the HUD centre: rotate(yaw) about it
+  expect(m.hudTransform.startsWith('translate(90px,90px) rotate('), m.hudTransform);
+  expect(m.stats.frameMs < 0.3, `update() costs ${m.stats.frameMs} ms a frame on average`);
   expect(m.cache.size <= MAX_TILES, 'cache over its cap');
   // a level without a source shows nothing and draws nothing
-  const before = m.stats.draws;
+  const before = m.stats.composites;
   m.update({}, pos, 0, 10);
-  expect(m.stats.draws === before, 'drew a map for a level with no source');
+  expect(m.stats.composites === before, 'drew a map for a level with no source');
+});
+
+test('large map labels: one per district area, and none overlapping', () => {
+  const ls = nycMinimapSource.labels!(-600, -500, 900, 250).filter((l) => l.kind === 'district');
+  const names = ls.map((l) => l.text);
+  // one label per area: the same name twice only for two separate areas, far apart
+  for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++)
+    if (ls[i].text === ls[j].text) expect(Math.hypot(ls[i].x - ls[j].x, ls[i].z - ls[j].z) > 2 * SZ, `${ls[i].text} labelled twice ${fmt(Math.hypot(ls[i].x - ls[j].x, ls[i].z - ls[j].z))} m apart`);
+  expect(names.length >= 8, `only ${names.length} district labels`);
+  const log: string[] = [];
+  const m = new Minimap();
+  m.headless = surface(960, 540, log);
+  const level = {};
+  registerMinimapSource((l) => (l === level ? nycMinimapSource : null));
+  m.update(level, { x: 100, z: -150 }, 0, 0);
+  m.cycle();
+  log.length = 0;
+  m.update(level, { x: 100, z: -150 }, 0, 0.1);
+  // replay the drawn text: boxes from the same width rule the placer uses; halo strokes are skipped
+  let size = 12;
+  const boxes: { t: string; x0: number; x1: number; y0: number; y1: number }[] = [];
+  for (const e of log) {
+    const f = /^font=\d+ (\d+)px/.exec(e);
+    if (f) size = Number(f[1]);
+    const t = /^fillText\((.*),(-?[\d.]+),(-?[\d.]+)\)$/.exec(e);
+    if (!t || t[1].startsWith('M: close') || size < 10.5) continue;
+    const w = t[1].length * size * 0.56, x = Number(t[2]), y = Number(t[3]);
+    boxes.push({ t: t[1], x0: x - w / 2, x1: x + w / 2, y0: y - size * 0.6, y1: y + size * 0.6 });
+  }
+  const bad: string[] = [];
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    if (a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0) bad.push(`${a.t} / ${b.t}`);
+  }
+  expect(boxes.length >= 5, `only ${boxes.length} labels drawn`);
+  none(bad, 'overlapping labels');
 });
 
 test('large map: click -> world round-trips with world -> map', () => {
