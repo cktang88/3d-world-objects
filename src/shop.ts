@@ -37,6 +37,8 @@ export class ShopLevel implements Level {
   private models: RemoteModel[] = [];
   /** triangles we are willing to spend on swapping shelf products for their originals */
   private triBudget = 2_500_000;
+  /** resolves once every product load has been started (for the lab) */
+  stocked: Promise<void> = Promise.resolve();
 
   constructor(desc: Extract<LevelDesc, { kind: 'interior' }>) {
     this.name = desc.name;
@@ -165,7 +167,7 @@ export class ShopLevel implements Level {
     }
 
     // stock it from the sand3d pools for this kind of shop
-    loadPools().then((pools) => {
+    this.stocked = loadPools().then((pools) => {
       if (!this.alive) return;
       const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
       const stock: RemoteEntry[] = [];
