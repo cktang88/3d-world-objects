@@ -392,9 +392,15 @@ export abstract class MuseumBase implements Level {
         holder.remove(placeholder);
         holder.add(mod.object);
         trackForDetail(holder, mod.object, e.id, e.og, mod.size);
-        holder.userData.baseScale = m.k;
+        // the room was planned for m.real: if the model that arrived has another raw size (a
+        // rebuilt GLB in other units than the USDA the size was measured from), fit it to that
+        const got = b.isEmpty() ? mod.size : b.getSize(new THREE.Vector3());
+        const want = Math.max(m.raw.x, m.raw.y, m.raw.z), have = Math.max(got.x, got.y, got.z);
+        const fix = have > 0 && want > 0 && Math.abs(Math.log(have / want)) > Math.log(1.25) ? want / have : 1;
+        const k = m.k * fix;
+        holder.userData.baseScale = k;
         holder.userData.fade = 0;
-        holder.scale.setScalar(m.k * 0.85);
+        holder.scale.setScalar(k * 0.85);
         slot.model = mod;
         slot.q = m.quality;
         e.attribution = `${fmtDims(m.real)} · shown at actual size${Math.abs(m.k - 1) > 0.01 ? ' · rescaled from the source to a realistic size' : ''} · ${mod.tris.toLocaleString()} triangles`;
