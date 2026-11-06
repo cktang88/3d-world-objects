@@ -8,6 +8,14 @@ export interface Rect {
   minZ: number;
   maxX: number;
   maxZ: number;
+  /** a vehicle's footprint (parked, showcase): pedestrians treat it like a car (people.ts Pedestrians.cars) */
+  vehicle?: boolean;
+}
+
+/** tag a collider as a vehicle's footprint */
+export function vehicleRect(r: Rect): Rect {
+  r.vehicle = true;
+  return r;
 }
 
 export type LevelDesc =

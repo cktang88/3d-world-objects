@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rect } from '../level';
+import { rect, vehicleRect } from '../level';
 import { Rng, hashN } from '../rng';
 import { LX, LZ, CURB } from './common';
 import { carMesh } from './vehicles';
@@ -44,7 +44,7 @@ export function slotter(ctx: BCtx): CSlot {
     addSlot(ctx.group, ctx.portals, { ...s, seed: hashN(ctx.seed, Math.round(s.x * 10), Math.round(s.z * 10)) });
     if (col) {
       const turn = Math.abs(Math.sin(s.rot ?? 0)) > 0.7;
-      ctx.colliders.push(rect(s.x, s.z, (turn ? s.d : s.w) * 0.85, (turn ? s.w : s.d) * 0.85));
+      ctx.colliders.push(vehicleRect(rect(s.x, s.z, (turn ? s.d : s.w) * 0.85, (turn ? s.w : s.d) * 0.85)));
     }
   };
 }
@@ -180,7 +180,7 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
       car.position.set(x, CURB, fz - row * 11);
       car.rotation.y = r.chance(0.5) ? 0 : Math.PI;
       ctx.group.add(car);
-      ctx.colliders.push(rect(x, fz - row * 11, 1.9, 4.6));
+      ctx.colliders.push(vehicleRect(rect(x, fz - row * 11, 1.9, 4.6)));
     }
     const trailer = new THREE.Mesh(new THREE.BoxGeometry(7, 2.8, 2.6), flat('#e6e2d6', 0.7));
     trailer.position.set(x1 - 4.5, CURB + 1.6, fz - row * 11);

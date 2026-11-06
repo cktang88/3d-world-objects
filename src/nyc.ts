@@ -18,7 +18,7 @@ import { Rng, hashN } from './rng';
 import { pickModel, spawn, normScale, type ModelEntry } from './assets';
 import { mat, glow } from './build';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
-import { disposeTree, rect } from './level';
+import { disposeTree, rect, vehicleRect } from './level';
 import { BIOMES } from './biomes';
 // [districts] neighbourhoods: building/shop mix, open spaces, showcase objects (src/nyc/district*.ts)
 import { districtAt, SPAWN, spawnView } from './nyc/districts';
@@ -137,7 +137,8 @@ export class NycLevel implements Level {
     }
     this.traffic.people = this.peds.inRoad(); // cars yield to people in the crosswalk
     this.traffic.update(dt, p, time);
-    this.peds.cars = this.traffic.rects(); // people wait for cars and never stand inside one
+    // people wait for cars and never stand inside one: moving traffic, and parked / showcase vehicles nearby
+    this.peds.cars = this.traffic.rects().concat(this.nearCols.filter((r) => r.vehicle));
     this.peds.update(dt, p, time, this.nearCols);
     updateDistricts(p, time); // [districts] stream showcase objects near the player
     for (const s of this.steam) {
@@ -403,7 +404,7 @@ export class NycLevel implements Level {
         car.position.set(x, 0, z);
         car.rotation.y = (run.axis === 'x' ? Math.PI / 2 : 0) + (rng.chance(0.5) ? Math.PI : 0);
         group.add(car); // not baked: the car swaps in its detailed LOD model once loaded
-        colliders.push(run.axis === 'x' ? rect(x, z, 4.6, 1.9) : rect(x, z, 1.9, 4.6));
+        colliders.push(vehicleRect(run.axis === 'x' ? rect(x, z, 4.6, 1.9) : rect(x, z, 1.9, 4.6)));
       }
     }
     if (ctx.cx === 0 && ctx.cz === 0) busStop(group, colliders); // the spawn kerb is a bus stop (vehicleBusStop.ts)

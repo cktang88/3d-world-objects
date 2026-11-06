@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rect } from '../level';
+import { rect, vehicleRect } from '../level';
 import { Rng, hashN } from '../rng';
 import { AX, SZ, CURB } from './common';
 import { kit, place, PM } from './streetprops';
@@ -24,7 +24,7 @@ export function buildAirport(c: OpenCtx) {
   const r = new Rng(hashN(c.seed, 41));
   const slot = (s: Omit<SlotSpec, 'seed'>, col = true) => {
     addSlot(group, c.portals, { ...s, seed: hashN(c.seed, Math.round(s.x * 10), Math.round(s.z * 10)) });
-    if (col) colliders.push(rect(s.x, s.z, Math.min(s.w, s.d) * 0.25, Math.max(s.w, s.d) * 0.6));
+    if (col) colliders.push(vehicleRect(rect(s.x, s.z, Math.min(s.w, s.d) * 0.25, Math.max(s.w, s.d) * 0.6)));
   };
   stat.add(slab(apronMat(), inner.minX, inner.maxX, inner.minZ, inner.maxZ, Y, 20));
   // perimeter fence along every street, 3 m with barbed-wire outriggers

@@ -30,6 +30,8 @@ import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './de
 import { Seamless, descKey, doorOf, floorStackStep, type Slot } from './seamless';
 import { Lazy, type LazyContainer } from './lazy';
 import { warmUp } from './lazy-furniture';
+import { probePedCar } from './probe';
+const PROBE_PEDCAR = new URLSearchParams(location.search).get('probe') === 'pedcar';
 import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
 import { Vertical } from './vertical';
 import { preloadFleet } from './nyc/vehicleFleet';
@@ -796,6 +798,7 @@ function frame() {
       outline.visible = false;
       hud.prompt.classList.remove('show');
     }
+    if (PROBE_PEDCAR) probePedCar(level, time); // ?probe=pedcar (src/probe.ts)
     lighting.update(dt, player.pos);
     weather.update(dt, player.pos);
     updateDetail(player.pos, mode === 'museum' ? 40 : 30);
