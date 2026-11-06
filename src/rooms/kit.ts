@@ -19,6 +19,9 @@ const rboxCache = new Map<string, THREE.BufferGeometry>();
 
 export class Kit {
   private bins = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  private binsNS = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  /** while true, geometry goes into meshes that cast no shadows (light fixtures, glass) */
+  noShadow = false;
   private stack: THREE.Matrix4[] = [new THREE.Matrix4()];
   private tmp = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -61,8 +64,9 @@ export class Kit {
     if (local) this.tmp.multiply(local);
     g.applyMatrix4(this.tmp);
     if (uv === 'world') worldUV(g, uvScale);
-    let bin = this.bins.get(mat);
-    if (!bin) this.bins.set(mat, (bin = []));
+    const bins = this.noShadow ? this.binsNS : this.bins;
+    let bin = bins.get(mat);
+    if (!bin) bins.set(mat, (bin = []));
     bin.push(g);
     this.tris += g.getAttribute('position').count / 3;
     return g;
@@ -128,8 +132,23 @@ export class Kit {
   }
 
   /** merge everything into meshes under `into` */
+  /** run fn with shadows off */
+  unshadowed(fn: () => void) {
+    const was = this.noShadow;
+    this.noShadow = true;
+    try {
+      fn();
+    } finally {
+      this.noShadow = was;
+    }
+  }
+
   finish(into: THREE.Object3D, shadows = true) {
-    for (const [mat, list] of this.bins) {
+    this.flush(into, this.bins, shadows);
+    this.flush(into, this.binsNS, false);
+  }
+  private flush(into: THREE.Object3D, bins: Map<THREE.Material, THREE.BufferGeometry[]>, shadows: boolean) {
+    for (const [mat, list] of bins) {
       if (!list.length) continue;
       const geo = list.length === 1 ? list[0] : mergeGeometries(list, false);
       if (!geo) continue;
@@ -142,7 +161,7 @@ export class Kit {
       into.add(mesh);
       list.forEach((g) => g !== geo && g.dispose());
     }
-    this.bins.clear();
+    bins.clear();
   }
 }
 

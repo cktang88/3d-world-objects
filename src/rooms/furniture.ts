@@ -108,7 +108,7 @@ export function tableLamp(k: Kit, r: Rng, x: number, y: number, z: number, shade
     k.cyl(base, 0.03, 0.05, 0.05, x, y, z, 12);
     k.cyl(M.brass(), 0.01, 0.01, 0.16, x, y + 0.25, z, 6);
   }
-  k.cyl(M.shade(shadeCol), 0.12, 0.18, 0.24, x, y + 0.36, z, 20, true);
+  k.unshadowed(() => k.cyl(M.shade(shadeCol), 0.12, 0.18, 0.24, x, y + 0.36, z, 20, true));
   return v(x, y + 0.45, z);
 }
 
@@ -116,7 +116,7 @@ export function floorLamp(k: Kit, r: Rng): Piece {
   const metal = r.chance(0.5) ? M.brass() : M.black();
   k.cyl(metal, 0.15, 0.16, 0.025, 0, 0, 0, 20);
   k.cyl(metal, 0.012, 0.012, 1.42, 0, 0.025, 0, 8);
-  k.cyl(M.shade(r.pick(['#efe2c6', '#e9e4da', '#1d1d1f'])), 0.17, 0.22, 0.28, 0, 1.38, 0, 20, true);
+  k.unshadowed(() => k.cyl(M.shade(r.pick(['#efe2c6', '#e9e4da', '#1d1d1f'])), 0.17, 0.22, 0.28, 0, 1.38, 0, 20, true));
   return { w: 0.4, d: 0.4, h: 1.66, tops: [], lamps: [v(0, 1.5, 0)] };
 }
 

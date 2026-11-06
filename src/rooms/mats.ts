@@ -26,7 +26,7 @@ export const M = {
   trim: () => mat('#f5f2ea', { rough: 0.38 }),
   trimDark: () => mat('#3a2a20', { rough: 0.45 }),
   ceiling: () => mat('#f4f2ec', { rough: 0.95 }),
-  parquet: () => surface('floor_parquet', [1, 1], { roughness: 1, color: '#d8c4ae' }),
+  parquet: () => surface('floor_parquet', [1, 1], { roughness: 1, color: '#c4b4a4' }),
   plank: () => surface('floor_laminate', [1, 1], { roughness: 1 }),
   oak: (color = '#ffffff') => surface('oak', [1, 1], { color, roughness: 0.55 }),
   walnut: (color = '#ffffff') => surface('walnut', [1, 1], { color, roughness: 0.5 }),

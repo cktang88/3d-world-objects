@@ -733,7 +733,13 @@ export class InteriorLevel implements Level {
       return;
     }
     k.box(M.ceiling(), w, 0.02, d, cx, H, cz);
-    // ceiling fixture
+    k.unshadowed(() => this.fixture(rm, w, d, cx, cz));
+  }
+
+  private fixture(rm: Room, w: number, d: number, cx: number, cz: number) {
+    const k = this.kit;
+    const H = this.H;
+    const t = rm.type;
     const r = this.rng;
     if (t === 'kitchen' || t === 'dining') {
       // schoolhouse pendants
@@ -964,7 +970,7 @@ export class InteriorLevel implements Level {
       const p = this.draw(f, () => F.sideTable(k, this.pal.wood)) as F.Piece;
       const lamp = this.kit.at(f.x, 0, f.z, 0, () => F.tableLamp(k, r, 0, p.h, 0));
       void lamp;
-      this.group.add(glow('#ffd59a', 0.9, f.x, p.h + 0.4, f.z, 0.45));
+      this.group.add(glow('#ffd59a', 0.55, f.x, p.h + 0.4, f.z, 0.3));
     }
     // a painting over the sofa (if it stands against a wall)
     const sofaSide = c.sides.find((s) => Math.abs((s.axis === 'z' ? sf!.z : sf!.x) - (s.face + s.inward * 0.49)) < 0.1 && s.axis === opp.axis);
@@ -1019,7 +1025,7 @@ export class InteriorLevel implements Level {
         F.tableLamp(k, r, -0.08, p.h, -0.04);
         if (r.chance(0.6)) F.bookStack(k, r, 0.12, p.h, 0.05);
       });
-      this.group.add(glow('#ffd59a', 0.8, f.x, p.h + 0.4, f.z, 0.4));
+      this.group.add(glow('#ffd59a', 0.5, f.x, p.h + 0.4, f.z, 0.3));
     }
     this.painting(r, bside, bf.t, 1.15 + 0.35 + 0.4, Math.min(1.2, bw * 0.75));
     // dresser on another wall, a picture or mirror over it
@@ -1209,7 +1215,7 @@ export class InteriorLevel implements Level {
         F.tableLamp(k, r, top.w / 2 - 0.15, top.y, -0.18);
         if (r.chance(0.6)) F.mug(k, r, -top.w / 2 + 0.2, top.y, 0.1);
       });
-      this.group.add(glow('#ffd59a', 0.7, f.x, top.y + 0.4, f.z, 0.35));
+      this.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.3));
       this.decorateTop(r, f, { ...top, x: -top.w / 2 + 0.2, w: 0.3, d: 0.3, z: -0.12 }, ['stationery', 'electronics', 'plant', 'toy'], [1, 1], 0.3);
       // chair pulled up to the desk (front side)
       const c0 = Math.cos(f.rot), s0 = Math.sin(f.rot);
@@ -1394,7 +1400,7 @@ export class InteriorLevel implements Level {
         }
       } else if (what === 'floorlamp') {
         this.kit.at(x, 0, z, 0, () => F.floorLamp(k, r));
-        this.group.add(glow('#ffd59a', 1.0, x, 1.5, z, 0.45));
+        this.group.add(glow('#ffd59a', 0.6, x, 1.5, z, 0.3));
       } else if (what === 'armchair') {
         this.kit.at(x, 0, z, rot, () => F.armchair(k, r.chance(0.5) ? this.pal.accent[0] : M.leather('#6a4028'), M.walnut()));
       } else {
