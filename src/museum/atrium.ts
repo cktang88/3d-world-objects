@@ -25,7 +25,7 @@ const CENTRE = new THREE.Vector3(0, 0, -16);
 /**
  * The great hall (after the British Museum's Great Court, the Met's Great Hall and the Smithsonian
  * Castle): a coffered ceiling round a skylight, a real Apollo 11 capsule on the central plinth, the
- * Wright Flyer overhead, six wing doorways each opening onto a lit vestibule framing the wing's
+ * Bell X-1 overhead, six wing doorways each opening onto a lit vestibule framing the wing's
  * best object, banners and text panels per wing, an information desk and benches.
  */
 export class AtriumLevel extends MuseumBase {
@@ -234,7 +234,8 @@ export class AtriumLevel extends MuseumBase {
     this.cols.push({ minX: -2.8, maxX: 2.8, minZ: CENTRE.z - 2.8, maxZ: CENTRE.z + 2.8 });
     const es = await loadCatalog('smithsonian', 'air-space').catch(() => [] as LibraryEntry[]);
     if (!this.alive) return;
-    const e = es.find((x) => /command module/i.test(x.title) && x.size && Math.hypot(x.size[0], x.size[2]) <= 5.6) ?? es.find((x) => x.size && Math.max(x.size[0], x.size[2]) <= 4.6);
+    // the capsule's exterior scan (the other record is its interior)
+    const e = es.find((x) => /command module/i.test(x.title) && x.size && Math.hypot(x.size[0], x.size[2]) <= 5.6 && (x.parts ?? []).some((p) => /exterior/.test(p.url))) ?? es.find((x) => x.size && Math.max(x.size[0], x.size[2]) <= 4.6);
     if (!e) return;
     const mm = siMeasured(e, false);
     const top = 0.85;
@@ -247,22 +248,24 @@ export class AtriumLevel extends MuseumBase {
     this.flush();
   }
 
-  /** the Wright Flyer overhead, at real size and full detail */
+  /** an aircraft overhead (the Bell X-1), at real size; low detail first, then the full scan */
   private async flyer(ctx: Ctx) {
     const es = await loadCatalog('smithsonian', 'air-space').catch(() => [] as LibraryEntry[]);
     if (!this.alive) return;
-    const e = es.find((x) => /wright flyer/i.test(x.title)) ?? es.find((x) => x.size && Math.max(...x.size) <= 14 && Math.max(...x.size) > 6);
+    // the Bell X-1 (the Wright Flyer's catalog record points at files that 404)
+    const e = es.find((x) => /bell x-1/i.test(x.title) && x.size) ?? es.find((x) => x.size && Math.max(...x.size) <= 14 && Math.max(...x.size) > 6);
     if (!e) return;
     const mm = siMeasured(e, false);
     const y = H - 2.2 - mm.real.y;
-    const f = new Frame(0, -24, 0, y);
+    // banking across the hall between the entrance and the capsule, clear of the title wall
+    const f = new Frame(1.5, -10.5, 0.55, y);
     const slot = this.exhibit(mm, f, 0, 0, 0, mm.real.x >= mm.real.z ? 0 : Math.PI / 2, { prio: -1, progressive: true });
     slot.holder.rotation.z = 0.06;
     for (const [sx, sz] of [[-0.35, -0.3], [0.35, -0.3], [0, 0.35]]) {
       const p = f.point(sx * Math.max(mm.real.x, mm.real.z), mm.real.y * 0.7, sz * Math.min(mm.real.x, mm.real.z));
       this.rod(ctx.m.cable, p, new THREE.Vector3(p.x, H, p.z), 0.006);
     }
-    this.spot(new THREE.Vector3(0, H - 0.4, -14), new THREE.Vector3(0, y + mm.real.y / 2, -24), { angle: 0.45, boost: 6 });
+    this.spot(new THREE.Vector3(-6, H - 0.4, -4), new THREE.Vector3(1.5, y + mm.real.y / 2, -10.5), { angle: 0.45, boost: 6 });
     this.flush();
   }
 
