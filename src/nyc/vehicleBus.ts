@@ -194,7 +194,7 @@ export function busMesh(rng: Rng): THREE.Group {
   box(g, mats.pod, 2.0, 0.24, 3.4, 0, top + 0.14, -1.6, true);
   box(g, mats.black, 1.6, 0.04, 1.2, 0, top + 0.33, 4.2); // condenser grille
   // windshield, destination sign, front lights, bumper, bike rack
-  const fz = -HL - 0.09;
+  const fz = -HL - 0.17;
   plane(g, mats.glass, BUS.wid - 0.22, 1.62, 0, 1.92, fz - 0.02, Math.PI).rotation.x = -0.02;
   const route = rng.pick(ROUTES);
   const sign = new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffffff', emissiveMap: ledSign(route, 512, 64), emissiveIntensity: 1.1, map: null });
@@ -208,8 +208,8 @@ export function busMesh(rng: Rng): THREE.Group {
     arm.rotation.y = s * 0.3;
     box(g, mats.black, 0.2, 0.42, 0.12, s * 1.32, 2.35, fz - 0.55, true);
     // rear lights
-    box(g, mats.tail, 0.16, 0.5, 0.04, s * 1.05, 1.0, HL + 0.09);
-    box(g, mats.amber, 0.16, 0.12, 0.04, s * 1.05, 0.66, HL + 0.09);
+    box(g, mats.tail, 0.16, 0.5, 0.04, s * 1.05, 1.0, HL + 0.13);
+    box(g, mats.amber, 0.16, 0.12, 0.04, s * 1.05, 0.66, HL + 0.13);
   }
   box(g, mats.black, BUS.wid + 0.02, 0.28, 0.16, 0, 0.5, fz + 0.02, true);
   box(g, mats.steel, 1.9, 0.05, 0.05, 0, 0.62, fz - 0.42);
@@ -217,11 +217,11 @@ export function busMesh(rng: Rng): THREE.Group {
   for (const x of [-0.85, 0, 0.85]) box(g, mats.steel, 0.05, 0.42, 0.05, x, 0.8, fz - 0.42);
   for (const x of [-0.9, 0.9]) box(g, mats.steel, 0.05, 0.05, 0.4, x, 0.6, fz - 0.22);
   // rear: engine grille, bumper, rear route sign
-  box(g, mats.black, BUS.wid - 0.5, 0.7, 0.03, 0, 1.0, HL + 0.09);
-  for (let k = 0; k < 7; k++) box(g, mats.steel, BUS.wid - 0.6, 0.025, 0.04, 0, 0.72 + k * 0.09, HL + 0.1);
+  box(g, mats.black, BUS.wid - 0.5, 0.7, 0.03, 0, 1.0, HL + 0.13);
+  for (let k = 0; k < 7; k++) box(g, mats.steel, BUS.wid - 0.6, 0.025, 0.04, 0, 0.72 + k * 0.09, HL + 0.14);
   box(g, mats.black, BUS.wid + 0.02, 0.3, 0.16, 0, 0.45, HL + 0.05, true);
   const num = route.split(' ')[0];
-  plane(g, new THREE.MeshStandardMaterial({ color: '#000', emissive: '#fff', emissiveMap: ledSign(num, 128, 64) }), 0.5, 0.25, 0, 2.6, HL + 0.1, 0);
+  plane(g, new THREE.MeshStandardMaterial({ color: '#000', emissive: '#fff', emissiveMap: ledSign(num, 128, 64) }), 0.5, 0.25, 0, 2.6, HL + 0.14, 0);
   // curb-side doors (+x): front door ahead of the front axle, rear door mid-ship; glass with black frames
   for (const [u, dw] of [[-5.3, 1.05], [0.95, 1.2]] as const) {
     box(g, mats.black, 0.03, 2.35, dw + 0.1, W + 0.07, 0.34 + 1.2, u);
