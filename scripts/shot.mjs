@@ -4,7 +4,13 @@
  *
  *   node scripts/shot.mjs --url "/?lab=vehicles" --out /path/shot.png [--port 5173]
  *        [--w 960] [--h 540] [--wait 2000] [--eval "js run in the page before the shot"]
- *        [--quality low|high|ultra]   (default high: ultra is very slow in software rendering)
+ *        [--quality low|high|ultra]   (default low; ultra is very slow in software rendering)
+ *        [--fast]      ?fast=1: just your block, no people, no textures, no post, no shadows, low
+ *        [--notex]     ?notex=1: flat colours, no texture/HDRI/PBR downloads
+ *        [--nopost]    ?post=0: no GTAO/bloom/grading
+ *        [--noshadows] ?shadows=0
+ *        Default viewport 480x270. Use --notex --nopost (or --fast) whenever you judge shape,
+ *        layout or proportion rather than materials.
  *        [--max 240]   hard wall-clock cap in seconds (default 240, never above 600): the run
  *                      kills its browser and exits 124 so nothing hangs or loops for long
  *
@@ -23,9 +29,15 @@ const args = Object.fromEntries(
 );
 const port = args.port ?? process.env.PORT ?? '5173';
 let url = args.url ?? '/?lab=index';
-if (!/quality=/.test(url)) url += (url.includes('?') ? '&' : '?') + `quality=${args.quality ?? 'high'}`;
+const addq = (k, v) => { if (!new RegExp(`[?&]${k}=`).test(url)) url += (url.includes('?') ? '&' : '?') + `${k}=${v}`; };
+if (args.fast) addq('fast', '1');
+if (args.notex) addq('notex', '1');
+if (args.nopost) addq('post', '0');
+if (args.noshadows) addq('shadows', '0');
+addq('quality', args.quality ?? 'low');
 const out = args.out ?? 'shot.png';
-const W = Number(args.w ?? 960), H = Number(args.h ?? 540);
+const W = Number(args.w ?? 480), H = Number(args.h ?? 270);
+const noTex = /[?&](notex=1|fast=1)/.test(url);
 
 const curl = (u) =>
   new Promise((res) => execFile('curl', ['-sSL', '--max-time', '90', '-D', '-', u], { encoding: 'buffer', maxBuffer: 256 << 20 }, (_e, o) => res(o)));
@@ -42,6 +54,8 @@ setTimeout(() => {
 browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (route) => {
+  // no textures: don't download Poly Haven texture sets / HDRIs at all
+  if (noTex && /polyhaven|\.(hdr|exr|jpe?g|png|webp|ktx2)(\?|$)/i.test(route.request().url())) return route.abort();
   const buf = await curl(route.request().url());
   if (!buf) return route.abort();
   const s = buf.toString('latin1');

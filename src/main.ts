@@ -1,3 +1,5 @@
+// ?fast=1 / ?notex=1 / ?post=0 / ?shadows=0 (src/flags.ts): first, so modules that read location.search see them
+import './flags';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import './style.css';
