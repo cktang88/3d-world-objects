@@ -3,6 +3,7 @@ import { Rng, hashN } from '../rng';
 import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST } from './common';
+import { laneOpen } from './districts'; // [districts]
 import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
 import { truckMesh } from './vehicleTruck';
@@ -266,6 +267,8 @@ export class Traffic {
       c.line = (k + 0.5) * SZ;
       c.t = p.x - c.dir * r.range(60, 140);
     }
+    // [districts] roads end at parks, the airport and the river: start on a road that is there
+    for (let i = 0; i < 8 && !laneOpen(c.axis, c.line, c.t); i++) c.t += c.dir * SZ;
     c.v = c.vmax;
     c.obj.rotation.y = c.axis === 'z' ? (c.dir > 0 ? Math.PI : 0) : c.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
   }
@@ -292,6 +295,14 @@ export class Traffic {
       const stopAt = centre - c.dir * (halfCross + 4.2);
       const dist = (stopAt - front) * c.dir;
       if (lightFor(c.axis, time) !== 'g' && dist > -0.5 && dist < 30) target = Math.min(target, Math.max(0, (dist - 0.5) * 1.2));
+      // [districts] a dead end ahead (park, airport, river): stop there; vanish once out of sight range
+      {
+        const ahead = c.t + c.dir * (c.len / 2 + 6);
+        if (!laneOpen(c.axis, c.line, ahead)) {
+          if (Math.hypot(c.obj.position.x - p.x, c.obj.position.z - p.z) > 90) this.place(c, p);
+          else target = 0;
+        }
+      }
       // follow the car ahead in the same lane
       for (const o of this.cars) {
         if (o === c || o.axis !== c.axis || o.dir !== c.dir || Math.abs(o.line - c.line) > 1) continue;

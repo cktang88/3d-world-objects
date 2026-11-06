@@ -7,6 +7,7 @@ import { FarCrowd } from './peopleFar';
 import { Dog, coffeeGeo, handBagGeo, propVcMat, strollerGeo } from './peopleProps';
 import { Rng, hashN } from '../rng';
 import { CURB, AX, SZ, AVE, ST, SW, CYCLE, lightFor } from './common';
+import { walkable } from './districts'; // [districts]
 import type { Rect } from '../level';
 
 /**
@@ -1006,6 +1007,12 @@ export class Pedestrians {
       if (pd.lead) continue;
       const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
       if (Math.abs(pd.t - along) > 80 || Math.abs(pd.line - across) > 80) this.place(pd, p, false);
+      // [districts] no walking on the river or across the airport: re-place, or turn back at the edge
+      for (let i = 0; i < 6 && !walkable(pd.axis === 'x' ? pd.t : pd.line, pd.axis === 'x' ? pd.line : pd.t); i++) this.place(pd, p, i > 0);
+      if (pd.state === 'walk' && !walkable(pd.axis === 'x' ? pd.t + pd.dir * 1.5 : pd.line, pd.axis === 'x' ? pd.line : pd.t + pd.dir * 1.5)) {
+        pd.dir = -pd.dir;
+        pd.yaw = yawOf(pd.axis, pd.dir);
+      }
       if (pd.state === 'stand') {
         pd.wait -= dt;
         if (pd.wait <= 0) {

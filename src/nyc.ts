@@ -18,6 +18,9 @@ import { pbr } from './pbr';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, rect } from './level';
 import { BIOMES } from './biomes';
+// [districts] neighbourhoods: building/shop mix, open spaces, showcase objects (src/nyc/district*.ts)
+import { districtAt } from './nyc/districts';
+import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
 
 // ---------------------------------------------------------------- static geometry baking
 
@@ -177,6 +180,7 @@ export class NycLevel implements Level {
     }
     this.traffic.update(dt, p, time);
     this.peds.update(dt, p, time, this.nearCols);
+    updateDistricts(p, time); // [districts] stream showcase objects near the player
     for (const s of this.steam) {
       const ph = ((time * 0.35 + s.userData.ph) % 1);
       s.position.y = s.userData.y + ph * 5;
@@ -227,9 +231,11 @@ export class NycLevel implements Level {
     const stat = new THREE.Group(); // merged at the end
     const colliders: Rect[] = [];
     const portals: Portal[] = [];
-    // district character: smooth-ish noise across the grid
-    const tower = 0.5 + 0.5 * Math.sin(cx * 0.9 + this.seed * 0.001) * Math.cos(cz * 0.37 + 1.3);
-    const village = tower < 0.35;
+    // [districts] the neighbourhood: open spaces build themselves; elsewhere it sets the character
+    const D = districtAt(cx, cz);
+    if (D.open) return openChunk(D, cx, cz, hashN(this.seed, cx, cz, 5), roadMat());
+    const tower = Math.min(1, Math.max(0, D.tower + 0.2 * Math.sin(cx * 0.9 + this.seed * 0.001) * Math.cos(cz * 0.37 + 1.3)));
+    const village = D.village;
 
     // road + sidewalk
     const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), roadMat());
@@ -255,44 +261,48 @@ export class NycLevel implements Level {
     const ctx: BCtx = makeCtx(rng, group, stat, cx, cz, hashN(this.seed, cx, cz, 5));
     ctx.colliders = colliders;
     ctx.portals = portals;
+    const plan = customBlock(ctx, D); // [districts] lots, yards, plazas take some frontages
 
     // avenue frontage: both ends of the block
     for (const end of [-1, 1]) {
+      if (!plan.ave[end < 0 ? 0 : 1]) continue; // [districts]
       const x0 = end < 0 ? -LX : LX - 20;
       const x1 = end < 0 ? -LX + 20 : LX;
       const side: Side = end < 0 ? 'W' : 'E';
       const big = tower > 0.62 && rng.chance(0.7);
       if (big) {
-        building(ctx, { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, side, 'tower', rng.int(22, 48), true, [true, true]);
+        building(ctx, { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, side, 'tower', rng.int(22, 48), true, [true, true], districtStyle(D, rng));
       } else {
         const n = rng.int(2, 3);
         const cuts = [-LZ];
         for (let i = 1; i < n; i++) cuts.push(-LZ + (i * 2 * LZ) / n + rng.range(-3, 3));
         cuts.push(LZ);
         for (let i = 0; i < n; i++) {
-          const type = tower > 0.45 ? rng.pick(['prewar', 'prewar', 'midrise'] as const) : rng.pick(['tenement', 'prewar', 'midrise'] as const);
-          const floors = type === 'prewar' ? rng.int(9, 18) : type === 'midrise' ? rng.int(6, 12) : rng.int(5, 6);
-          building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1]);
+          const type = aveType(D, rng); // [districts]
+          const floors = floorsFor(D, type === 'prewar' ? rng.int(9, 18) : type === 'midrise' ? rng.int(6, 12) : type === 'brownstone' ? rng.int(3, 5) : rng.int(5, 6));
+          building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1], districtStyle(D, rng));
         }
       }
     }
     // mid-block rows facing the streets
     for (const row of [-1, 1]) {
+      if (!plan.rows[row < 0 ? 0 : 1]) continue; // [districts]
       const side: Side = row < 0 ? 'N' : 'S';
       let x = -LX + 20;
       while (x < LX - 20 - 3) {
-        const type = village ? rng.pick(['brownstone', 'brownstone', 'brownstone', 'tenement'] as const) : tower > 0.6 ? rng.pick(['midrise', 'tenement', 'prewar', 'castiron'] as const) : rng.pick(['tenement', 'tenement', 'brownstone', 'castiron', 'midrise'] as const);
+        const type = rowType(D, rng); // [districts]
         let w = type === 'brownstone' ? rng.range(5.5, 7) : type === 'castiron' ? rng.range(9, 14) : rng.range(7, 10);
         if (x + w > LX - 20 - 3) w = LX - 20 - x;
         const depth = rng.range(14, 19);
         const r: Rect = row < 0 ? { minX: x, maxX: x + w, minZ: -LZ, maxZ: -LZ + depth } : { minX: x, maxX: x + w, minZ: LZ - depth, maxZ: LZ };
-        const floors = type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12);
-        const store = type !== 'brownstone' && rng.chance(type === 'tenement' ? 0.6 : 0.75);
-        building(ctx, r, side, type, floors, store, [false, false]);
+        const floors = floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));
+        const store = type !== 'brownstone' && rng.chance(Math.min(1, (type === 'tenement' ? 0.6 : 0.75) * D.stores));
+        building(ctx, r, side, type, floors, store, [false, false], districtStyle(D, rng));
         x += w;
       }
     }
     this.street(ctx, village, tower);
+    districtExtras(ctx, D); // [districts] sidewalk displays, district props
 
     // buildings: windows, shop glass, lettering, instanced small parts (pulled out of stat first)
     finishBuildings(ctx);
