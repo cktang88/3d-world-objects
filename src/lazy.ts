@@ -43,9 +43,14 @@ export interface ContainerSpec {
   door?: THREE.Object3D;
   /** a drawer to slide out along obj's +z */
   drawer?: THREE.Object3D;
+  /** draw the door/drawer only while it is open (it is added to a model that has its own fronts) */
+  hideClosed?: boolean;
   /** contents can't be seen while shut (default true). False (glass coolers, display cases): generated when near and facing */
   closedOpaque?: boolean;
 }
+
+/** how far a drawer slides out, as a share of its depth (stays in its runners) */
+export const DRAWER_TRAVEL = 0.8;
 
 export class LazyContainer {
   open = false;
@@ -108,10 +113,11 @@ export class LazyContainer {
     const e = t * t * (3 - 2 * t);
     if (this.spec.open) this.spec.open(e);
     else if (this.spec.door) this.spec.door.rotation.y = -1.85 * e;
-    else if (this.spec.drawer) this.spec.drawer.position.z = e * 0.8 * (this.spec.size?.z ?? 0.4);
+    else if (this.spec.drawer) this.spec.drawer.position.z = e * DRAWER_TRAVEL * (this.spec.size?.z ?? 0.4);
+    if (this.spec.hideClosed) for (const m of [this.spec.door, this.spec.drawer]) if (m) m.visible = t > 0.001;
     if (this.contents) {
       // no moving part we know of: present the contents by sliding them out of the front
-      if (!this.spec.open && !this.spec.door) this.contents.position.z = (this.contents.userData.restZ as number) + e * 0.8 * (this.spec.size?.z ?? 0.4);
+      if (!this.spec.open && !this.spec.door) this.contents.position.z = (this.contents.userData.restZ as number) + e * DRAWER_TRAVEL * (this.spec.size?.z ?? 0.4);
       this.contents.visible = !this.opaque || t > 0.02;
     }
   }
@@ -173,6 +179,7 @@ interface ContainerLike {
   drawer?: THREE.Object3D;
   open?: (t: number) => void;
   closedOpaque?: boolean;
+  hideClosed?: boolean;
   label?: string;
 }
 const NAMES: Record<string, string> = { dresser: 'dresser', nightstand: 'nightstand drawer', cabinet: 'cabinet', upper: 'cupboard', fridge: 'fridge', closet: 'closet', cooler: 'cooler', freezer: 'freezer' };
@@ -325,7 +332,7 @@ export class Lazy {
       for (const c of list ?? []) {
         // only containers with an anchor object (ShopLevel's glass coolers stock themselves in update())
         if (!(c.obj as THREE.Object3D | undefined)?.isObject3D) continue;
-        registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque });
+        registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed });
       }
     }
     const t0 = performance.now();

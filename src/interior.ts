@@ -86,6 +86,8 @@ export interface Container {
   door?: THREE.Object3D;
   drawer?: THREE.Object3D;
   open?: (t: number) => void;
+  /** the moving part is only drawn while open (drawers added to a library model that has its own fronts) */
+  hideClosed?: boolean;
 }
 interface Frame {
   x: number;
@@ -1180,7 +1182,7 @@ export class InteriorLevel implements Level {
    * Drawers and cabinet doors as separate meshes registered as containers (lazy.ts): a drawer slides
    * out with its contents, a door swings on its hinge; contents are generated only when opened.
    */
-  private movingParts(f: Frame, parts: F.Part[] | undefined) {
+  private movingParts(f: Frame, parts: F.Part[] | undefined, hideClosed = false) {
     if (!parts) return;
     const c = Math.cos(f.rot), s = Math.sin(f.rot);
     for (const pt of parts) {
@@ -1223,6 +1225,10 @@ export class InteriorLevel implements Level {
       const entry: Container = { kind: pt.kind, obj, size: new THREE.Vector3(pt.w, pt.h, pt.d), room: this.cur.room, generate: gen };
       if (pt.move === 'drawer') entry.drawer = mover;
       else entry.open = open;
+      if (hideClosed) {
+        entry.hideClosed = true;
+        mover.visible = false;
+      }
       this.containers.push(entry);
     }
   }
@@ -1455,7 +1461,7 @@ export class InteriorLevel implements Level {
       const nsId = r.chance(0.5) ? pickLib('nightstand', r) : null;
       const p = this.libPiece(f, nsId, (kk) => F.nightstand(kk, this.pal.wood)) as F.Piece;
       if (nsId) p.h = LIB[nsId][1];
-      if (nsId) this.container('nightstand', f, { x: 0, y: 0.12, z: 0, w: 0.44, h: p.h - 0.16, d: 0.34 });
+      if (nsId) this.movingParts(f, libDrawers('nightstand', LIB[nsId], 1, this.pal.wood), true);
       else this.movingParts(f, p.parts);
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -0.08, p.h, -0.04);
@@ -1483,7 +1489,7 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, drId, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const dtop = drId ? { x: 0, z: 0, y: ds[1], w: ds[0] - 0.1, d: ds[2] - 0.12 } : p.tops[0];
-      if (drId) this.container('dresser', f, { x: 0, y: 0.08, z: 0, w: ds[0] - 0.08, h: dtop.y - 0.12, d: ds[2] - 0.08 });
+      if (drId) this.movingParts(f, libDrawers('dresser', ds, ds[1] > 1.1 ? 4 : 3, this.pal.wood), true);
       else this.movingParts(f, p.parts);
       this.decorateTop(r, f, { ...dtop, x: -dtop.w / 4, w: dtop.w / 2 }, ['lamp', 'tableware', 'toy', 'plant', 'electronics'], [1, 1], 0.45);
       this.libTop(r, f, { ...dtop, x: dtop.w / 4, w: dtop.w / 2 }, 'table', 2, 0.45);
@@ -2052,7 +2058,7 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, id, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const top = id ? { x: 0, z: 0, y: s[1], w: s[0] - 0.12, d: s[2] - 0.12 } : p.tops[0];
-      if (id) this.container('dresser', f, { x: 0, y: 0.08, z: 0, w: s[0] - 0.08, h: top.y - 0.12, d: s[2] - 0.08 });
+      if (id) this.movingParts(f, libDrawers('dresser', s, 3, this.pal.wood), true);
       else this.movingParts(f, p.parts);
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -top.w / 2 + 0.18, top.y, 0);
@@ -2413,4 +2419,19 @@ function curtainGeo(w: number, h: number) {
   g.computeVertexNormals();
   curtainCache.set(key, g);
   return g;
+}
+
+/**
+ * Drawers for a library (Poly Haven) dresser or nightstand, whose model has its drawer fronts baked
+ * in: rows of drawers on its front face (size [w, h, d], frame at its centre, front at +d/2). Their
+ * fronts are only drawn while open (Container.hideClosed), so the closed model looks as it was.
+ */
+export function libDrawers(kind: 'dresser' | 'nightstand', size: readonly number[], rows: number, mat: THREE.Material): F.Part[] {
+  const [w, h, d] = size;
+  // a nightstand has one drawer under its top; a dresser is drawers from the plinth to the top
+  const y0 = kind === 'nightstand' ? Math.max(0.1, h - 0.22) : 0.1, y1 = h - 0.05;
+  const rh = (y1 - y0) / rows;
+  const out: F.Part[] = [];
+  for (let i = 0; i < rows; i++) out.push({ move: 'drawer', kind, x: 0, y: y0 + rh * i + 0.004, z: d / 2 + 0.004, w: Math.max(0.2, w - 0.1), h: rh - 0.012, d: Math.max(0.15, d - 0.1), mat });
+  return out;
 }

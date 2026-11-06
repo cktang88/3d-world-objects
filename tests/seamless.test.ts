@@ -228,3 +228,47 @@ test('seamless waits for you to move (or 8 s) before prebuilding doors on the st
   for (let i = 0; i < 7; i++) s.update(1 / 60, street, p);
   expect(s.slots.has(descKey(A.target as LevelDesc)), 'walking 2 m towards the door did not start its prebuild');
 });
+
+test('library dressers and nightstands: drawers open on E, slide within their runners, contents fit and only exist once opened', () => {
+  // apartments until we have a few library-model drawers (InteriorLevel.libDrawers: hideClosed)
+  type C = { kind: string; obj: THREE.Group; size: THREE.Vector3; drawer?: THREE.Object3D; hideClosed?: boolean };
+  const found: { lv: InteriorLevel; c: C }[] = [];
+  for (let seed = 1; seed < 80 && found.length < 6; seed++) {
+    const lv = new InteriorLevel({ kind: 'interior', seed, name: `a${seed}`, style: seed % 2 ? 'apartment' : 'house', floor: 0, floors: 1, biome: 'town' });
+    for (const c of (lv as unknown as { containers: C[] }).containers) if (c.hideClosed && c.drawer) found.push({ lv, c });
+  }
+  expect(found.length > 0, 'no library dresser/nightstand drawers in 80 apartments');
+  console.log(`   ${found.length} library drawers (${[...new Set(found.map((f) => f.c.kind))].join(', ')})`);
+  const lazy = new Lazy();
+  const cam = new THREE.PerspectiveCamera();
+  for (const { lv, c } of found) {
+    lv.group.updateMatrixWorld(true);
+    lazy.update(0.1, cam, lv);
+    expect(!c.drawer!.visible, `${c.kind}: its drawer is drawn while shut (the model has its own fronts)`);
+    expect(c.obj.children.length === 1, `${c.kind}: contents exist before anyone opened it`);
+    // open it the way E does
+    const lc = lazy.aim(new THREE.Ray(c.obj.localToWorld(new THREE.Vector3(0, c.size.y / 2, 1.2)), c.obj.getWorldDirection(new THREE.Vector3()).negate()), 2.4, lv);
+    expect(lc, `${c.kind}: not aimable from 1.2 m in front`);
+    lazy.toggle(lc!.c);
+    for (let i = 0; i < 30; i++) lazy.update(1 / 30, cam, lv);
+    const travel = c.drawer!.position.z;
+    between(travel, 0.5 * c.size.z, c.size.z, `${c.kind}: drawer travel ${fmt(travel)} m for a ${fmt(c.size.z)} m deep drawer`);
+    expect(c.drawer!.visible, `${c.kind}: the open drawer is not drawn`);
+    const contents = lc!.c.contents;
+    expect(contents && contents.children.length, `${c.kind}: opening generated nothing`);
+    // contents inside the drawer box (obj-local: x within the width, y within the height, z within the pulled-out depth)
+    c.obj.updateMatrixWorld(true);
+    const inv = c.obj.matrixWorld.clone().invert();
+    const b = new THREE.Box3().setFromObject(contents!).applyMatrix4(inv);
+    const room = new THREE.Box3(new THREE.Vector3(-c.size.x / 2 - 0.01, -0.01, travel - c.size.z - 0.03), new THREE.Vector3(c.size.x / 2 + 0.01, c.size.y + 0.01, travel + 0.01));
+    expect(room.containsBox(b), `${c.kind}: contents ${b.min.toArray().map(fmt)}..${b.max.toArray().map(fmt)} outside the drawer ${room.min.toArray().map(fmt)}..${room.max.toArray().map(fmt)}`);
+    // and shut again
+    lazy.toggle(lc!.c);
+    for (let i = 0; i < 30; i++) lazy.update(1 / 30, cam, lv);
+    expect(c.drawer!.position.z < 1e-3 && !c.drawer!.visible, `${c.kind}: did not close`);
+  }
+  // evicting the room drops the contents
+  for (const { lv } of found) lv.dispose();
+  lazy.update(0.1, cam, found[0].lv);
+  expect(found.every(({ c }) => c.obj.userData.disposed), 'containers not marked disposed with their level');
+});
