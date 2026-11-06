@@ -535,6 +535,11 @@
 - Poly Haven texture sets streamed from dl.polyhaven.org (CC0), listed in `public/pbr.json`: https://polyhaven.com/textures
 - ambientCG (CC0), repacked to WebP in `public/assets/materials/`: Metal009, Metal011, Metal012, Metal029, Metal048B, Metal049B, Metal058A, Plastic010, Plastic013B, Porcelain002, Rubber004 — https://ambientcg.com/view?id=<id>
 
+## HDRI environments (CC0, src/lighting.ts)
+
+Streamed from dl.polyhaven.org (Poly Haven, CC0 1.0), used as sky/background and image-based light; sun clamped out and intensity normalised at load:
+docklands_02 (day), venice_sunset (golden hour), sunset_jhbcentral (dusk), shanghai_bund (night), sculpture_exhibition (museum), phone_shop (shops), lebombo (interiors) — https://polyhaven.com/a/<id>
+
 ## Vehicles (public/assets/vehicles/)
 
 Street cars, via the [Objaverse](https://huggingface.co/datasets/allenai/objaverse) mirror of Sketchfab; all CC BY 4.0. Modified: re-oriented, rescaled to real size, parts removed, simplified into two LODs, textures resized to WebP, body paint made tintable (scripts/build_vehicles.mjs).
