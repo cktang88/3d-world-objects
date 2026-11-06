@@ -148,55 +148,16 @@ float pedRegion(vec3 p) {
 }
 `;
 
-function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number, r: Rng) {
-  const m = base.clone();
-  // ordinary proportions (m): arm radius at the shoulder, thigh radius, hip half-width, chest
-  // half-width, hip half-depth, chest half-depth; scaled per body type (slim / average / heavier)
-  const base6 = g === 'male' ? [0.05, 0.083, 0.165, 0.168, 0.108, 0.118] : [0.044, 0.086, 0.178, 0.148, 0.112, 0.122];
-  const mul = o.build === 0 ? [0.9, 0.92, 0.93, 0.92, 0.9, 0.9] : o.build === 2 ? [1.15, 1.1, 1.12, 1.1, 1.32, 1.22] : [1, 1, 1, 1, 1, 1];
-  const sh = base6.map((v, i) => v * mul[i]);
-  const j = () => r.range(0.96, 1.04);
-  // soften the sculpted muscle relief of the skin (women most)
-  m.normalScale.multiplyScalar(g === 'female' ? 0.3 : 0.6);
-  const b = BODY[g];
-  const sleeve = o.topStyle === 0 ? b.shoulderX + 0.13 : b.wristX - 0.035;
-  const hem = o.bottomStyle === 2 ? b.knee + 0.07 : b.ankle;
-  const neck = b.neck + (o.topStyle === 2 || o.topStyle === 4 ? 0.035 : o.topStyle === 3 ? 0.02 : 0);
-  const infl = [[0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle], [0.007, 0.008, 0.007, 0.002][o.bottomStyle], 0.02];
-  const u = {
-    uGeo: { value: geo },
-    uGeoScale: { value: geoScale },
-    uGeoInv: { value: geo.clone().invert() },
-    uSlimA: { value: new THREE.Vector4(g === 'female' ? r.range(0.7, 0.8) : r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
-    uSlimB: { value: new THREE.Vector4(0, b.legX, g === 'male' ? r.range(0.03, 0.05) : r.range(0.0, 0.012), b.legZ) },
-    uSlimC: { value: new THREE.Vector4(0, b.neck, 0, 0) },
-    uShape: { value: new THREE.Vector4(sh[0] * j(), sh[1] * j(), sh[2] * j(), 0.65) },
-    uShape2: { value: new THREE.Vector4(sh[3] * j(), sh[4] * j(), sh[5] * j(), 0) },
-    uB2: { value: new THREE.Vector4(b.wristX, 0, 0, 0) },
-    uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
-    uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
-    uInfl: { value: new THREE.Vector4(infl[0], infl[1], infl[2], o.bottomStyle) },
-    uTop: { value: new THREE.Color(o.top) },
-    uInner: { value: new THREE.Color(o.inner) },
-    uBottom: { value: new THREE.Color(o.bottom) },
-    uShoe: { value: new THREE.Color(o.shoe) },
-    uSole: { value: new THREE.Color(o.sole) },
-    uSkin: { value: new THREE.Color(o.skin) },
-  };
-  m.onBeforeCompile = (s) => {
-    Object.assign(s.uniforms, u);
-    s.vertexShader = s.vertexShader
-      .replace('#include <common>', `#include <common>\n${REGION_GLSL}\nvarying vec3 vBody;`)
-      .replace(
-        '#include <beginnormal_vertex>',
-        `#include <beginnormal_vertex>
+/** the pedestrian reshape (vertex shader, inputs: position, pedN0; outputs: pedPos, bn, vBody),
+ *  shared by the body material and its shadow depth material */
+const SHAPE_GLSL = /* glsl */ `
         // ---- pedestrian shape, in bind (body) space before skinning. The base meshes are
         // bodybuilders: limbs become smooth tubes and the torso a smooth ellipse of ordinary
         // proportions (per body type), fully under clothes and partly on bare skin, and the
         // normals follow the smoothed shape so no muscle relief shows through.
         vBody = (uGeo * vec4(position, 1.0)).xyz;
         vec3 bp = vBody;
-        vec3 bn = normalize(mat3(uGeo) * objectNormal);
+        vec3 bn = normalize(mat3(uGeo) * pedN0);
         float bax = abs(bp.x);
         float pr = pedRegion(vBody);
         float clothed = (pr > 0.5 && pr < 2.5) ? 1.0 : 0.0;
@@ -257,6 +218,52 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
         float inf = pr == 1.0 ? uInfl.x : pr == 2.0 ? uInfl.y : pr == 3.0 ? uInfl.z : 0.0;
         bp += bn * inf;
         vec3 pedPos = (uGeoInv * vec4(bp, 1.0)).xyz;
+`;
+
+function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number, r: Rng) {
+  const m = base.clone();
+  // ordinary proportions (m): arm radius at the shoulder, thigh radius, hip half-width, chest
+  // half-width, hip half-depth, chest half-depth; scaled per body type (slim / average / heavier)
+  const base6 = g === 'male' ? [0.05, 0.083, 0.165, 0.168, 0.108, 0.118] : [0.044, 0.086, 0.178, 0.148, 0.112, 0.122];
+  const mul = o.build === 0 ? [0.9, 0.92, 0.93, 0.92, 0.9, 0.9] : o.build === 2 ? [1.15, 1.1, 1.12, 1.1, 1.32, 1.22] : [1, 1, 1, 1, 1, 1];
+  const sh = base6.map((v, i) => v * mul[i]);
+  const j = () => r.range(0.96, 1.04);
+  // soften the sculpted muscle relief of the skin (women most)
+  m.normalScale.multiplyScalar(g === 'female' ? 0.3 : 0.6);
+  const b = BODY[g];
+  const sleeve = o.topStyle === 0 ? b.shoulderX + 0.13 : b.wristX - 0.035;
+  const hem = o.bottomStyle === 2 ? b.knee + 0.07 : b.ankle;
+  const neck = b.neck + (o.topStyle === 2 || o.topStyle === 4 ? 0.035 : o.topStyle === 3 ? 0.02 : 0);
+  const infl = [[0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle], [0.007, 0.008, 0.007, 0.002][o.bottomStyle], 0.02];
+  const u = {
+    uGeo: { value: geo },
+    uGeoScale: { value: geoScale },
+    uGeoInv: { value: geo.clone().invert() },
+    uSlimA: { value: new THREE.Vector4(g === 'female' ? r.range(0.7, 0.8) : r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
+    uSlimB: { value: new THREE.Vector4(0, b.legX, g === 'male' ? r.range(0.03, 0.05) : r.range(0.0, 0.012), b.legZ) },
+    uSlimC: { value: new THREE.Vector4(0, b.neck, 0, 0) },
+    uShape: { value: new THREE.Vector4(sh[0] * j(), sh[1] * j(), sh[2] * j(), 0.65) },
+    uShape2: { value: new THREE.Vector4(sh[3] * j(), sh[4] * j(), sh[5] * j(), 0) },
+    uB2: { value: new THREE.Vector4(b.wristX, 0, 0, 0) },
+    uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
+    uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
+    uInfl: { value: new THREE.Vector4(infl[0], infl[1], infl[2], o.bottomStyle) },
+    uTop: { value: new THREE.Color(o.top) },
+    uInner: { value: new THREE.Color(o.inner) },
+    uBottom: { value: new THREE.Color(o.bottom) },
+    uShoe: { value: new THREE.Color(o.shoe) },
+    uSole: { value: new THREE.Color(o.sole) },
+    uSkin: { value: new THREE.Color(o.skin) },
+  };
+  m.onBeforeCompile = (s) => {
+    Object.assign(s.uniforms, u);
+    s.vertexShader = s.vertexShader
+      .replace('#include <common>', `#include <common>\n${REGION_GLSL}\nvarying vec3 vBody;`)
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        vec3 pedN0 = objectNormal;
+        ${SHAPE_GLSL}
         objectNormal = normalize(mat3(uGeoInv) * bn);`,
       )
       .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = pedPos;');
@@ -326,6 +333,16 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, pedGeoNormal, cloth));');
   };
   m.customProgramCacheKey = () => 'ped-body-v6';
+  // shadows cast by the reshaped body, not the original bodybuilder mesh
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  depth.onBeforeCompile = (s) => {
+    Object.assign(s.uniforms, u);
+    s.vertexShader = s.vertexShader
+      .replace('#include <common>', `#include <common>\n${REGION_GLSL}\nvarying vec3 vBody;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvec3 pedN0 = normal;\n${SHAPE_GLSL}\ntransformed = pedPos;`);
+  };
+  depth.customProgramCacheKey = () => 'ped-body-depth-v1';
+  m.userData.depth = depth;
   return m;
 }
 
@@ -767,7 +784,10 @@ export class Person {
       const m = x as THREE.SkinnedMesh;
       if (!m.isSkinnedMesh) return;
       const name = (m.material as THREE.Material).name;
-      if (/Superhero/i.test(name)) m.material = bm;
+      if (/Superhero/i.test(name)) {
+        m.material = bm;
+        m.customDepthMaterial = bm.userData.depth;
+      }
       else if (/Hair/i.test(name)) m.material = hm;
       else if (/Eye/i.test(name)) m.material = eyeMat(m.material as THREE.MeshStandardMaterial, r.int(0, EYES.length - 1));
       if (/Body_LOD/.test(m.name)) {
