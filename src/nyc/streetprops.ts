@@ -150,7 +150,13 @@ export function tree(stat: THREE.Object3D, x: number, z: number, rng: Rng, group
   if (!sp) {
     group.userData.treeSpecies ??= pickSpecies(rng);
     group.userData.treeVariant ??= rng.int(0, TREE_VARIANTS - 1);
-    sp = rng.chance(0.7) ? group.userData.treeSpecies : pickSpecies(rng);
+    // one secondary species per block: at most two instanced pairs (4 draw calls) per chunk
+    for (let k = 0; k < 6 && !group.userData.treeSecond; k++) {
+      const s2 = pickSpecies(rng);
+      if (s2 !== group.userData.treeSpecies) group.userData.treeSecond = s2;
+    }
+    group.userData.treeSecond ??= group.userData.treeSpecies === 'plane' ? 'locust' : 'plane';
+    sp = rng.chance(0.7) ? group.userData.treeSpecies : group.userData.treeSecond;
   }
   addTree(group, sp!, sp === group.userData.treeSpecies ? group.userData.treeVariant ?? 0 : 0, x + (axis === 'x' ? rng.range(-0.3, 0.3) : 0), CURB + 0.01, z + (axis === 'z' ? rng.range(-0.3, 0.3) : 0), rng);
 }
