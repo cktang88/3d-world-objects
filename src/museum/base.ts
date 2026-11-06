@@ -362,12 +362,11 @@ export abstract class MuseumBase implements Level {
 
   /** a pool of light on a surface (cheap: an additive decal) */
   pool(x: number, y: number, z: number, r: number, color = '#ffe7c2', opacity = 0.35) {
-    const m = new THREE.Mesh(unitPlane, poolMat(color, opacity));
-    m.rotation.x = -Math.PI / 2;
-    m.scale.set(r * 2, r * 2, 1);
-    m.position.set(x, y + 0.006, z);
-    m.renderOrder = 1;
-    this.group.add(m);
+    // capped so a pool never blows out under bloom; merged with the room's other pools (one draw)
+    const rr = Math.min(r, 3);
+    const op = Math.min(opacity, 0.22);
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y + 0.006, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), new THREE.Vector3(rr * 2, rr * 2, 1));
+    this.geo(poolMat(color, op), unitPlane, m);
   }
 
   /**

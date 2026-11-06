@@ -317,7 +317,8 @@ export class GalleryLevel extends MuseumBase {
     const st = this.style;
     const { W, D, H } = plan;
     // the stand-in light while this room is seen through a doorway, a few metres in, high up
-    this.previewLight(new THREE.Vector3(0, H - 1, -Math.min(7, D / 3)), st.light, st.dark ? 4 * W * Math.sqrt(D) : 0.9 * W * Math.sqrt(D), Math.max(W, D) * 1.5);
+    // modest, and short-ranged: it stands just behind another room's doorway, so it must not flood that room
+    this.previewLight(new THREE.Vector3(0, H - 1, -Math.min(7, D / 3)), st.light, Math.min(140, (st.dark ? 1.4 : 0.7) * W * Math.sqrt(D)), Math.min(D, 18));
     this.fillLevel = st.dark ? 0.3 : 0.5;
     if (st.outdoor && st.arch === 'openair') return;
     this.maxSpots = st.dark ? MuseumBase.RIG_SPOTS : 5;
