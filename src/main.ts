@@ -893,7 +893,9 @@ ready.then(() => {
 });
 
 Object.assign(window, {
-  __world: { seam, vert, renderer, lighting, weather, scene, camera, gtao, bloom, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+  __world: { seam, vert, renderer, lighting, weather, scene, camera, gtao, bloom, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode,
+    // scripts/e2e: read-only views of the journey state
+    lazy, get stack() { return stack; }, get desc() { return currentDesc; }, get started() { return started; }, get transitioning() { return transitioning; }, get aimedBox() { return aimedBox; }, get infoOpen() { return infoOpen; }, get mode() { return mode; } },
 });
 
 // ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "qa": "node scripts/qa.mjs",
     "qa:changed": "node scripts/qa.mjs --changed",
+    "e2e": "node scripts/e2e/run.mjs",
     "assets": "python3 scripts/fetch_catalog.py 80 && python3 scripts/build_assets.py"
   },
   "dependencies": {
