@@ -1415,8 +1415,10 @@ export class InteriorLevel implements Level {
       const n = Math.max(2, Math.round(iw / 0.5));
       for (let i = 0; i < n; i++) {
         const xx = -iw / 2 + 0.02 + ((iw - 0.04) * (i + 0.5)) / n;
-        k.box(this.pal.cab, (iw - 0.04) / n - 0.006, 0.16, 0.02, xx, 0.69, idp / 2 - 0.02 + 0.13 - 0.15 + 0.15);
-        k.box(M.brass(), 0.12, 0.012, 0.02, xx, 0.77, idp / 2 + 0.01);
+        k.box(this.pal.cab, (iw - 0.04) / n - 0.006, 0.16, 0.02, xx, 0.69, idp / 2 - 0.01);
+        k.box(this.pal.cab, (iw - 0.04) / n - 0.006, 0.54, 0.02, xx, 0.12, idp / 2 - 0.01);
+        k.box(this.pal.cab, (iw - 0.04) / n - 0.13, 0.42, 0.02, xx, 0.18, idp / 2 + 0.005);
+        k.box(M.brass(), 0.12, 0.012, 0.02, xx, 0.77, idp / 2 + 0.015);
       }
     });
     this.container('cabinet', fr, { x: 0, y: 0.1, z: 0.13, w: iw - 0.04, h: 0.6, d: idp - 0.34 });
