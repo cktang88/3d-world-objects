@@ -11,7 +11,7 @@ import type { Rect } from '../src/level';
 /** one block of each special kind (and each variant of the open ones) */
 const ALL: [string, number, number][] = [
   ['park fountain', 0, -4], ['park pond', 1, -4], ['park playground', -1, -4], ['park ballfield', 2, -4], ['park dogrun', -1, -5], ['park garden', 1, -5],
-  ['auto row', 4, -4], ['construction', 4, -1], ['rail yard', 5, -1], ['greenmarket', -2, 2], ['museum', -2, -5],
+  ['auto row', 4, -4], ['construction', 4, -1], ['rail yard', 5, -1], ['greenmarket', -2, 2], ['armory', -2, -5], ['museum', -2, -6],
   ['pier shed', 6, 0], ['pier aircraft', 6, 1], ['pier marina', 6, -1], ['carrier', 7, -1],
   ['airport stands', -3, -2], ['airport', -4, -3], ['bowery', 1, 2],
 ];

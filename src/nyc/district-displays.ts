@@ -125,8 +125,23 @@ function flatFrame() {
   return (frameM ??= new THREE.MeshStandardMaterial({ color: '#202224', roughness: 0.6, metalness: 0.5 }));
 }
 
+/**
+ * The Bowery's appliance and restaurant-supply row: ranges, fridges, mixers, washers and ice
+ * machines lined up on the sidewalk against the shopfronts of one side street, clear of the doors.
+ */
+function applianceRow(ctx: BCtx, r: Rng) {
+  const slot = slotter(ctx);
+  const sz = r.chance(0.5) ? 1 : -1;
+  const z = sz * (LZ + 0.75);
+  for (let x = -18; x <= 18; x += 1.35) {
+    if (ctx.doors.some((p) => Math.abs(p.x - x) < 1.6 && Math.sign(p.z) === sz)) continue;
+    slot({ kind: ['applianceRow', 'appliance'], x, y: CURB, z, rot: 0, w: 1.2, d: 0.95, h: 2.1, min: 0.45, radius: 50, maxTris: 80_000 });
+  }
+}
+
 export function sidewalkDisplays(ctx: BCtx, d: District) {
   if (d.kind === 'timesq') billboards(ctx, new Rng(hashN(ctx.seed, 77)));
+  if (d.kind === 'bowery') applianceRow(ctx, new Rng(hashN(ctx.seed, 78)));
   if (!d.displays.length || !ctx.doors.length) return;
   const r = new Rng(hashN(ctx.seed, 808));
   const slot = slotter(ctx);

@@ -257,6 +257,8 @@ export function buildPlaza(ctx: BCtx, r: Rng): Plan {
 // ---------------------------------------------------------------- museum mile
 
 export function buildMuseum(ctx: BCtx, r: Rng): Plan {
+  // every other Museum Mile block is the armory
+  if ((((ctx.cx + ctx.cz) % 2) + 2) % 2 === 1) return buildArmory(ctx, r);
   const slot = slotter(ctx);
   // the museum faces the park side (+x): a limestone palace set back behind steps and a plaza
   const s = 1;
@@ -284,7 +286,7 @@ export function buildMuseum(ctx: BCtx, r: Rng): Plan {
     sign(ctx, ['ARMS & ARMOR', 'INSTRUMENTS', 'ARCHITECTURE'][i], bx1 + 0.37, CURB + 9, -6 + i * 6, Math.PI / 2, 0.32, 2, '#ffffff', 'paint');
   }
   // plinths on the plaza with the collection out on show
-  const kinds = [['armour'], ['science'], ['arch'], ['armour', 'arch'], ['science', 'arch']];
+  const kinds = [['armory', 'armour'], ['science'], ['arch'], ['armory', 'arch'], ['science', 'arch']];
   let k = 0;
   for (const z of [-19, -14, 14, 19]) {
     for (const x of [px0 + 2.5, px0 + 6.5]) {
@@ -510,4 +512,61 @@ export function buildGarden(ctx: BCtx, r: Rng): Plan {
   const zs = zc - row * 3.5;
   for (const x of [R.x0 + 7, R.x0 + 21, R.x1 - 21, R.x1 - 7]) slot({ kind: ['folly', 'structure', 'smallbuilding'], x, y: Y, z: zs, rot: row > 0 ? Math.PI : 0, w: 9, d: 7, h: 7, min: 1.8, radius: 110, maxTris: 300_000 });
   return { ave: [true, true], rows: row > 0 ? [true, false] : [false, true], core: false };
+}
+
+// ---------------------------------------------------------------- the armory
+
+/**
+ * A Park Avenue Armory–style frontage: a red-brick armory with a crenellated parapet set back
+ * behind a granite courtyard on the avenue, an iron fence and gate, and the collection out on
+ * stands: suits of armour, helmets, shields, swords and polearms, and the big pieces (cannon,
+ * catapults) on the paving. Armour and historic arms only (the armory pool has no firearms).
+ */
+export function buildArmory(ctx: BCtx, r: Rng): Plan {
+  const slot = slotter(ctx);
+  const bx0 = LX - 20, bx1 = LX - 13;
+  building(ctx, { minX: bx0, maxX: bx1, minZ: -LZ, maxZ: LZ }, 'E', 'midrise', 5, false, [true, true], { material: 'brick', wall: '#8a3b2c', cornice: 'parapet', fireEscape: 0, acUnits: 0, waterTower: 0 });
+  // crenellations along the parapet and two corner towers
+  const brick = flat('#7c3326', 0.9);
+  const roofY = CURB + 4.3 + 4 * 3.15 + 0.3;
+  for (let z = -LZ + 0.6; z < LZ; z += 1.6) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.8), brick);
+    m.position.set(bx1 - 0.35, roofY + 0.4, z);
+    m.userData.owned = true;
+    ctx.stat.add(m);
+  }
+  for (const sz of [-1, 1]) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(5, roofY + 5, 5), brick);
+    t.position.set(bx1 - 2.5, (roofY + 5) / 2, sz * (LZ - 2.5));
+    t.castShadow = true;
+    t.userData.owned = true;
+    ctx.stat.add(t);
+  }
+  sign(ctx, 'THE ARMORY · ARMS & ARMOUR', bx1 + 0.05, CURB + 6.2, 0, Math.PI / 2, 0.6, 14, '#e8dcc0', 'paint');
+  // the courtyard: granite paving, an iron fence on the avenue with a gate
+  ctx.stat.add(slab(flat('#a49d92', 0.85), bx1, LX, -LZ, LZ, Y, 2));
+  const iron = flat('#1c1d1f', 0.5, 0.5);
+  for (const [a, b] of [[-LZ, -2.5], [2.5, LZ]]) {
+    const f = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.8, b - a), iron);
+    f.position.set(LX - 0.2, CURB + 0.9, (a + b) / 2);
+    f.userData.owned = true;
+    ctx.stat.add(f);
+    ctx.colliders.push({ minX: LX - 0.35, maxX: LX - 0.05, minZ: a, maxZ: b });
+  }
+  // two rows of stands, the big pieces in the middle row
+  const stand = flat('#4a3424', 0.8);
+  for (const u of [3, 11]) {
+    for (let z = -LZ + 2.5; z < LZ - 2; z += 3.4) {
+      if (Math.abs(z) < 2.6) continue; // the path from the gate to the door
+      const x = bx1 + u;
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.9), stand);
+      base.position.set(x, CURB + 0.2, z);
+      base.userData.owned = true;
+      ctx.stat.add(base);
+      ctx.colliders.push(rect(x, z, 1, 1));
+      slot({ kind: ['armory', 'armour'], x, y: CURB + 0.4, z, rot: Math.PI / 2 + r.range(-0.2, 0.2), w: 1.3, d: 1.1, h: 2.3, min: 0.25, radius: 60, maxTris: 120_000 }, false);
+    }
+  }
+  for (const z of [-15, -8, 8, 15]) slot({ kind: ['armory', 'armour'], x: bx1 + 7, y: Y, z, rot: Math.PI / 2, w: 4.5, d: 2.6, h: 4, min: 1.0, radius: 80, maxTris: 200_000 });
+  return { ave: [true, false], rows: [true, true], core: false };
 }
