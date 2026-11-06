@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Env, Level, Portal, Rect } from '../level';
 import { rect } from '../level';
-import { loadRemote, animate, disposeModel, clearQueue, DATASET_LABEL, type RemoteModel } from '../remote';
+import { loadRemote, animate, disposeModel, clearQueue, isRebuilt, DATASET_LABEL, type RemoteModel } from '../remote';
 import { trackForDetail } from '../detail';
 import type { Measured } from './sizes';
 import { fmtDims } from './text';
@@ -224,6 +224,18 @@ export function frontOf(root: THREE.Object3D, want: THREE.Vector3): 'keep' | 'fl
   if (other > wanted * 1.6 + 20) return 'flip';
   if (wanted > other * 1.6 + 20) return 'keep';
   return 'guess';
+}
+
+/** do an object's sorted dimensions have the proportions of `raw` (within 35%)? */
+function proportionsMatch(o: THREE.Object3D, raw: THREE.Vector3) {
+  const b = new THREE.Box3().setFromObject(o);
+  if (b.isEmpty()) return true;
+  const g = b.getSize(new THREE.Vector3());
+  const a = [g.x, g.y, g.z], r = [raw.x, raw.y, raw.z];
+  const ga = Math.max(...a), ra = Math.max(...r);
+  if (!(ga > 0 && ra > 0)) return true;
+  // per axis, as fractions of the largest dimension (the up axis must agree too)
+  return a.every((v, i) => Math.abs(v / ga - r[i] / ra) < 0.35 * Math.max(r[i] / ra, 0.25));
 }
 
 export function easeOut(t: number) {
@@ -548,8 +560,17 @@ export abstract class MuseumBase implements Level {
       inspect: m.library ? undefined : e,
     });
     e.attribution = `${fmtDims(m.real)} · shown at actual size${Math.abs(m.k - 1) > 0.01 ? ' · rescaled from the source to a realistic size' : ''}`;
-    const got = m.model ? Promise.resolve(m.model) : m.load ? m.load() : loadRemote(e, { prio: opts.prio ?? 0, shadows: false });
+    const got0 = m.model ? Promise.resolve(m.model) : m.load ? m.load() : loadRemote(e, { prio: opts.prio ?? 0, shadows: false });
     m.model = undefined; // hand over ownership
+    // a rebuilt GLB whose proportions are not the object's (another pose, a partial rebuild) is
+    // replaced by the object built from its own USDA, which is what the room was planned for
+    const got = m.library
+      ? got0
+      : got0.then((mod) => {
+          if (!isRebuilt(e.id) || proportionsMatch(mod.object, m.raw)) return mod;
+          disposeModel(mod.object);
+          return loadRemote({ ...e, id: `${e.id}#usda` }, { prio: opts.prio ?? 0, shadows: false });
+        });
     const p = got
       .then((mod) => {
         if (!this.alive) {
