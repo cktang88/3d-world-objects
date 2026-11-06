@@ -840,18 +840,26 @@ interface Ped {
   /** set on the companion: the person it follows */
   lead?: Ped;
 }
+/** ?quality=low: a smaller crowd that switches to the far crowd sooner */
+const LOWQ = (() => {
+  try {
+    return new URLSearchParams(location.search).get('quality') === 'low';
+  } catch {
+    return false;
+  }
+})();
 /** crowd size; ?people=N overrides (0 turns pedestrians off, for perf comparisons) */
 const COUNT = (() => {
   try {
     const n = new URLSearchParams(location.search).get('people');
-    return n !== null && isFinite(Number(n)) ? Number(n) : 110;
+    return n !== null && isFinite(Number(n)) ? Number(n) : LOWQ ? 70 : 110;
   } catch {
     return 110;
   }
 })();
 const SHADOWS = 20;
 /** switch to / from the VAT far crowd (hysteresis) */
-const FAR_IN = 32, FAR_OUT = 28;
+const FAR_IN = LOWQ ? 22 : 32, FAR_OUT = LOWQ ? 18 : 28;
 /** ?pfreeze=0 disables culling / frozen frames (for before/after perf comparisons) */
 const FREEZE = (() => {
   try {
