@@ -47,6 +47,8 @@ export function districtStyle(d: District, r: Rng): BuildingStyle {
 export interface Plan {
   ave: [boolean, boolean];
   rows: [boolean, boolean];
+  /** false: drop the block's hidden backyard box (a lot or yard opens the block up) */
+  core?: boolean;
 }
 export { openChunk, customBlock };
 

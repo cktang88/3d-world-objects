@@ -134,7 +134,7 @@ export function buildConstruction(ctx: BCtx, r: Rng): Plan {
     ctx.stat.add(t);
   }
   ctx.colliders.push(rect(R.x0 + 6, R.z0 + (R.z1 - R.z0) / 2 + row * 4, 9, 3));
-  return { ave: s > 0 ? [true, false] : [false, true], rows: row > 0 ? [true, false] : [false, true] };
+  return { ave: s > 0 ? [true, false] : [false, true], rows: row > 0 ? [true, false] : [false, true], core: false };
 }
 
 // ---------------------------------------------------------------- rail and container yards
@@ -220,7 +220,7 @@ export function buildYard(ctx: BCtx, r: Rng): Plan {
   for (let i = 0; i < 3; i++) slot({ kind: 'machine', x: bx - s * 3, y: Y, z: -12 + i * 5, rot: r.range(0, 6), w: 4, d: 3.5, h: 4, min: 0.8, radius: 90, maxTris: 150_000 });
   slot({ kind: 'truck', x: (A.x0 + A.x1) / 2 + s * 5, y: Y, z: 8, rot: 0, w: 9, d: 3.2, h: 4.5, min: 2.5, radius: 110, maxTris: 250_000 });
   sign(ctx, 'WEST SIDE FREIGHT · NO TRESPASSING', 0, CURB + 1.6, row * (LZ + 0.1), row > 0 ? 0 : Math.PI, 0.4, 14, '#c21f2a', 'paint');
-  return { ave: s > 0 ? [true, false] : [false, true], rows: row > 0 ? [true, false] : [false, true] };
+  return { ave: s > 0 ? [true, false] : [false, true], rows: row > 0 ? [true, false] : [false, true], core: false };
 }
 
 // ---------------------------------------------------------------- greenmarket plaza
@@ -250,7 +250,7 @@ export function buildPlaza(ctx: BCtx, r: Rng): Plan {
     }
   }
   sign(ctx, 'GREENMARKET', 0, CURB + 3.3, row * (LZ + 0.2), row > 0 ? 0 : Math.PI, 0.7, 10, '#2f6b3a');
-  return { ave: [true, true], rows: row > 0 ? [true, false] : [false, true] };
+  return { ave: [true, true], rows: row > 0 ? [true, false] : [false, true], core: false };
 }
 
 // ---------------------------------------------------------------- museum mile
@@ -304,5 +304,5 @@ export function buildMuseum(ctx: BCtx, r: Rng): Plan {
     ctx.stat.add(f);
     ctx.colliders.push(rect(px0 + 6, z, 5, 5));
   }
-  return { ave: [true, false], rows: [true, true] };
+  return { ave: [true, false], rows: [true, true], core: false };
 }

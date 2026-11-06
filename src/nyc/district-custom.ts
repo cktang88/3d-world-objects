@@ -187,7 +187,7 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
     sign(ctx, 'USED CARS · WE FINANCE', 0, CURB + 3.2, fz + row * 0.05, row > 0 ? 0 : Math.PI, 0.5, 9, '#ffd23f', 'paint');
     jersey(ctx.stat, -1.5, CURB, fz - row * 0.6, 0);
   }
-  return { ave: west ? [false, false] : [false, false], rows: row > 0 ? [true, false] : [false, true] };
+  return { ave: [false, false], rows: row > 0 ? [true, false] : [false, true], core: false };
 }
 
 /** a dealer lot: two rows of cars nose-out to the avenue and the aisle, painted bays */

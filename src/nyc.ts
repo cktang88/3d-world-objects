@@ -228,12 +228,13 @@ export class NycLevel implements Level {
     groundBase({ group, stat, cx, cz, village: loft, cobble });
     yield; // [vis]
     // the hidden backyard core of the block
-    B(stat, mat('#5a564f'), LX * 2 - 1, 2.5, LZ * 2 - 1, 0, 0, 0, false);
+    const core = B(stat, mat('#5a564f'), LX * 2 - 1, 2.5, LZ * 2 - 1, 0, 0, 0, false);
 
     const ctx: BCtx = makeCtx(rng, group, stat, cx, cz, hashN(this.seed, cx, cz, 5));
     ctx.colliders = colliders;
     ctx.portals = portals;
     const plan = customBlock(ctx, D); // [districts] lots, yards, plazas take some frontages
+    if (plan.core === false) stat.remove(core); // [districts] open lots: no backyard box in the way
 
     // avenue frontage: both ends of the block
     for (const end of [-1, 1]) {
