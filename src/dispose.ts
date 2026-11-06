@@ -181,3 +181,28 @@ export function memTrackChildren(root: THREE.Object3D) {
   if (!enabled) return;
   for (const c of root.children) memTrack(c, c.name || c.type);
 }
+
+/**
+ * Copies handed out from a model cache, held weakly: a cached model is in use while one of its
+ * copies is reachable and not disposed (disposeTree marks a dropped level's nodes). `excess` lists
+ * the cache keys to free: the unused ones beyond `max`, oldest first (keys in LRU order).
+ */
+export class CopyTracker {
+  private copies = new Map<string, WeakRef<THREE.Object3D>[]>();
+  add(key: string, copy: THREE.Object3D) {
+    const l = this.copies.get(key) ?? [];
+    l.push(new WeakRef(copy));
+    this.copies.set(key, l);
+  }
+  inUse(key: string) {
+    const l = (this.copies.get(key) ?? []).filter((r) => { const o = r.deref(); return !!o && !o.userData.disposed; });
+    if (l.length) this.copies.set(key, l);
+    else this.copies.delete(key);
+    return l.length > 0;
+  }
+  forget(key: string) { this.copies.delete(key); }
+  excess(keys: Iterable<string>, max: number) {
+    const unused = [...keys].filter((k) => !this.inUse(k));
+    return unused.slice(0, Math.max(0, unused.length - max));
+  }
+}

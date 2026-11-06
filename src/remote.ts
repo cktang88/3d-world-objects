@@ -3,6 +3,7 @@ import type { ParsedObject, JointDef } from './usda/parse';
 import { kindOf, enhance, glassFrom, enhanceTree } from './materials';
 import { gltf } from './detail';
 import { checkSize } from './rebuiltCheck';
+import { CopyTracker, disposeObject } from './dispose';
 
 /** One object anywhere in the sand3d release, streamed from Hugging Face on demand. */
 export interface RemoteEntry {
@@ -229,9 +230,24 @@ export function isRebuilt(id: string) {
   return rebuilt.has(id);
 }
 const glbCache = new Map<string, Promise<{ scene: THREE.Group; size: THREE.Vector3; tris: number }>>();
+/** copies of cached rebuilt models (their geometry is shared, so the cache frees it): see trimGlb */
+const glbCopies = new CopyTracker();
+/** rebuilt models kept cached with no copy in use; beyond this the least recently used are freed */
+const GLB_UNUSED_MAX = 24;
+function trimGlb() {
+  for (const k of glbCopies.excess(glbCache.keys(), GLB_UNUSED_MAX)) {
+    const p = glbCache.get(k)!;
+    glbCache.delete(k);
+    glbCopies.forget(k);
+    p.then((r) => disposeObject(r.scene, { allGeometry: true, allMaterials: true }), () => undefined);
+  }
+}
 function loadRebuilt(e: RemoteEntry) {
   let p = glbCache.get(e.id);
-  if (!p) {
+  if (p) {
+    glbCache.delete(e.id);
+    glbCache.set(e.id, p); // LRU bump
+  } else {
     p = gltf()!.loadAsync(`${import.meta.env.BASE_URL}rebuilt/${e.id}.glb`).then((g) => {
       enhanceTree(g.scene);
       let tris = 0;
@@ -246,6 +262,8 @@ function loadRebuilt(e: RemoteEntry) {
       return { scene: g.scene, size, tris: Math.round(tris) };
     });
     glbCache.set(e.id, p);
+    p.catch(() => glbCache.delete(e.id));
+    trimGlb();
   }
   return p;
 }
@@ -253,7 +271,9 @@ function loadRebuilt(e: RemoteEntry) {
 export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: boolean } = {}): Promise<RemoteModel> {
   // prefer the UV-mapped rebuild (static objects only: joints come from the USD)
   if (rebuilt.has(e.id) && !e.joints && gltf()) {
-    return loadRebuilt(e).then((r) => {
+    const p = loadRebuilt(e);
+    return p.then((r): RemoteModel | Promise<RemoteModel> => {
+      if (glbCache.get(e.id) !== p) return loadRemote(e, opts); // freed while we waited: load it afresh
       // safety net: a rebuild whose size or axes disagree with its source USDA is not used
       const want = rebuiltDims[e.id];
       if (want && !checkSize(r.size.toArray(), want, 1.5).ok) {
@@ -261,7 +281,9 @@ export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: bool
         rebuilt.delete(e.id);
         return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));
       }
-      return { object: r.scene.clone(true), size: r.size.clone(), animator: null, tris: r.tris };
+      const object = r.scene.clone(true);
+      glbCopies.add(e.id, object);
+      return { object, size: r.size.clone(), animator: null, tris: r.tris };
     });
   }
   return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));

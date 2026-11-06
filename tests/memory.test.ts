@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { test, expect, soft } from './qa';
 import { settle } from './env';
-import { cycles, refsOf, leaksOf } from './memlib';
+import { cycles, refsOf, leaksOf, collect } from './memlib';
 import { memTrack } from '../src/dispose';
 import type { Level, LevelDesc } from '../src/level';
 
@@ -125,4 +125,26 @@ test('memory: drawer open -> close -> evict room 10x', async () => {
   });
   soft(opened > 0, 'KNOWN no container contents generated in Node (models do not load)');
   console.log(`   drawers: ${opened} containers opened with contents over the cycles`);
+});
+
+// ---------------------------------------------------------------- model caches (remote.ts rebuilt GLBs)
+
+test('memory: a model cache frees only models with no live copy, oldest first, beyond its cap', async () => {
+  const { CopyTracker } = await import('../src/dispose');
+  const t = new CopyTracker();
+  const keep: THREE.Object3D[] = [];
+  ((): void => {
+    for (let i = 0; i < 6; i++) {
+      const copy = new THREE.Group();
+      t.add(`m${i}`, copy);
+      if (i % 2 === 0) keep.push(copy); // m0, m2, m4 stay in a live scene; the others are dropped
+    }
+  })();
+  keep[1].userData.disposed = true; // m2's room was disposed
+  await collect();
+  const keys = ['m0', 'm1', 'm2', 'm3', 'm4', 'm5'];
+  const ex = t.excess(keys, 2);
+  // unused: m1, m3, m5 (collected) and m2 (disposed): oldest beyond 2 are m1 and m2
+  expect(JSON.stringify(ex) === JSON.stringify(['m1', 'm2']), `freed ${ex.join(' ')}`);
+  expect(!ex.includes('m0') && !ex.includes('m4'), 'a model with a live copy was freed');
 });
