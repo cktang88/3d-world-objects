@@ -53,7 +53,7 @@ export interface Spec {
 }
 
 export const SPECS: Record<BType, Spec> = {
-  walkup: { H: 3.05, risers: 16, fw: 0.95, gap: 0.12, run: 0.24, hw: 0, hallL: 4.6, lifts: [], units: 4, lobbyUnits: 2, unitStyles: ['apartment'], enclosed: false, lobbyW: 0, lobbyL: 4.6, roofW: 8.5, speed: 1 },
+  walkup: { H: 3.05, risers: 16, fw: 0.95, gap: 0.12, run: 0.25, hw: 0, hallL: 4.6, lifts: [], units: 4, lobbyUnits: 2, unitStyles: ['apartment'], enclosed: false, lobbyW: 0, lobbyL: 4.6, roofW: 8.5, speed: 1 },
   prewar: { H: 3.2, risers: 18, fw: 1.1, gap: 0.3, run: 0.27, hw: 1.9, hallL: 9.5, lifts: [{ side: 1, at: 8.3 }], units: 6, lobbyUnits: 2, unitStyles: ['apartment'], enclosed: false, lobbyW: 7, lobbyL: 7.5, roofW: 18, speed: 1.3 },
   office: { H: 3.9, risers: 22, fw: 1.15, gap: 0.25, run: 0.28, hw: 2.7, hallL: 10.5, lifts: [{ side: 1, at: 6.7 }, { side: 1, at: 9.0 }, { side: -1, at: 6.7 }, { side: -1, at: 9.0 }], units: 3, lobbyUnits: 0, unitStyles: ['office'], enclosed: true, lobbyW: 12, lobbyL: 9, roofW: 24, speed: 3 },
   loft: { H: 3.8, risers: 22, fw: 1.1, gap: 0.2, run: 0.27, hw: 2.2, hallL: 5.5, lifts: [{ side: 1, at: 4.1 }], units: 2, lobbyUnits: 1, unitStyles: ['office', 'workshop', 'apartment'], enclosed: true, lobbyW: 0, lobbyL: 4.5, roofW: 12, speed: 0.8 },
@@ -1417,20 +1417,25 @@ export class FloorLevel implements Level {
       }
     }
     yield;
-    this.skyline(W, zA, zB);
+    yield* this.skyline(W, zA, zB);
     this.spawn.pos.set(d.SW / 2 - 0.55, 0, d.Ld + 1.2);
     this.spawn.yaw = Math.PI;
   }
 
   /** the city around: blocks of buildings rising from the street far below */
-  private skyline(W: number, zA: number, zB: number) {
+  private *skyline(W: number, zA: number, zB: number) {
     const k = new Kit(), r = new Rng(hashN(this.desc.seed, 5150));
     const street = -this.floors * this.d.H - 0.15;
     const styles = ['brick', 'prewar', 'panel', 'glass', 'brick'] as const;
-    const matsF = styles.map((st, i) => {
-      const f = facade(st, r.pick(['#8c5a44', '#b8a888', '#9a948a', '#6a7a8a', '#a87a5a']), 0.25, 300 + i);
-      return new THREE.MeshStandardMaterial({ map: f.map, emissiveMap: f.emissive, emissive: new THREE.Color('#ffd9a0'), emissiveIntensity: 0.25, roughness: 0.8 });
-    });
+    // facade textures are canvases (cached after the first roof): one per slice
+    const matsF: THREE.Material[] = [];
+    for (let i = 0; i < styles.length; i++) {
+      matsF.push(cached(`skyline:${i}`, () => {
+        const f = facade(styles[i], ['#8c5a44', '#b8a888', '#9a948a', '#6a7a8a', '#a87a5a'][i], 0.25, 300 + i);
+        return new THREE.MeshStandardMaterial({ map: f.map, emissiveMap: f.emissive, emissive: new THREE.Color('#ffd9a0'), emissiveIntensity: 0.25, roughness: 0.8 });
+      }));
+      yield;
+    }
     const cx = 0, cz = (zA + zB) / 2;
     for (let i = 0; i < 160; i++) {
       const a = r.range(0, Math.PI * 2), dist = r.range(22, 260);

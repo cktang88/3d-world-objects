@@ -31,7 +31,7 @@ painted CMU shafts with the floor number stencilled at each landing.
 |---|---|---|---|---|
 | floor to floor | 3.05 m | 3.2 m | 3.9 m | 3.8 m |
 | risers per floor (rise) | 16 (0.191) | 18 (0.178) | 22 (0.177) | 22 (0.173) |
-| run | 0.24 | 0.27 | 0.28 | 0.27 |
+| run | 0.25 | 0.27 | 0.28 | 0.27 |
 | flight width | 0.95 | 1.1 | 1.15 | 1.1 |
 | well between flights | 0.12 | 0.30 | 0.25 | 0.20 |
 | hall width | = stair (2.0) | 1.8 + lobby | 2.4 | 2.2 |
