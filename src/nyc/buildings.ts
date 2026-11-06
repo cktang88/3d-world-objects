@@ -902,8 +902,11 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
         }
       }
       const surround = type === 'prewar' ? 'brass' : type === 'midrise' ? 'plain' : rng.pick(['stone', 'plain'] as const);
-      B(F.g, mat('#8f8b84', { rough: 0.9 }), 1.9, 0.16, 0.45, du, 0, 0.22);
-      doorway(F, du, 0.16, 1.3, Math.min(2.7, ground - 0.5), rng.pick(['#2a2a2a', '#3b2414', '#1d2a22', '#5a3a2a']), surround);
+      // two stone steps up from the pavement (which sits at y = 0.15)
+      const stepM = mat(rng.pick(['#8f8b84', '#a29c90', '#6f6b66']), { rough: 0.9 });
+      B(F.g, stepM, 2.0, 0.32, 0.36, du, 0, 0.18);
+      B(F.g, stepM, 2.2, 0.17, 0.7, du, 0, 0.35);
+      doorway(F, du, 0.32, 1.3, Math.min(2.7, ground - 0.7), rng.pick(['#2a2a2a', '#3b2414', '#1d2a22', '#5a3a2a']), surround);
       if (type === 'prewar' && rng.chance(0.75)) canopy(F, du, rng.pick(['#1d3b2e', '#5a1d1d', '#1d2a4a', '#2a2a2a']), 4.2, addr);
       portalDoor(ctx, F, du, 0.8, alongX, addr, floors, type, rng.pick(['apartment', 'apartment', 'office']));
     } else {

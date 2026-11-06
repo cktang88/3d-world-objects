@@ -21,7 +21,6 @@ const scene: LabScene = {
     const seed = Number(params.get('seed') ?? 1);
     const rng = new Rng(seed);
     const blockG = new THREE.Group();
-    blockG.position.y = 0.15;
     group.add(blockG);
     const stat = new THREE.Group();
     const ctx = makeCtx(rng, blockG, stat, 0, 0, seed);

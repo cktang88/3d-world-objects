@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { cutHoles } from '../seamless';
-import { B, canvasTex } from './common';
+import { B, CURB, canvasTex } from './common';
 import { mat } from '../build';
 import { normalFrom } from '../textures';
 import { Rng, hashN } from '../rng';
@@ -479,6 +479,22 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
     // window lettering and neon
     if (rng.chance(0.35)) T.add(F.m, rng.pick(['OPEN', 'OPEN', 'ATM', 'LOTTO', 'COLD BEER', 'SALE', 'WE DELIVER']), a + pw * rng.range(0.3, 0.7), transom - 0.45, glassZ + 0.02, 0.26, pw * 0.6, rng.pick(['#ff3a2a', '#ff5ad1', '#4ad8ff', '#ffd23a']), 0, 'neon');
     if (rng.chance(0.3)) T.add(F.m, rng.pick(['EST. 1962', 'SINCE 1987', 'FREE DELIVERY', 'OPEN 7 DAYS', 'CASH ONLY']), a + pw / 2, transom - 0.12, glassZ + 0.02, 0.1, pw * 0.7, '#e8d9a8', 1);
+    // posters, decals and hours taped to the glass (bodegas are covered in them)
+    const nPost = shop.type === 'deli' ? rng.int(3, 7) : rng.int(0, 3);
+    for (let k = 0; k < nPost; k++) {
+      const w = rng.range(0.22, 0.55), h = w * rng.range(1.0, 1.45);
+      const pu = rng.range(a + w / 2 + 0.05, b - w / 2 - 0.05);
+      const py = rng.chance(0.6) ? bulk + 0.12 + rng.range(0, 0.5) : transom - h - rng.range(0.05, 0.4);
+      if (b - a < w + 0.2) break;
+      B(Fi, mat(rng.pick(['#f2efe6', '#e8c64a', '#d8442e', '#2e6fd8', '#f5f5f5', '#3a3a3a', '#5fbf5a']), { rough: 0.8 }), w, h, 0.005, pu, py, glassZ + 0.012, false);
+      if (rng.chance(0.6)) B(Fi, mat(rng.pick(['#1d1d1d', '#c4161c', '#1e3f8a']), { rough: 0.8 }), w * 0.8, h * 0.18, 0.006, pu, py + h * 0.65, glassZ + 0.016, false);
+    }
+  }
+  // steel cellar doors in the sidewalk in front of many shops
+  if (rng.chance(0.3) && W > 3) {
+    const cu = doorAt > 0 ? u0 + 1.2 : u1 - 1.2;
+    B(Fi, mat('#5a5c5e', { rough: 0.45, metal: 0.8 }), 1.6, 0.02, 1.1, cu, CURB, 0.75, false);
+    B(Fi, mat('#3a3c3e', { rough: 0.5, metal: 0.7 }), 0.03, 0.025, 1.1, cu, CURB, 0.75, false);
   }
   // recessed entry: return walls, ceiling, mosaic floor, glass door at the back
   if (recess > 0.2) {
@@ -492,7 +508,7 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
       ctx.shop.add(base.clone().multiply(new THREE.Matrix4().makeTranslation(s > 0 ? -recess : 0, bulk, 0)), recess, transom - bulk, cell, 3, seed, lit);
       B(G, frameM, 0.08, dispTop - transom, recess, wu, transom, -recess / 2, false);
     }
-    B(G, mat(rng.pick(['#e8e2d4', '#c9c2b0', '#b8b0a0']), { rough: 0.6 }), bayW, 0.02, recess + 0.12, du, 0, -recess / 2);
+    B(G, mat(rng.pick(['#e8e2d4', '#c9c2b0', '#b8b0a0']), { rough: 0.6 }), bayW, 0.02, recess + 0.12, du, CURB, -recess / 2);
     B(G, frameM, bayW, 0.06, recess, du, transom, -recess / 2, false);
     // door frame and glass door
     B(G, alu, doorW + 0.12, 0.08, 0.1, du, 2.25, doorZ);
