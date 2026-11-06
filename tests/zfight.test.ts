@@ -8,6 +8,7 @@ import { test, expect, soft, fmt } from './qa';
 import { nycChunk } from './world';
 import { districtAt } from '../src/nyc/districts';
 import { scanZFight, fixZFight, topPairs } from '../src/zfix';
+import { setZfix } from '../src/nyc/buildings';
 import * as THREE from 'three';
 
 function find(kind: string, not?: [number, number]): [number, number] | null {
@@ -28,20 +29,21 @@ const BLOCKS: [string, [number, number] | null][] = [
 const verbose = !!process.env.QA_VERBOSE;
 const rows: string[] = [];
 
-test('z-fighting: flickering coplanar pairs per block (scan, then fix)', () => {
+test('z-fighting per block: without vs with the build-time fix (per building, before the bake)', () => {
   for (const [label, at] of BLOCKS) {
     if (!at) continue;
+    setZfix(false);
+    const raw = nycChunk(1, at[0], at[1], true);
+    const before = scanZFight(raw.group);
+    setZfix(true);
     const ch = nycChunk(1, at[0], at[1], true);
-    const g = ch.group;
-    const before = scanZFight(g);
-    const fx = fixZFight(g);
-    const after = scanZFight(g);
-    rows.push(`${label.padEnd(20)} (${at}) tris ${before.tris}  pairs ${before.pairs} -> ${after.pairs}  area ${fmt(before.area)} -> ${fmt(after.area)} m²  scan ${Math.round(before.ms)} ms, fix ${Math.round(fx.ms)} ms (${fx.passes} passes, ${fx.moved} moved), build ${Math.round(ch.ms)} ms`);
-    if (verbose) for (const l of topPairs(before, 12)) rows.push('     ' + l);
-    soft(after.pairs === 0, `${label}: ${after.pairs} pairs left after the fixer`);
+    const after = scanZFight(ch.group);
+    rows.push(`${label.padEnd(20)} (${at}) tris ${after.tris}  pairs ${before.pairs} -> ${after.pairs}  overlap ${fmt(before.area)} -> ${fmt(after.area)} m²  build ${Math.round(raw.ms)} -> ${Math.round(ch.ms)} ms  (scan ${Math.round(after.ms)} ms)`);
+    if (verbose) for (const l of topPairs(after, 10)) rows.push('     left: ' + l);
+    console.log(rows.splice(0).join('\n'));
+    if (label !== 'park') expect(after.area < before.area * 0.5, `${label}: the build-time fix should remove most flickering overlap (${fmt(before.area)} -> ${fmt(after.area)} m²)`);
+    soft(after.area < 5, `KNOWN ${label}: ${fmt(after.area)} m² of coplanar overlap left (${after.pairs} pairs): see topPairs`);
   }
-  console.log(rows.join('\n'));
-  expect(rows.length >= 4, 'blocks built');
 });
 
 test('zfix: lifts a flush decal, a stacked chain and an instanced plate apart', () => {

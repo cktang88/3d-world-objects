@@ -38,6 +38,8 @@ export interface ZOptions {
   movable?: (m: THREE.Object3D) => boolean;
   /** scanZFight: also return every pair in `list` */
   keepPairs?: boolean;
+  /** fixZFight: at most this many scan+lift passes. Default 4 */
+  passes?: number;
   /** lift step for fixZFight (m). Default 0.004 */
   step?: number;
 }
@@ -55,7 +57,8 @@ export interface ZPairInfo {
 export interface ZScan {
   /** overlapping coplanar same-facing pairs (counted per triangle pair) */
   pairs: number;
-  /** summed area of the smaller triangle of each pair (m^2): how much surface flickers */
+  /** summed overlap of each pair (projected bounding-box intersection capped by the smaller triangle, m^2):
+   *  roughly how much surface flickers */
   area: number;
   tris: number;
   ms: number;
@@ -148,12 +151,13 @@ interface BatchedInternals {
   _drawRanges?: { start: number; count: number }[];
 }
 
-function collect(root: THREE.Object3D, opts: ZOptions): Soup {
+function collect(roots: THREE.Object3D | THREE.Object3D[], opts: ZOptions): Soup {
   const soup = new Soup();
   soup.floorDown = opts.ignoreFloorDown ?? true;
   const minArea = opts.minArea ?? 1e-5;
-  root.updateMatrixWorld(true);
-  root.traverse((o) => {
+  const list = Array.isArray(roots) ? roots : [roots];
+  for (const r of list) r.updateMatrixWorld(true);
+  for (const root of list) root.traverse((o) => {
     if (!drawable(o, opts) || offsetResolved(o)) return;
     const m = o as THREE.Mesh;
     const im = o as THREE.InstancedMesh, bm = o as unknown as THREE.BatchedMesh & BatchedInternals;
@@ -187,7 +191,7 @@ function collect(root: THREE.Object3D, opts: ZOptions): Soup {
 // ------------------------------------------------------------------ pair finding
 
 /** visit every overlapping coplanar same-facing pair (i, j: triangle ids; j's area <= i's when sorted) */
-function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number) => void) {
+function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, overlap: number) => void) {
   const res = opts.res ?? 0.0015;
   const minOv = opts.minOverlap ?? 0.004;
   const same = opts.sameMesh ?? true;
@@ -263,8 +267,17 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number) => 
         proj(s, ax, A, 0);
         proj(t, ax, B, 0);
         if (!sepAxes(A, B)) continue;
-        if (F[s * 14 + 13] >= F[t * 14 + 13]) visit(s, t);
-        else visit(t, s);
+        // overlap estimate: the projected bounding boxes' intersection, capped by the smaller triangle
+        let ov = 1;
+        for (let k = 0; k < 2; k++) {
+          const a0 = Math.min(A[k], A[k + 2], A[k + 4]), a1 = Math.max(A[k], A[k + 2], A[k + 4]);
+          const b0 = Math.min(B[k], B[k + 2], B[k + 4]), b1 = Math.max(B[k], B[k + 2], B[k + 4]);
+          ov *= Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+        }
+        const nz = Math.abs([F[so + 9], F[so + 10], F[so + 11]][ax]) || 1; // projection shrinks areas by |n.axis|
+        ov = Math.min(ov / nz, F[so + 13], F[to + 13]);
+        if (F[so + 13] >= F[to + 13]) visit(s, t, ov);
+        else visit(t, s, ov);
       }
       active.push(t);
     }
@@ -272,16 +285,16 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number) => 
 }
 
 /** Count z-fighting pairs under `root` (world space, after matrices update). */
-export function scanZFight(root: THREE.Object3D, opts: ZOptions = {}): ZScan {
+export function scanZFight(root: THREE.Object3D | THREE.Object3D[], opts: ZOptions = {}): ZScan {
   const t0 = performance.now();
   const soup = collect(root, opts);
   const byName = new Map<string, { pairs: number; area: number }>();
   const samples: ZPairInfo[] = [];
   let pairs = 0, area = 0;
   const F = soup.f;
-  findPairs(soup, opts, (i, j) => {
+  findPairs(soup, opts, (i, j, ov) => {
     pairs++;
-    const ar = F[j * 14 + 13];
+    const ar = ov;
     area += ar;
     const na = soup.owners[soup.owner[i]].name, nb = soup.owners[soup.owner[j]].name;
     const k = na < nb ? `${na} | ${nb}` : `${nb} | ${na}`;
@@ -299,14 +312,14 @@ export function scanZFight(root: THREE.Object3D, opts: ZOptions = {}): ZScan {
 }
 
 /** Lift faces apart (see the header). Returns triangles moved, passes and ms. */
-export function fixZFight(root: THREE.Object3D, opts: ZOptions = {}): { moved: number; passes: number; ms: number } {
+export function fixZFight(root: THREE.Object3D | THREE.Object3D[], opts: ZOptions = {}): { moved: number; passes: number; ms: number } {
   const t0 = performance.now();
   let moved = 0, passes = 0;
-  for (let n = 1; passes < 4 && n; passes++) moved += n = fixPass(root, opts);
+  for (let n = 1; passes < (opts.passes ?? 4) && n; passes++) moved += n = fixPass(root, opts);
   return { moved, passes, ms: performance.now() - t0 };
 }
 
-function fixPass(root: THREE.Object3D, opts: ZOptions): number {
+function fixPass(root: THREE.Object3D | THREE.Object3D[], opts: ZOptions): number {
   const step = opts.step ?? 0.004;
   const soup = collect(root, opts);
   const F = soup.f;
@@ -330,10 +343,11 @@ function fixPass(root: THREE.Object3D, opts: ZOptions): number {
   if (!level.size) return 0;
   // group lifts per owner: plain meshes move vertices, instances move as a whole
   const users = new Map<THREE.BufferGeometry, number>();
-  root.traverse((o) => {
-    const g = (o as THREE.Mesh).geometry;
-    if (g) users.set(g, (users.get(g) ?? 0) + 1);
-  });
+  for (const r of Array.isArray(root) ? root : [root])
+    r.traverse((o) => {
+      const g = (o as THREE.Mesh).geometry;
+      if (g) users.set(g, (users.get(g) ?? 0) + 1);
+    });
   const perOwner = new Map<number, number[]>();
   for (const t of level.keys()) {
     const o = soup.owner[t];
@@ -366,9 +380,11 @@ function fixPass(root: THREE.Object3D, opts: ZOptions): number {
       continue;
     }
     // plain mesh: own the geometry, then move the lifted triangles' vertices (shared vertices take the larger lift)
+    // geometry may be shared beyond this tree (unit boxes, instanced kits): edit a private copy, once
     let g = obj.geometry;
-    if ((users.get(g) ?? 1) > 1) {
+    if (!g.userData.zfixOwned || (users.get(g) ?? 1) > 1) {
       g = obj.geometry = g.clone();
+      g.userData.zfixOwned = true;
     }
     const ix = g.index;
     // indexed: lifted triangles get their own copies of their corners (one per vertex and lift level), so

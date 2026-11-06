@@ -1,3 +1,4 @@
+import { fixZFight } from '../zfix';
 import * as THREE from 'three';
 import { B, C, M, bake, canvasTex, unitBox, unitCyl, unitSphere, avenueName, streetName, type Side } from './common';
 import { mat } from '../build';
@@ -803,7 +804,24 @@ export interface BuildingStyle {
   signs?: ('board' | 'lightbox' | 'letters')[];
 }
 
+/**
+ * One building. [zfix] Its parts are then de-flickered: coplanar overlapping faces (bands and cornices meeting at
+ * corners, sills flush with walls, signs on facades) are lifted apart a few mm (src/zfix.ts), before the chunk bakes.
+ */
 export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: number, store: boolean, cornerSides: [boolean, boolean], opts: BuildingStyle = {}) {
+  const parents = [ctx.group, ctx.stat, ctx.fine];
+  const n0 = parents.map((p) => p.children.length);
+  buildingBody(ctx, r, front, type, floors, store, cornerSides, opts);
+  const fresh = parents.flatMap((p, i) => p.children.slice(n0[i]));
+  if (ZFIX_ON) fixZFight(fresh, { passes: 2 });
+}
+/** set false to measure without the per-building z-fight pass */
+export let ZFIX_ON = true;
+export function setZfix(v: boolean) {
+  ZFIX_ON = v;
+}
+
+function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: number, store: boolean, cornerSides: [boolean, boolean], opts: BuildingStyle = {}) {
   const { rng, stat, fine, colliders } = ctx;
   const matStyle: Record<NonNullable<BuildingStyle['material']>, FacadeStyle> = { brick: 'brick', brownstone: 'brownstone', limestone: 'prewar', castiron: 'castiron', panel: 'panel', glass: 'glass' };
   const style: FacadeStyle = opts.material ? matStyle[opts.material] : ({ brownstone: 'brownstone', tenement: 'brick', prewar: 'prewar', midrise: rng.pick(['brick', 'brick', 'panel'] as const), tower: rng.pick(['glass', 'glass', 'panel'] as const), castiron: 'castiron' }[type] as FacadeStyle);
