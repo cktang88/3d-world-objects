@@ -31,7 +31,7 @@ const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wri
 
 // ---------------------------------------------------------------- wardrobe (from the reference photos)
 const SKIN_TINT = ['#ffffff', '#f4e2d4', '#e6c4a6', '#c99a74', '#a8734e', '#7d5236', '#5c3a26'];
-const HAIR = ['#14100c', '#1c1410', '#2a1c12', '#3d2a1a', '#5a3d24', '#8a6a44', '#b89868', '#6b6b6b', '#a8a8a4'];
+const HAIR = ['#0e0b09', '#14100c', '#1c1410', '#241810', '#2a1c12', '#3d2a1a', '#4a3220', '#7a5a3a', '#b89868', '#6b6b6b'];
 const COAT = ['#151517', '#1b1d22', '#22262e', '#1d2433', '#2b2f36', '#3a3f45', '#4a4238', '#5b4a36', '#8a6c4a', '#a8865c', '#3b4232', '#4a1f22', '#6b6e72'];
 const PUFFER = ['#121214', '#1a1c22', '#1c2638', '#2f3a2a', '#5a1a1c', '#7a7f86', '#c8c4ba', '#1f3d5a'];
 const SHIRT = ['#e8e6e0', '#d8d4cc', '#9aa0a8', '#2a2c30', '#6b7a8c', '#a83a32', '#3a5a7a', '#c8b48c', '#7a8a6a', '#e0c0b8'];
@@ -458,7 +458,8 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
         const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
         if (m && !/Superhero/i.test(m.name)) texs.push(m.map);
       });
-    for (const h of hairMap.values()) texs.push(h.mat.map);
+    // (hair.glb carries its own copies of the same two hair textures: the body's go into the atlas,
+    // the separate hair meshes always drew with those)
     buildAtlas(texs);
     propsMat.map = ATLAS.tex;
     propsMat.needsUpdate = true;
@@ -679,8 +680,15 @@ function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeom
   const finish = (g: THREE.BufferGeometry, color: string | undefined, rect: AtlasRect | undefined) => {
     const n = g.attributes.position.count;
     if (!g.attributes.color || color) {
+      // a tint multiplies any baked vertex colours (the hair meshes carry dark COLOR_0 shading,
+      // which their own material multiplied too)
       const c = new THREE.Color(color ?? '#808080'), a = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) c.toArray(a, i * 3);
+      const vc = g.attributes.color as THREE.BufferAttribute | undefined;
+      for (let i = 0; i < n; i++) {
+        a[i * 3] = c.r * (vc ? vc.getX(i) : 1);
+        a[i * 3 + 1] = c.g * (vc ? vc.getY(i) : 1);
+        a[i * 3 + 2] = c.b * (vc ? vc.getZ(i) : 1);
+      }
       g.setAttribute('color', new THREE.BufferAttribute(a, 3));
     }
     const uv = new Float32Array(n * 2);
