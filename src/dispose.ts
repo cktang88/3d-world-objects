@@ -206,3 +206,40 @@ export class CopyTracker {
     return unused.slice(0, Math.max(0, unused.length - max));
   }
 }
+
+/**
+ * A Set-like list that does not keep its members alive (iteration skips and forgets collected
+ * ones): for registries of materials or objects that outlive the levels they came from.
+ */
+export class WeakList<T extends object> implements Iterable<T> {
+  private refs: WeakRef<T>[] = [];
+  private members = new WeakSet<T>();
+  add(v: T) {
+    if (this.members.has(v)) return this;
+    this.members.add(v);
+    this.refs.push(new WeakRef(v));
+    return this;
+  }
+  has(v: T) { return this.members.has(v); }
+  delete(v: T) {
+    if (!this.members.delete(v)) return false;
+    this.refs = this.refs.filter((r) => r.deref() !== v);
+    return true;
+  }
+  clear() { this.refs = []; this.members = new WeakSet(); }
+  /** live members (collected ones are dropped as a side effect) */
+  get size() { this.prune(); return this.refs.length; }
+  prune(keep?: (v: T) => boolean) {
+    this.refs = this.refs.filter((r) => {
+      const v = r.deref();
+      if (v && (!keep || keep(v))) return true;
+      if (v) this.members.delete(v);
+      return false;
+    });
+  }
+  *[Symbol.iterator]() {
+    let dead = 0;
+    for (const r of this.refs) { const v = r.deref(); if (v) yield v; else dead++; }
+    if (dead > 32 && dead > this.refs.length / 4) this.prune();
+  }
+}

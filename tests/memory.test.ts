@@ -148,3 +148,27 @@ test('memory: a model cache frees only models with no live copy, oldest first, b
   expect(JSON.stringify(ex) === JSON.stringify(['m1', 'm2']), `freed ${ex.join(' ')}`);
   expect(!ex.includes('m0') && !ex.includes('m4'), 'a model with a live copy was freed');
 });
+
+// ---------------------------------------------------------------- lighting's scene hooks (lighting.ts [perf] add queue)
+
+test('memory: lighting keeps no evicted objects (add queue idle without a rig; weak material registries)', async () => {
+  const { pendingAddCount } = await import('../src/lighting');
+  const { WeakList } = await import('../src/dispose');
+  // Object3D.add is patched by lighting.ts: with no rig draining it, nothing may be queued (held)
+  const g = new THREE.Group();
+  for (let i = 0; i < 100; i++) g.add(new THREE.Mesh());
+  expect(pendingAddCount() === 0, `${pendingAddCount()} added objects queued with no lighting rig to drain them`);
+  // its material registries (csmMats, emissives) are WeakLists: a dropped level's materials are collected
+  const list = new WeakList<THREE.Material>();
+  const kept = new THREE.MeshStandardMaterial();
+  list.add(kept);
+  const refs = ((): WeakRef<object>[] => {
+    const out: WeakRef<object>[] = [];
+    for (let i = 0; i < 50; i++) { const m = new THREE.MeshStandardMaterial(); list.add(m); out.push(new WeakRef(m)); }
+    return out;
+  })();
+  await collect();
+  const alive = refs.filter((r) => r.deref()).length;
+  expect(alive === 0, `${alive} of 50 dropped materials kept alive by a WeakList`);
+  expect(list.size === 1 && [...list][0] === kept, `WeakList holds ${list.size} live members`);
+});

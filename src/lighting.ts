@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { CSM } from 'three/examples/jsm/csm/CSM.js';
 import { FLAGS } from './flags';
+import { WeakList } from './dispose'; // [memory]
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import type { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -160,14 +161,19 @@ let proxiesPresent = false;
 // wrapping, caster tagging, light and far-proxy lists) only looks at what is new instead of walking the scene
 let pendingAdds: THREE.Object3D[] = [];
 let pendingOverflow = false;
+/** [memory] queue only while a lighting rig drains it every frame (else it would keep removed subtrees alive) */
+let queueing = false;
+/** qa (tests/memory.test.ts): how many added subtrees are queued */
+export const pendingAddCount = () => pendingAdds.length;
 {
   const P = THREE.Object3D.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
   for (const k of ['add', 'attach']) {
     const f = P[k];
     P[k] = function (this: THREE.Object3D, ...a: unknown[]) {
-      if (!pendingOverflow) {
+      if (!queueing) pendingOverflow = true; // not draining: the next drain does a full walk instead
+      else if (!pendingOverflow) {
         for (const o of a) if (o && (o as THREE.Object3D).isObject3D) pendingAdds.push(o as THREE.Object3D);
-        if (pendingAdds.length > 50000) {
+        if (pendingAdds.length > 5000) { // [memory] a small cap: undrained, the queue keeps removed subtrees alive
           pendingOverflow = true; // nobody is draining (no lighting running): fall back to a full scan later
           pendingAdds = [];
         }
@@ -175,6 +181,11 @@ let pendingOverflow = false;
       return f.apply(this, a);
     };
   }
+}
+/** is o attached under root? */
+function inScene(o: THREE.Object3D, root: THREE.Object3D) {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === root) return true;
+  return false;
 }
 /** what traverseVisible would visit: visible itself and up the chain, and attached under `root` */
 function drawn(o: THREE.Object3D, root: THREE.Object3D) {
@@ -733,7 +744,8 @@ export class Lighting {
   ready: Promise<unknown> = Promise.resolve();
 
   private csm: CSM | null = null;
-  private csmMats = new Set<THREE.Material>();
+  // [memory] weak: wrapped materials of evicted levels must not be kept alive by lighting (src/dispose.ts)
+  private csmMats = new WeakList<THREE.Material>();
   private csmUniforms = { breaks: { value: [] as THREE.Vector2[] }, near: { value: 0.05 }, far: { value: 200 } };
   /** the cascades cast the sun's shadow (outdoors, or a level with a sun) */
   private sunOn = false;
@@ -754,7 +766,7 @@ export class Lighting {
   private markers: THREE.Object3D[] = [];
   private scanT = 0;
   private lampT = 0;
-  private emissives = new Set<THREE.MeshStandardMaterial>();
+  private emissives = new WeakList<THREE.MeshStandardMaterial>(); // [memory] weak, see csmMats
   private loadToken = 0;
   private frame = 0;
   private csmWraps = 0;
@@ -1386,6 +1398,9 @@ export class Lighting {
     }
     this.csmMats.clear();
     this.csm = null;
+    queueing = false; // [memory] nothing drains the add queue now
+    pendingAdds = [];
+    pendingOverflow = true;
   }
 
   /** every lit material must know about the cascades (else each cascade light would light it fully) */
@@ -1396,6 +1411,7 @@ export class Lighting {
     u.near.value = this.camera.near;
     u.far.value = Math.min(this.camera.far, csm.maxFar);
     const fade = csm.fade;
+    queueing = true;
     // [perf] no per-frame walk of the whole scene: newly added subtrees are visited once (wrap materials, tag
     // casters, list lights and far-proxy casters); each frame re-checks only the listed lights' and proxies'
     // visibility (removed ones no longer reach the scene), so the light count and the LIGHT_BUDGET padding
@@ -1457,7 +1473,12 @@ export class Lighting {
       // lights/proxies removed since keep their list entry until the next full walk; drawn() skips them
       const list = pendingAdds;
       pendingAdds = [];
-      for (const r of list) r.traverse(visit);
+      // [memory] only subtrees still in the scene (a detached level is queued again when its group is added),
+      // and forget listed lights/proxies that left it, so neither list keeps evicted levels alive
+      for (const r of list) if (inScene(r, this.scene)) r.traverse(visit);
+      const stay = (o: THREE.Object3D) => inScene(o, this.scene);
+      if (this.lightList.some((o) => !stay(o))) this.lightList = this.lightList.filter(stay);
+      if (this.proxyList.some((o) => !stay(o))) this.proxyList = this.proxyList.filter(stay);
     }
     const n = this.lightCount;
     n.point = n.spot = n.pointShadow = n.spotShadow = 0;
