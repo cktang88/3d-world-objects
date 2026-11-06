@@ -44,6 +44,8 @@ interface KindSpec {
   sheenRough?: number;
   spec?: number;
   ior?: number;
+  /** albedo contrast of the photo (1 = as scanned) */
+  contrast?: number;
   /** texture bombing against visible repeats */
   antiTile?: boolean;
   /** edge wear with a baked convexity mask: 0 none */
@@ -71,7 +73,7 @@ const KINDS: Record<string, KindSpec> = {
   fabric: { tex: 'weave', tile: 0.025, strength: 0.3, bump: 0.7, rough: 0.05, dark: 0.6, diff: 0.9, arm: 0.6, nor: 1.0, detail: 0, r: [0.8, 1], sheen: 0.6, sheenRough: 0.75, spec: 0.35, antiTile: true },
   velvet: { tex: 'weave', tile: 0.012, strength: 0.25, bump: 0.4, rough: 0.05, dark: 0.55, diff: 0.9, arm: 0.5, nor: 0.7, detail: 0, r: [0.85, 1], sheen: 1, sheenRough: 0.35, spec: 0.3, antiTile: true },
   leather: { tex: 'leather', tile: 0.05, strength: 0.25, bump: 0.8, rough: 0.2, dark: 0.6, diff: 0.75, arm: 0.8, nor: 1.0, detail: 0, r: [0.35, 0.75], clearcoat: 0.15, clearcoatRough: 0.35, antiTile: true, wear: 0.5 },
-  marble: { tex: 'marble', tile: 0.7, strength: 0.6, bump: 0.05, rough: 0.1, dark: 0.45, diff: 0.95, arm: 0.5, nor: 0.3, detail: 0, r: [0.08, 0.5], clearcoat: 0.5, clearcoatRough: 0.05 },
+  marble: { tex: 'marble', tile: 0.7, strength: 0.6, bump: 0.05, rough: 0.1, dark: 0.45, contrast: 2.2, diff: 0.95, arm: 0.5, nor: 0.3, detail: 0, r: [0.08, 0.5], clearcoat: 0.5, clearcoatRough: 0.05 },
   concrete: { tex: 'concrete', tile: 0.5, strength: 0.35, bump: 0.7, rough: 0.15, dark: 0.6, diff: 0.9, arm: 0.8, nor: 1.0, detail: 0, r: [0.7, 1], antiTile: true },
   ceramic: { tex: 'micro', tile: 0.15, strength: 0.03, bump: 0.04, rough: 0.05, dark: 0.9, diff: 0.15, arm: 0.6, nor: 0.15, detail: 0, r: [0.2, 0.8], clearcoat: 1, clearcoatRough: 0.04 },
 };
@@ -238,7 +240,7 @@ uniform sampler2D uTriNor;    // OpenGL normal map (flat until loaded)
 uniform sampler2D uTriArm;    // AO / roughness / metalness
 uniform sampler2D uTriDetail; // procedural height
 uniform vec3 uTriMean;
-uniform float uTriRoughMean;
+uniform float uTriRoughMean, uContrast;
 uniform float uTriScale, uProcScale, uTriStrength, uTriBump, uTriRough, uTriDark;
 uniform float uDiffMix, uArmMix, uNorMix, uWear, uWearAll, uBakeAo, uDust, uDbg;
 
@@ -341,7 +343,7 @@ float triWear = 0.0;
   triWear = smoothstep(0.58, 0.85, vTriBake.g + (triH - 0.5) * 0.25 + (triArm.g - uTriRoughMean) * 0.4) * uWear * uWearAll * min(uBakeAo, 1.0);
 #endif
 float triProc = mix(1.0, mix(uTriDark, 1.0, triH), uTriStrength);
-vec3 triPhoto = clamp(triDiff.rgb / max(uTriMean, vec3(0.02)), 0.0, 3.0);
+vec3 triPhoto = clamp(pow(triDiff.rgb / max(uTriMean, vec3(0.02)), vec3(uContrast)), 0.0, 3.0);
 // low-frequency macro variation so large surfaces are not uniformly tinted
 float triMacro = 1.0 + (triNoise(vTriPos.xz * 2.3 + vTriPos.y * 1.7) - 0.5) * 0.12 * uDiffMix;
 diffuseColor.rgb *= mix(vec3(triProc), triPhoto, uDiffMix) * mix(1.0, triArm.r, uArmMix * 0.7) * triMacro;
@@ -442,6 +444,7 @@ interface KindUniforms {
   uTriDetail: { value: THREE.Texture };
   uTriMean: { value: THREE.Color };
   uTriRoughMean: { value: number };
+  uContrast: { value: number };
   uTriScale: { value: number };
   uProcScale: { value: number };
   uTriStrength: { value: number };
@@ -502,7 +505,7 @@ function uniformsFor(kind: string, spec: KindSpec): KindUniforms {
   if (u) return u;
   const uu: KindUniforms = {
     uTriDiff: { value: white }, uTriNor: { value: flatNormal }, uTriArm: { value: armNeutral }, uTriDetail: { value: tex(spec.tex) },
-    uTriMean: { value: new THREE.Color(1, 1, 1) }, uTriRoughMean: { value: 0.5 },
+    uTriMean: { value: new THREE.Color(1, 1, 1) }, uTriRoughMean: { value: 0.5 }, uContrast: { value: spec.contrast ?? 1 },
     uTriScale: { value: 1 / spec.tile }, uProcScale: { value: 1 / spec.tile }, uTriStrength: { value: spec.strength }, uTriBump: { value: spec.bump },
     uTriRough: { value: spec.rough }, uTriDark: { value: spec.dark }, uDiffMix: { value: 0 }, uArmMix: { value: 0 }, uNorMix: { value: 0 },
     uWear: { value: spec.wear ?? 0 }, ...globals,
