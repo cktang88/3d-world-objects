@@ -63,14 +63,14 @@ export function siTheme(theme: number, size = 24): Theme {
 }
 
 /** a library object as a measured exhibit: its size is known without loading it */
-export function siMeasured(e: LibraryEntry, hero: boolean): Measured {
+export function siMeasured(e: LibraryEntry, hero: boolean, pinFull = false): Measured {
   const real = new THREE.Vector3(...e.size!);
   const entry: RemoteEntry = {
     ds: 'Smithsonian Open Access (CC0)', split: '', row: 0, id: `si:${e.id}`, family: e.category, entry: '', title: e.title, author: e.author || 'Smithsonian Institution',
     url: e.page, license: e.licence, path: '', bytes: 0, f: 0, joints: 0,
   };
   // the full scans are ~150k faces with 2k textures: only for a hero you can walk right up to
-  const quality = hero && Math.max(real.x, real.y, real.z) < 5 ? 'full' : 'low';
+  const quality = pinFull || (hero && Math.max(real.x, real.y, real.z) < 5) ? 'full' : 'low';
   const loadQ = (q: 'low' | 'full') =>
     loadLibraryModel(e, { quality: q, shadows: false }).then((g): RemoteModel => {
       let tris = 0;
@@ -82,5 +82,6 @@ export function siMeasured(e: LibraryEntry, hero: boolean): Measured {
       });
       return { object: g, size: real.clone(), animator: null, tris: Math.round(tris) };
     });
-  return { entry, raw: real.clone(), k: 1, real, library: true, quality, loadQ, load: () => loadQ(quality) };
+  // pinned heroes stay at full detail (no swapping by distance)
+  return { entry, raw: real.clone(), k: 1, real, library: true, quality, loadQ: pinFull ? undefined : loadQ, load: () => loadQ(quality) };
 }

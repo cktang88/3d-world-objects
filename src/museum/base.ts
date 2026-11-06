@@ -344,7 +344,7 @@ export abstract class MuseumBase implements Level {
    * Show an object at its real size. (lx, ly, lz) in frame f is where its base centre goes;
    * `rot` turns it about Y. Never scaled down: the only scale applied is the realScale correction.
    */
-  exhibit(m: Measured, f: Frame, lx: number, ly: number, lz: number, rot = 0, opts: { prio?: number; spin?: number; label?: string } = {}) {
+  exhibit(m: Measured, f: Frame, lx: number, ly: number, lz: number, rot = 0, opts: { prio?: number; spin?: number; label?: string; progressive?: boolean } = {}) {
     const at = f.point(lx, ly, lz);
     const holder = new THREE.Group();
     holder.position.copy(at);
@@ -402,6 +402,20 @@ export abstract class MuseumBase implements Level {
         placeholder.material = new THREE.MeshBasicMaterial({ color: '#884444', wireframe: true });
       });
     this.pendingLoads.push(p);
+    if (opts.progressive && m.loadQ) {
+      // show the low-detail scan first, then swap in the full one and keep it (a hero)
+      const loadQ = m.loadQ;
+      m.loadQ = undefined;
+      p.then(() => loadQ('full'))
+        .then((mod) => {
+          if (!this.alive || !slot.model) return;
+          slot.holder.remove(slot.model.object);
+          slot.holder.add(mod.object);
+          slot.model = mod;
+          slot.q = 'full';
+        })
+        .catch(() => {});
+    }
     return slot;
   }
 }
