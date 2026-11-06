@@ -679,6 +679,495 @@
     "gpuMB": 985,
     "jsHeapMB": 392
    }
+  },
+  "shop": {
+   "desc": "inside the first shop reachable from spawn",
+   "level": "Lucky Deli & Grocery",
+   "portal": "Enter Lucky Deli & Grocery",
+   "commit": "b76626a",
+   "date": "2026-11-06T09:06:06.346Z",
+   "quality": "low",
+   "viewport": [
+    320,
+    180
+   ],
+   "seed": 20261105,
+   "tod": "day",
+   "calls": 118,
+   "callsRange": [
+    118,
+    118
+   ],
+   "tris": 2573070,
+   "programs": 46,
+   "geometries": 250,
+   "textures": 109,
+   "perPass": {
+    "main/shadow": {
+     "calls": 0,
+     "tris": 0,
+     "n": 1
+    },
+    "main": {
+     "calls": 118,
+     "tris": 2573070,
+     "n": 1
+    }
+   },
+   "scene": {
+    "meshes": 150,
+    "meshesVisible": 130,
+    "meshesInFrustum": 117,
+    "instanced": 75,
+    "instancesInFrustum": 8439,
+    "skinnedInFrustum": 0,
+    "trisInFrustum": 2573058,
+    "shadowCastersVisible": 0,
+    "transmissiveInFrustum": 0,
+    "sprites": 0,
+    "lights": 31,
+    "shadowLights": 3
+   },
+   "top": [
+    {
+     "label": "(unnamed) [Instanced scan]",
+     "tris": 1008192,
+     "instances": 827,
+     "draws": 9,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #b5a68b]",
+     "tris": 234520,
+     "instances": 615,
+     "draws": 3,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced painted_metal #92928c roughness=0.4]",
+     "tris": 204960,
+     "instances": 122,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #eeeeea]",
+     "tris": 172854,
+     "instances": 243,
+     "draws": 3,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #808080]",
+     "tris": 165680,
+     "instances": 152,
+     "draws": 2,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced aluminium #d9d9d9]",
+     "tris": 155488,
+     "instances": 258,
+     "draws": 3,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #e5e5e5]",
+     "tris": 96996,
+     "instances": 137,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced MeshStandardMaterial map:tex #ffffff]",
+     "tris": 91252,
+     "instances": 1869,
+     "draws": 8,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #b77940 roughness=0.8]",
+     "tris": 81852,
+     "instances": 57,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #000000]",
+     "tris": 62744,
+     "instances": 341,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced handsanitizer]",
+     "tris": 57980,
+     "instances": 195,
+     "draws": 3,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced Material.005]",
+     "tris": 56160,
+     "instances": 390,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #808080 roughness=0.55]",
+     "tris": 47520,
+     "instances": 99,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #915940]",
+     "tris": 29592,
+     "instances": 137,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Instanced plastic #a58b65 roughness=0.85]",
+     "tris": 14700,
+     "instances": 25,
+     "draws": 1,
+     "castShadow": false
+    }
+   ],
+   "settleFrames": 28,
+   "settled": true,
+   "memoryPeak": {
+    "rendererMB": 549,
+    "gpuMB": 633,
+    "jsHeapMB": 88
+   }
+  },
+  "museum-atrium": {
+   "desc": "museum atrium spawn",
+   "level": "Atrium",
+   "portal": "atrium",
+   "commit": "b76626a",
+   "date": "2026-11-06T09:07:59.376Z",
+   "quality": "low",
+   "viewport": [
+    320,
+    180
+   ],
+   "seed": 20261105,
+   "tod": "day",
+   "calls": 59,
+   "callsRange": [
+    59,
+    59
+   ],
+   "tris": 15720,
+   "programs": 21,
+   "geometries": 129,
+   "textures": 57,
+   "perPass": {
+    "main/shadow": {
+     "calls": 0,
+     "tris": 0,
+     "n": 1
+    },
+    "main": {
+     "calls": 59,
+     "tris": 15720,
+     "n": 1
+    }
+   },
+   "scene": {
+    "meshes": 183,
+    "meshesVisible": 78,
+    "meshesInFrustum": 58,
+    "instanced": 0,
+    "instancesInFrustum": 0,
+    "skinnedInFrustum": 0,
+    "trisInFrustum": 15708,
+    "shadowCastersVisible": 10,
+    "transmissiveInFrustum": 0,
+    "sprites": 0,
+    "lights": 31,
+    "shadowLights": 3
+   },
+   "top": [
+    {
+     "label": "1c6faaa26131439eb7037dd2dbba49cbfbx/RootNode/Assem1_SLDASM/Assem1_SLDASM_Maple_0 [Mesh Maple]",
+     "tris": 3422,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #6d1a22]",
+     "tris": 2304,
+     "instances": 2,
+     "draws": 2,
+     "castShadow": false
+    },
+    {
+     "label": "Scene/Gear [Mesh MeshStandardMaterial vc #ffffff]",
+     "tris": 2228,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #b8975a]",
+     "tris": 1728,
+     "instances": 2,
+     "draws": 2,
+     "castShadow": false
+    },
+    {
+     "label": "Sketchfab_Scene/Sketchfab_model/modelobjcleanermaterialmergergles/Object_4 [Mesh material_2]",
+     "tris": 764,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "Scene/gear [Mesh MeshStandardMaterial vc #ffffff]",
+     "tris": 672,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #efe8db]",
+     "tris": 648,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "Sketchfab_Scene/Sketchfab_model/0ce5df1b9ed544e796bc8a9db27ebd9eobjcleanermaterialmergergles/Object_2 [Mesh Scene_-_Root]",
+     "tris": 552,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #efe7d6]",
+     "tris": 528,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #14110d]",
+     "tris": 480,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "b1a665edf2f74f90965b4b5ff93f413cfbx/RootNode/pSphere1/pSphere1_lambert3_0 [Mesh lambert3]",
+     "tris": 456,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "UVmushroomfbx/RootNode/Cylinder/Cylinder_Material001_0 [Mesh Material.001]",
+     "tris": 424,
+     "instances": 2,
+     "draws": 2,
+     "castShadow": true
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #d9d6cf]",
+     "tris": 288,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "Sketchfab_Scene/Sketchfab_model/modelobjcleanermaterialmergergles/Object_3 [Mesh material_1]",
+     "tris": 278,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": true
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #e6dccb]",
+     "tris": 240,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    }
+   ],
+   "settleFrames": 25,
+   "settled": true,
+   "memoryPeak": {
+    "rendererMB": 351,
+    "gpuMB": 390,
+    "jsHeapMB": 49
+   }
+  },
+  "gallery": {
+   "desc": "first gallery off the atrium",
+   "level": "Milestones of Flight",
+   "portal": "Milestones of Flight",
+   "commit": "b76626a",
+   "date": "2026-11-06T09:08:14.371Z",
+   "quality": "low",
+   "viewport": [
+    320,
+    180
+   ],
+   "seed": 20261105,
+   "tod": "day",
+   "calls": 39,
+   "callsRange": [
+    39,
+    39
+   ],
+   "tris": 899017,
+   "programs": 32,
+   "geometries": 164,
+   "textures": 89,
+   "perPass": {
+    "main/shadow": {
+     "calls": 0,
+     "tris": 0,
+     "n": 1
+    },
+    "main": {
+     "calls": 39,
+     "tris": 899017,
+     "n": 1
+    }
+   },
+   "scene": {
+    "meshes": 47,
+    "meshesVisible": 41,
+    "meshesInFrustum": 38,
+    "instanced": 0,
+    "instancesInFrustum": 0,
+    "skinnedInFrustum": 0,
+    "trisInFrustum": 899005,
+    "shadowCastersVisible": 0,
+    "transmissiveInFrustum": 0,
+    "sprites": 0,
+    "lights": 31,
+    "shadowLights": 3
+   },
+   "top": [
+    {
+     "label": "smithsonian:936d1822-b237-4431-bb3f-a1f9d39a2e90/mesh_0 [Mesh default]",
+     "tris": 608677,
+     "instances": 3,
+     "draws": 3,
+     "castShadow": false
+    },
+    {
+     "label": "smithsonian:6c69a6bb-55e6-4356-8725-120ff7f8d652/mesh_0 [Mesh default]",
+     "tris": 99526,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "smithsonian:d8c63e8a-4ebc-11ea-b77f-2e728ce88125/mesh_0 [Mesh default]",
+     "tris": 72170,
+     "instances": 4,
+     "draws": 4,
+     "castShadow": false
+    },
+    {
+     "label": "smithsonian:d8c6457e-4ebc-11ea-b77f-2e728ce88125/mesh_0 [Mesh default]",
+     "tris": 41224,
+     "instances": 3,
+     "draws": 3,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #e8eaec]",
+     "tris": 24880,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "smithsonian:d8c636ce-4ebc-11ea-b77f-2e728ce88125/mesh_0 [Mesh default]",
+     "tris": 20000,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "smithsonian:e7514eea-3f12-490d-a2d0-999f2a1a70f7/mesh_0 [Mesh default]",
+     "tris": 20000,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #9aa1a8]",
+     "tris": 9408,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #c8ccd0]",
+     "tris": 1128,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #3a3d40]",
+     "tris": 828,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #202020]",
+     "tris": 396,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #14110d]",
+     "tris": 240,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #fff8e6]",
+     "tris": 192,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #dfe3e6]",
+     "tris": 144,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    },
+    {
+     "label": "(unnamed) [Mesh MeshStandardMaterial #eef4fa]",
+     "tris": 48,
+     "instances": 1,
+     "draws": 1,
+     "castShadow": false
+    }
+   ],
+   "settleFrames": 13,
+   "settled": true,
+   "memoryPeak": {
+    "rendererMB": 662,
+    "gpuMB": 507,
+    "jsHeapMB": 109
+   }
   }
  },
  "posesFull": {
@@ -1213,14 +1702,14 @@
    "date": "2026-11-06T06:34:00Z",
    "reason": "not reached (same run)"
   },
-  "poses.shop": {
-   "date": "2026-11-06T09:00:16.886Z",
-   "reason": "shop took over 150s",
-   "stage": "shop: sample",
+  "poses.apartment": {
+   "date": "2026-11-06T09:17:41.245Z",
+   "reason": "no unit door in the lobby",
+   "stage": "enter Enter 58 Park Av",
    "memoryPeak": {
-    "rendererMB": 1016,
-    "gpuMB": 1096,
-    "jsHeapMB": 359
+    "rendererMB": 848,
+    "gpuMB": 769,
+    "jsHeapMB": 277
    }
   }
  },
@@ -1236,6 +1725,17 @@
     "floors": 1,
     "biome": "metropolis",
     "shop": "deli"
+   }
+  },
+  "apartment": {
+   "label": "Enter 58 Park Av",
+   "target": {
+    "kind": "floor",
+    "seed": 3157469134,
+    "name": "58 Park Av",
+    "type": "office",
+    "floor": 0,
+    "floors": 39
    }
   }
  }

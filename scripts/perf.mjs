@@ -178,7 +178,7 @@ await page.evaluate(() => {
 const settle = (minFrames = 5, stableFor = 4) =>
   page.evaluate(([minFrames, stableFor]) => new Promise((resolve) => {
     const p = window.__world.perf;
-    const start = p.last.frame;
+    const start = p.last.frame, t0 = performance.now();
     let key = '', since = 0, lastFrame = start;
     const poll = () => {
       const f = p.last;
@@ -190,7 +190,8 @@ const settle = (minFrames = 5, stableFor = 4) =>
         const k = [lv?.chunks?.size ?? 0, q(f.geometries), q(f.textures), f.programs, lv?.name].join('|');
         if (k === key) since++;
         else { key = k; since = 0; }
-        if (f.frame - start >= minFrames && since >= stableFor) return resolve({ frames: f.frame - start, key });
+        // at least 10 s: models and museum objects stream in asynchronously after the level is built
+        if (f.frame - start >= minFrames && since >= stableFor && performance.now() - t0 > 10000) return resolve({ frames: f.frame - start, key });
       }
       setTimeout(poll, 250);
     };
@@ -233,7 +234,8 @@ async function measure(pose) {
       doc.targets = { ...doc.targets, ...(await page.evaluate(() => {
         const ps = window.__world.level.portals();
         const pick = (p) => (p ? { label: p.label, target: p.target } : undefined);
-        return { shop: pick(ps.find((p) => p.target?.kind === 'interior' && p.target.shop)), apartment: pick(ps.find((p) => p.target?.kind === 'interior' && !p.target.shop)) };
+        // apartments: a brownstone door (interior), else a building lobby (floor level) whose unit doors lead in
+        return { shop: pick(ps.find((p) => p.target?.kind === 'interior' && p.target.shop)), apartment: pick(ps.find((p) => p.target?.kind === 'interior' && !p.target.shop) ?? ps.find((p) => p.target?.kind === 'floor')) };
       })) };
       save();
     }
@@ -244,6 +246,17 @@ async function measure(pose) {
       label = t.label;
       at(`enter ${t.label}`);
       await page.evaluate((t) => window.__world.enter({ target: t.target, label: t.label }), t);
+      if (t.target.kind === 'floor') {
+        // a lobby: go on through the first unit door
+        const u = await page.evaluate(() => {
+          const p = window.__world.level.portals().find((p) => p.target?.kind === 'interior');
+          return p ? { label: p.label, target: p.target } : null;
+        });
+        if (!u) throw new Error('no unit door in the lobby');
+        label += ` > ${u.label}`;
+        at(`enter ${u.label}`);
+        await page.evaluate((u) => window.__world.enter({ target: u.target, label: u.label }), u);
+      }
     } else {
       if ((await levelName()) !== 'Atrium') { at('enter museum atrium'); await page.evaluate(() => window.__world.startMode('museum')); }
       label = 'atrium';
