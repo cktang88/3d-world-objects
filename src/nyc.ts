@@ -284,7 +284,7 @@ export class NycLevel implements Level {
         x += w;
       }
     }
-    this.street(ctx, village, tower);
+    this.street(ctx, village, tower, D.trees); // [districts] street-tree density
     yield; // [vis]
     districtExtras(ctx, D); // [districts] sidewalk displays, district props
     groundDetails({ group, stat, cx, cz, village: loft, doors: ctx.doors, seed: this.seed });
@@ -306,7 +306,7 @@ export class NycLevel implements Level {
 
   // ------------------------------------------------------------ street furniture
 
-  private street(ctx: BCtx, village: boolean, tower: number) {
+  private street(ctx: BCtx, village: boolean, tower: number, trees = 0) {
     const { rng, stat, group, colliders } = ctx;
     const edgeX = BX - 0.7, edgeZ = BZ - 0.7;
     const near = (x: number, z: number, d = 2.2) => ctx.doors.some((p) => Math.hypot(p.x - x, p.z - z) < d);
@@ -347,10 +347,13 @@ export class NycLevel implements Level {
         colliders.push(rect(x, z, 0.4, 0.4));
       }
       // street trees
-      if (!run.ave && (village || tower < 0.6)) {
+      // [districts] tall blocks keep a district's share of the side-street trees (Midtown has them, Times Square not)
+      const full = village || tower < 0.6;
+      if (!run.ave && (full || trees > 0)) {
         for (let t = run.from + 9; t < run.to - 3; t += rng.range(8, 11)) {
           const [x, z] = P(t);
           if (near(x, z, 2.6)) continue;
+          if (!full && treeHash(ctx.cx * AX + x, ctx.cz * SZ + z) >= trees) continue;
           tree(stat, x, z, rng, group, run.axis);
           colliders.push(rect(x, z, 0.5, 0.5));
         }
@@ -460,3 +463,9 @@ function objectPortal(e: ModelEntry, x: number, z: number, size: THREE.Vector3, 
 
 // [minimap] the NYC level maps itself (src/minimap.ts, src/nyc/minimap-nyc.ts)
 registerMinimapSource((l) => (l instanceof NycLevel ? nycMinimapSource : null));
+
+/** [districts] 0..1 per street-tree slot (deterministic, independent of the block's rng) */
+function treeHash(x: number, z: number) {
+  const h = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return h - Math.floor(h);
+}

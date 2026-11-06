@@ -113,3 +113,17 @@ test('storefront variety: no two neighbouring shops of the same kind on the spaw
   }
   none(bad, 'same-kind shops side by side');
 });
+
+test("street trees follow the district's tree share: Midtown's tall blocks keep side-street trees", () => {
+  // street audit: the Midtown side streets by the spawn were bare (towers turned every tree off)
+  const count = (cx: number, cz: number) => {
+    const ct = nycChunk(1, cx, cz).group.userData.trees as { trees: { pos: { x: number; z: number } }[] } | undefined;
+    // side-street trees only (block-local |z| near the kerb), not the park's or a district's
+    return (ct?.trees ?? []).filter((t) => Math.abs(Math.abs(t.pos.z - cz * SZ) - (BZ - 0.7)) < 0.3).length;
+  };
+  const D = districtAt(0, 0);
+  expect(D.name === 'Midtown' && D.trees > 0, `spawn block is ${D.name}, trees ${D.trees}`);
+  const n = count(0, 0);
+  expect(n >= 3, `${n} side-street trees on the spawn block (want >= 3 at a ${D.trees} share)`);
+  expect(n <= 20, `${n} side-street trees on the spawn block: more than every slot`);
+});
