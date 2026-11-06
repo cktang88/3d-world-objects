@@ -44,23 +44,26 @@ export function knownRaw(id: string): THREE.Vector3 | null {
 }
 
 /**
- * Sizes measured offline for every object (scripts/build_sizes.py -> public/museum/s/<shard>.json).
- * With these a room is planned at once; runtime measuring is only the fallback.
+ * Sizes measured offline for every object (scripts/build_sizes.py -> public/museum/s/<shard>.json:
+ * per theme, sizes in the order of its members). With these a room is planned at once; runtime
+ * measuring is only the fallback.
  */
 const offline = new Map<string, [number, number, number]>();
-const shardLoads = new Map<number, Promise<void>>();
-export function loadSizeShard(shard: number): Promise<void> {
+const shardLoads = new Map<number, Promise<Record<string, ([number, number, number] | 0)[]>>>();
+export async function loadThemeSizes(shard: number, theme: number, members: { id: string }[]): Promise<void> {
   let p = shardLoads.get(shard);
   if (!p) {
     p = fetch(`${import.meta.env.BASE_URL}museum/s/${shard}.json`)
       .then((r) => (r.ok ? r.json() : {}))
-      .then((m: Record<string, [number, number, number]>) => {
-        for (const [k, v] of Object.entries(m)) offline.set(k, v);
-      })
-      .catch(() => {});
+      .catch(() => ({}));
     shardLoads.set(shard, p);
   }
-  return p;
+  const sizes = (await p)[String(theme)];
+  if (!sizes) return;
+  members.forEach((e, i) => {
+    const v = sizes[i];
+    if (v) offline.set(e.id, v);
+  });
 }
 
 export function remember(id: string, raw: THREE.Vector3) {

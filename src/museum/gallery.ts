@@ -7,7 +7,7 @@ import { MuseumBase, shade } from './base';
 import { makeMats, type Ctx, type Unit } from './displays';
 import { assemble, partitionRooms, planRoom, type Plan } from './plan';
 import { buildShell, doorPortal, doorSign } from './shell';
-import { loadSizeShard, measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
+import { loadThemeSizes, measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
 import { pageSize, styleFor, STYLES, type Style } from './style';
 import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smithsonian';
 
@@ -125,7 +125,8 @@ export class GalleryLevel extends MuseumBase {
 
   private async start(per: number) {
     const t = this.theme;
-    const [all] = await Promise.all([themeMembers(t.id), loadSizeShard(t.shard)]);
+    const all = await themeMembers(t.id);
+    await loadThemeSizes(t.shard, t.id, all);
     if (!this.alive) return;
     // rooms are cut from the theme by what fits (size-capped halls, at most two colossal things each)
     const rooms = partitionRooms(all, (e) => measuredFromCache(e)?.real ?? null, per);
@@ -155,7 +156,9 @@ export class GalleryLevel extends MuseumBase {
         if (ex.target.kind !== 'gallery' || isSi(ex.target.theme)) return;
         const tt = museum().themes[ex.target.theme];
         const pp = pageSize(tt.collection);
-        Promise.all([themeMembers(tt.id), loadSizeShard(tt.shard)]).then(([mm]) => this.alive && prefetchSizes(mm.slice(0, pp * 2), 1000 + i * 100));
+        themeMembers(tt.id)
+          .then((mm) => loadThemeSizes(tt.shard, tt.id, mm).then(() => mm))
+          .then((mm) => this.alive && prefetchSizes(mm.slice(0, pp * 2), 1000 + i * 100));
       });
     });
     await this.settle();

@@ -4,7 +4,7 @@ Real sizes for every museum object, so a gallery can be planned without measurin
 
 Streams each object's USDA from Hugging Face (never stored), reads only the prim hierarchy, the
 xformOps and each mesh's `extent`, and unions the transformed extent boxes. The point arrays are
-skipped. Output: public/museum/s/<shard>.json  {id: [x, y, z]}  in the app's Y-up axes (metres, raw
+skipped. Output: public/museum/s/<shard>.json  {theme: [[x, y, z] or 0, ...]} in the order of t/<shard>.json, in Y-up axes (metres, raw
 source size: the runtime still applies realScale).
 
     python3 scripts/build_sizes.py [--workers 48] [--cache /path/sizes.jsonl] [--limit N]
@@ -223,9 +223,11 @@ def main():
     args = ap.parse_args()
 
     shards = {}
+    themes = {}  # shard -> {theme: members in order}
     for f in sorted(glob.glob(os.path.join(ROOT, 'public/museum/t/*.json'))):
         sh = os.path.basename(f)[:-5]
-        for _, v in json.load(open(f)).items():
+        themes[sh] = json.load(open(f))
+        for _, v in themes[sh].items():
             shards.setdefault(sh, []).extend(v)
     done = {}
     if os.path.exists(args.cache):
@@ -263,9 +265,12 @@ def main():
 
     os.makedirs(os.path.join(ROOT, 'public/museum/s'), exist_ok=True)
     total = 0
-    for sh, es in shards.items():
-        m = {e[3]: compact(done[e[3]]) for e in es if done.get(e[3])}
-        total += len(m)
+    # compact: per theme, the sizes in the same order as its members in t/<shard>.json (0 = unknown)
+    for sh, ts in themes.items():
+        m = {}
+        for tid, es in ts.items():
+            m[tid] = [compact(done[e[3]]) if done.get(e[3]) else 0 for e in es]
+            total += sum(1 for v in m[tid] if v)
         with open(os.path.join(ROOT, f'public/museum/s/{sh}.json'), 'w') as f:
             json.dump(m, f, separators=(',', ':'))
     print(f'wrote sizes for {total} objects', flush=True)
