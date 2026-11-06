@@ -318,6 +318,11 @@ function cutWheels(parts: Part[], r: number): Wheel[] {
     }
   }
   const wheels: { c: THREE.Vector3; r: number; x0: number; x1: number; tris: Map<Part, number[]> }[] = [];
+  // a tyre that floats a few mm (no contact points): mirror its partner on the other side
+  for (let i = 0; i < 4; i++) {
+    const o = boxes[i ^ 1];
+    if (boxes[i].isEmpty() && !o.isEmpty()) boxes[i].set(new THREE.Vector3(-o.max.x, o.min.y, o.min.z), new THREE.Vector3(-o.min.x, o.max.y, o.max.z));
+  }
   for (const b of boxes) {
     if (b.isEmpty() || b.max.z - b.min.z > r * 1.6) return [];
     wheels.push({ c: new THREE.Vector3((b.min.x + b.max.x) / 2, r, (b.min.z + b.max.z) / 2), r, x0: b.min.x - 0.04, x1: b.max.x + 0.04, tris: new Map() });
