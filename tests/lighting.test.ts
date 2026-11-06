@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { test, expect, between, near } from './qa';
 import './env';
-import { PRESETS, TIMES, INDOOR_HDRI, analyse, blendPreset } from '../src/lighting';
+import { PRESETS, TIMES, INDOOR_HDRI, OVERCAST, LIGHT_BUDGET, analyse, blendPreset, rotateEquirect, downsampleEquirect } from '../src/lighting';
 
 const H2F = THREE.DataUtils.toHalfFloat;
 
@@ -97,4 +97,32 @@ test('preset blending is continuous and hits the end points', () => {
   near(m1.exposure, b.exposure, 1e-6, 'blend 1 exposure');
   between(mh.night, Math.min(a.night, b.night), Math.max(a.night, b.night), 'blend 0.5 night');
   expect(/^#[0-9a-f]{6}$/i.test(mh.sunColor), 'blended colour is hex');
+});
+
+test('rotating an HDRI moves its sun to the wanted azimuth (sunAz convention: atan2(x, z))', () => {
+  for (const want of [235, 250, 10, 140]) {
+    const t = hdr({ sun: [1.1, 25] });
+    const a = analyse(t, 1e9, 1);
+    const alpha = THREE.MathUtils.degToRad(want) - Math.atan2(a.sun!.x, a.sun!.z);
+    rotateEquirect(t, alpha);
+    const b = analyse(t, 1e9, 1);
+    const got = THREE.MathUtils.radToDeg(Math.atan2(b.sun!.x, b.sun!.z));
+    const err = Math.abs(((got - want + 540) % 360) - 180);
+    expect(err < 5, `sun at ${got.toFixed(1)} deg, wanted ${want}`);
+    // and the analytic rotation of the old sun vector agrees
+    const v = a.sun!.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), alpha);
+    expect(v.angleTo(b.sun!) < 0.1, 'rotated sun vector matches');
+  }
+});
+
+test('downsampled copy for the PMREM keeps the mean, overcast preset and light budget are sane', () => {
+  const t = hdr({ sun: [0.5, 30], sunL: 50 });
+  const big = analyse(t, 1e9, 1).mean;
+  const s = downsampleEquirect(t, 32);
+  expect((s.image as unknown as { width: number }).width === 32, 'width 32');
+  near(analyse(s, 1e9, 1).mean / big, 1, 0.08, 'mean preserved');
+  between(OVERCAST.sunIntensity, 0, 2, 'overcast sun is weak');
+  expect(OVERCAST.envSat < 0.9 && OVERCAST.align === false, 'overcast is grey and has no sun to align');
+  // museum rig 10 spots + 3 points, interiors 12 points + 1 shadow point, plus 2 seamless preview + 1 lift light
+  expect(LIGHT_BUDGET.spot >= 10 && LIGHT_BUDGET.point >= 15 && LIGHT_BUDGET.pointShadow >= 1, 'budget covers the level rigs');
 });

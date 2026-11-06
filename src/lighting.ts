@@ -24,7 +24,7 @@ export const TIMES: TimeOfDay[] = ['day', 'golden', 'dusk', 'night'];
 export type Place = 'outdoor' | 'museum' | 'shop' | 'interior' | 'studio';
 export type Quality = 'ultra' | 'high' | 'low';
 
-interface Preset {
+export interface Preset {
   label: string;
   /** Poly Haven HDRI id (CC0) */
   hdri: string;
@@ -48,7 +48,9 @@ interface Preset {
   bounce: { sky: string; ground: string; intensity: number };
   /** exponential fog density (1/m), tinted from the HDRI horizon */
   fog: number;
-  fogTint?: string;
+  /** colour the HDRI-horizon fog colour is pulled towards, by fogTintMix */
+  fogTint: string;
+  fogTintMix: number;
   night: number;
   /** share of apartment windows lit */
   lit: number;
@@ -61,28 +63,40 @@ interface Preset {
 export const PRESETS: Record<TimeOfDay, Preset> = {
   day: {
     label: 'Day', hdri: 'docklands_02', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 6,
-    sky: 0.6, clampMul: 12, envSat: 0.7, exposure: 0.58, bounce: { sky: '#dcd6cc', ground: '#b49478', intensity: 0.55 }, fog: 0.0012, night: 0, lit: 0.04, wet: 0,
+    sky: 0.6, clampMul: 12, envSat: 0.7, exposure: 0.58, bounce: { sky: '#dcd6cc', ground: '#b49478', intensity: 0.55 }, fog: 0.0012, fogTint: '#aab6c2', fogTintMix: 0, night: 0, lit: 0.04, wet: 0,
     bloom: { strength: 0.12, radius: 0.4, threshold: 3.0 },
     grade: { gain: '#fffaf4', lift: '#04060a', sat: 1.04, contrast: 1.04, vignette: 0.22 },
   },
   golden: {
     label: 'Golden hour', hdri: 'venice_sunset', align: true, sunAz: 250, sunElev: 8, sunColor: '#ffb067', sunIntensity: 5.5,
-    sky: 0.55, clampMul: 10, envSat: 0.95, exposure: 0.8, bounce: { sky: '#d8c8b8', ground: '#c08860', intensity: 0.35 }, fog: 0.0022, night: 0.15, lit: 0.12, wet: 0,
+    sky: 0.55, clampMul: 10, envSat: 0.95, exposure: 0.8, bounce: { sky: '#d8c8b8', ground: '#c08860', intensity: 0.35 }, fog: 0.0022, fogTint: '#c8a890', fogTintMix: 0, night: 0.15, lit: 0.12, wet: 0,
     bloom: { strength: 0.2, radius: 0.5, threshold: 2.2 },
     grade: { gain: '#fff1e0', lift: '#060812', sat: 1.08, contrast: 1.06, vignette: 0.28 },
   },
   dusk: {
     label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
-    sky: 0.12, clampMul: 30, envSat: 0.95, exposure: 1.3, bounce: { sky: '#8890a8', ground: '#6a5a50', intensity: 0.04 }, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.3, wet: 0.35,
+    sky: 0.12, clampMul: 30, envSat: 0.95, exposure: 1.3, bounce: { sky: '#8890a8', ground: '#6a5a50', intensity: 0.04 }, fog: 0.002, fogTint: '#6f7fa8', fogTintMix: 0.8, night: 0.75, lit: 0.3, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
   },
   night: {
     label: 'Night', hdri: 'shanghai_bund', align: false, sunAz: 140, sunElev: 50, sunColor: '#8ea4d6', sunIntensity: 0.12,
-    sky: 0.04, clampMul: 400, envSat: 0.55, exposure: 1.35, bounce: { sky: '#404050', ground: '#4a3a2a', intensity: 0.03 }, fog: 0.0022, fogTint: '#2a2a3a', night: 1, lit: 0.36, wet: 0.8,
+    sky: 0.04, clampMul: 400, envSat: 0.55, exposure: 1.35, bounce: { sky: '#404050', ground: '#4a3a2a', intensity: 0.03 }, fog: 0.0022, fogTint: '#2a2a3a', fogTintMix: 0.8, night: 1, lit: 0.36, wet: 0.8,
     bloom: { strength: 0.5, radius: 0.5, threshold: 0.8 },
     grade: { gain: '#fbfaff', lift: '#050712', sat: 1.12, contrast: 1.08, vignette: 0.38 },
   },
+};
+
+/**
+ * Overcast sky (for src/weather.ts: setWeather({ overcast })): a soft, shadowless grey HDRI.
+ * Blended over the time-of-day preset by daylight (it fades out towards night), keeping that
+ * preset's night factor, lit windows and wetness.
+ */
+export const OVERCAST: Preset = {
+  label: 'Overcast', hdri: 'potsdamer_platz', align: false, sunAz: 235, sunElev: 50, sunColor: '#e8ecf0', sunIntensity: 0.9,
+  sky: 0.75, clampMul: 30, envSat: 0.55, exposure: 0.66, bounce: { sky: '#d0d2d4', ground: '#8a8478', intensity: 0.12 }, fog: 0.0024, fogTint: '#b4b8bc', fogTintMix: 0.5, night: 0, lit: 0.06, wet: 0,
+  bloom: { strength: 0.08, radius: 0.4, threshold: 3.0 },
+  grade: { gain: '#fbfcff', lift: '#05060a', sat: 0.94, contrast: 1.02, vignette: 0.2 },
 };
 
 const _ca = new THREE.Color(), _cb = new THREE.Color();
@@ -251,8 +265,10 @@ export interface WeatherMods {
   fogMix: number;
   /** street wetness floor 0..1 */
   wet: number;
+  /** 0..1: blend the sky, image-based light and grade towards the OVERCAST preset (daylight only) */
+  overcast: number;
 }
-export const weather: WeatherMods = { cloud: 0, sunMul: 1, skyMul: 1, fogMul: 1, fogColor: null, fogMix: 0, wet: 0 };
+export const weather: WeatherMods = { cloud: 0, sunMul: 1, skyMul: 1, fogMul: 1, fogColor: null, fogMix: 0, wet: 0, overcast: 0 };
 let rig: Lighting | null = null;
 export function setWeather(w: Partial<WeatherMods>) {
   Object.assign(weather, w);
@@ -262,9 +278,11 @@ export function setWeather(w: Partial<WeatherMods>) {
 // ---------------------------------------------------------------- HDRI loading
 
 interface Hdri {
+  /** full-res equirect for the sky dome, rotated into the world frame */
   tex: THREE.DataTexture;
+  /** PMREM (always ENV_SIZE, built from a 1024-wide copy) so every environment map shares one shader variant */
   env: THREE.Texture;
-  /** sun direction in the texture's own frame, or null */
+  /** sun direction (world frame after rotation), or null */
   sun: THREE.Vector3 | null;
   /** mean upper-sky radiance after clamping */
   skyMean: number;
@@ -273,6 +291,56 @@ interface Hdri {
 }
 
 const hdriCache = new Map<string, Promise<Hdri | null>>();
+
+/**
+ * Rotate an equirect about the vertical axis in place: a world direction with azimuth phi
+ * (atan2(x, z), the sunAz convention) then shows what the image had at phi - alpha.
+ * Baking the rotation into the pixels lets two HDRIs with different rotations blend.
+ */
+export function rotateEquirect(tex: THREE.DataTexture, alpha: number) {
+  const img = tex.image as unknown as { data: Uint16Array; width: number; height: number };
+  const { data, width: W, height: H } = img;
+  const shift = Math.round((alpha / (Math.PI * 2)) * W);
+  const k = ((shift % W) + W) % W;
+  if (!k) return;
+  const row = new Uint16Array(W * 4);
+  for (let r = 0; r < H; r++) {
+    const o = r * W * 4;
+    row.set(data.subarray(o, o + W * 4));
+    for (let c = 0; c < W; c++) {
+      const src = ((c + k) % W) * 4;
+      data[o + c * 4] = row[src];
+      data[o + c * 4 + 1] = row[src + 1];
+      data[o + c * 4 + 2] = row[src + 2];
+      data[o + c * 4 + 3] = row[src + 3];
+    }
+  }
+  tex.needsUpdate = true;
+}
+
+/** a box-filtered copy at most maxW wide (the PMREM is built from it, so its size is fixed) */
+export function downsampleEquirect(tex: THREE.DataTexture, maxW: number): THREE.DataTexture {
+  const img = tex.image as unknown as { data: Uint16Array; width: number; height: number };
+  const f = Math.max(1, Math.round(img.width / maxW));
+  if (f === 1) return tex;
+  const W = Math.floor(img.width / f), H = Math.floor(img.height / f);
+  const out = new Uint16Array(W * H * 4);
+  const half = THREE.DataUtils.fromHalfFloat, toHalf = THREE.DataUtils.toHalfFloat;
+  for (let r = 0; r < H; r++)
+    for (let c = 0; c < W; c++)
+      for (let k = 0; k < 4; k++) {
+        let sum = 0;
+        for (let y = 0; y < f; y++) for (let x = 0; x < f; x++) sum += half(img.data[((r * f + y) * img.width + c * f + x) * 4 + k]);
+        out[(r * W + c) * 4 + k] = toHalf(sum / (f * f));
+      }
+  const t = new THREE.DataTexture(out, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
+  t.flipY = tex.flipY;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.LinearSRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
 /** ?notex=1 (fast testing): no HDRI downloads; outdoor uses the physical sky, indoor the RoomEnvironment */
 const NO_HDRI = typeof location !== 'undefined' && /[?&](notex|nohdri)=?1?(&|$)/.test(location.search);
 
@@ -403,6 +471,93 @@ function vec3Of(hex: string, v: THREE.Vector3) {
 // ---------------------------------------------------------------- the lighting rig
 
 const LAMP_POOL = 8;
+/** every environment map is a PMREM of this cube size (RoomEnvironment, physical sky, HDRIs) */
+const ENV_SIZE = 256;
+/** seconds for a time-of-day change */
+export const TRANSITION_S = typeof location !== 'undefined' && /[?&]todsec=([\d.]+)/.test(location.search) ? Number(/[?&]todsec=([\d.]+)/.exec(location.search)![1]) : 4;
+
+/**
+ * The scene always holds exactly this many lights of each kind (levels' own lights plus dark
+ * padding lights), and the 3 cascade lights stay in the scene everywhere, so going between the
+ * street, shops, apartments and the museum never changes the shader variants (no recompiles).
+ * A level needing more than this logs a warning (and does recompile).
+ */
+export const LIGHT_BUDGET = { point: 16, spot: 10, pointShadow: 1, spotShadow: 0 };
+type LightKind = keyof typeof LIGHT_BUDGET;
+
+interface Src {
+  name: string;
+  h: Hdri;
+  /** normalisation so the upper sky has the preset's radiance */
+  scale: number;
+  sun: THREE.Vector3;
+}
+
+const SkyDomeShader = {
+  uniforms: {
+    tA: { value: null as THREE.Texture | null }, tB: { value: null as THREE.Texture | null }, tC: { value: null as THREE.Texture | null },
+    wA: { value: 0 }, wB: { value: 1 }, wC: { value: 0 },
+  },
+  vertexShader: /* glsl */ `varying vec3 vDir;
+void main() {
+  vDir = position;
+  vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_Position = p.xyww;
+}`,
+  fragmentShader: /* glsl */ `uniform sampler2D tA, tB, tC;
+uniform float wA, wB, wC;
+varying vec3 vDir;
+#include <common>
+vec2 eqUv(vec3 d) {
+  d = normalize(d);
+  return vec2(atan(d.z, d.x) * RECIPROCAL_PI2 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * RECIPROCAL_PI + 0.5);
+}
+void main() {
+  vec2 uv = eqUv(vDir);
+  vec3 c = vec3(0.0);
+  if (wA > 0.0) c += texture2D(tA, uv).rgb * wA;
+  if (wB > 0.0) c += texture2D(tB, uv).rgb * wB;
+  if (wC > 0.0) c += texture2D(tC, uv).rgb * wC;
+  gl_FragColor = vec4(c, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`,
+};
+
+const EnvBlendShader = {
+  uniforms: {
+    eA: { value: null as THREE.Texture | null }, eB: { value: null as THREE.Texture | null }, eC: { value: null as THREE.Texture | null },
+    wA: { value: 0 }, wB: { value: 1 }, wC: { value: 0 },
+  },
+  vertexShader: /* glsl */ `varying vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: /* glsl */ `uniform sampler2D eA, eB, eC;
+uniform float wA, wB, wC;
+varying vec2 vUv;
+void main() {
+  vec4 c = vec4(0.0);
+  if (wA > 0.0) c += texture2D(eA, vUv) * wA;
+  if (wB > 0.0) c += texture2D(eB, vUv) * wB;
+  if (wC > 0.0) c += texture2D(eC, vUv) * wC;
+  gl_FragColor = c;
+}`,
+};
+
+const smooth = (t: number) => t * t * (3 - 2 * t);
+/**
+ * three r170's CSMShader.lights_fragment_begin (installed globally by new CSM()) still calls
+ * getPointShadow() without the shadowIntensity argument added in r169, so any point light that
+ * casts shadows (interiors' follow light) fails to compile. Patch the installed chunk.
+ */
+function fixCsmChunk() {
+  const c = THREE.ShaderChunk.lights_fragment_begin;
+  const bad = 'getPointShadow( pointShadowMap[ i ], pointLightShadow.shadowMapSize, pointLightShadow.shadowBias';
+  if (c.includes(bad)) THREE.ShaderChunk.lights_fragment_begin = c.split(bad).join('getPointShadow( pointShadowMap[ i ], pointLightShadow.shadowMapSize, pointLightShadow.shadowIntensity, pointLightShadow.shadowBias');
+}
+function dirOf(azDeg: number, elDeg: number) {
+  const el = THREE.MathUtils.degToRad(elDeg), az = THREE.MathUtils.degToRad(azDeg);
+  return new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
+}
 
 export class Lighting {
   readonly grade = new ShaderPass(GradeShader);
@@ -417,11 +572,17 @@ export class Lighting {
   private csm: CSM | null = null;
   private csmMats = new Set<THREE.Material>();
   private csmUniforms = { breaks: { value: [] as THREE.Vector2[] }, near: { value: 0.05 }, far: { value: 200 } };
+  /** the cascades cast the sun's shadow (outdoors, or a level with a sun) */
+  private sunOn = false;
   private sky = new Sky();
   private skyScene = new THREE.Scene();
   private skyForEnv = new Sky();
   private skyEnv: THREE.WebGLRenderTarget | null = null;
-  private hdriKey = '';
+  private dome: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
+  private envRT: THREE.WebGLRenderTarget;
+  private blendQuad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private blendCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private envKey = '';
   private env: Env | null = null;
   private sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
   private lamps: THREE.SpotLight[] = [];
@@ -432,18 +593,33 @@ export class Lighting {
   private lampT = 0;
   private emissives = new Set<THREE.MeshStandardMaterial>();
   private loadToken = 0;
-  /** preset values before weather modifiers */
-  private base = { env: 0.55, bg: 1, fog: 0.0015, fogColor: new THREE.Color('#aab6c2') };
   private frame = 0;
   private csmWraps = 0;
+  // time of day: the light is a blend from -> to over TRANSITION_S, the sky a crossfade srcA -> srcB
+  private from: Preset = PRESETS.day;
+  private to: Preset = PRESETS.day;
+  private cur: Preset = PRESETS.day;
+  private t = 1;
+  private dur = 0;
+  private srcA: Src | null = null;
+  private srcB: Src | null = null;
+  private srcC: Src | null = null;
+  private sunFrom = new THREE.Vector3(0, 1, 0);
+  private sunTo = new THREE.Vector3(0, 1, 0);
+  private lastNight = -1;
+  // fixed light budget
+  private pads: Record<LightKind, THREE.Light[]> = { point: [], spot: [], pointShadow: [], spotShadow: [] };
+  private padGroup = new THREE.Group();
+  private warned = new Set<string>();
+  private lightCount: Record<LightKind, number> = { point: 0, spot: 0, pointShadow: 0, spotShadow: 0 };
 
   constructor(
     private renderer: THREE.WebGLRenderer,
     private scene: THREE.Scene,
     private camera: THREE.PerspectiveCamera,
     private pmrem: THREE.PMREMGenerator,
-    /** the plain directional light used for non-outdoor scenes */
-    private sun: THREE.DirectionalLight,
+    /** kept dark: the cascades are the only sun (one shader variant everywhere) */
+    sun: THREE.DirectionalLight,
     private hemi: THREE.HemisphereLight,
     private ambient: THREE.AmbientLight,
     private roomEnv: THREE.Texture,
@@ -459,6 +635,31 @@ export class Lighting {
     scene.add(this.sky);
     this.skyForEnv.scale.setScalar(1000);
     this.skyScene.add(this.skyForEnv);
+    sun.visible = false;
+
+    // the HDRI sky: a dome drawn first at the far plane (no depth write, so GTAO never sees it)
+    const dm = new THREE.ShaderMaterial({ ...SkyDomeShader, uniforms: THREE.UniformsUtils.clone(SkyDomeShader.uniforms), side: THREE.BackSide, depthWrite: false, fog: false });
+    this.dome = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), dm);
+    this.dome.frustumCulled = false;
+    this.dome.renderOrder = -1e6;
+    this.dome.visible = false;
+    this.dome.name = 'sky-dome';
+    this.dome.onBeforeRender = (_r, _s, cam) => {
+      this.dome.position.copy(cam.position);
+      this.dome.scale.setScalar((cam as THREE.PerspectiveCamera).far * 0.5);
+      this.dome.updateMatrixWorld();
+    };
+    scene.add(this.dome);
+    // the blended environment map (same CubeUV layout as a PMREM of ENV_SIZE)
+    this.envRT = new THREE.WebGLRenderTarget(3 * Math.max(ENV_SIZE, 16 * 7), 4 * ENV_SIZE, {
+      type: THREE.HalfFloatType, format: THREE.RGBAFormat, colorSpace: THREE.LinearSRGBColorSpace, depthBuffer: false,
+      generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    });
+    this.envRT.texture.mapping = THREE.CubeUVReflectionMapping;
+    this.envRT.texture.name = 'lighting.env';
+    const bm = new THREE.ShaderMaterial({ ...EnvBlendShader, uniforms: THREE.UniformsUtils.clone(EnvBlendShader.uniforms), depthTest: false, depthWrite: false, toneMapped: false });
+    this.blendQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bm);
+    this.blendQuad.frustumCulled = false;
 
     // street lamps: a small pool of real spot lights near the viewer...
     for (let i = 0; i < LAMP_POOL; i++) {
@@ -479,57 +680,53 @@ export class Lighting {
     this.lampGroup.add(this.pools);
     this.lampGroup.visible = false;
     scene.add(this.lampGroup);
+    this.padGroup.name = 'light-budget-pads';
+    scene.add(this.padGroup);
+    scene.fog = new THREE.FogExp2('#000000', 0);
     this.grade.uniforms.uAspect.value = innerWidth / innerHeight;
+    this.makeCsm();
     rig = this;
     // a lost GL context (out of GPU memory) shows as a black frame: make it visible in debug()
     renderer.domElement.addEventListener?.('webglcontextlost', () => (this.status = 'webgl context lost'));
   }
 
-  /** re-apply the weather modifiers on top of the current outdoor preset */
+  /** weather changed: applied on the next update() (cheap, no reloads) */
   applyWeather() {
-    if (this.place !== 'outdoor') return;
-    const p = PRESETS[tod];
-    const w = weather;
-    if (this.csm) for (const l of this.csm.lights) l.intensity = p.sunIntensity * w.sunMul;
-    // bounce comes from sunlit walls: it fades with the sun under cloud, but sky light still bounces a little
-    this.hemi.intensity = p.bounce.intensity * (0.35 + 0.65 * w.sunMul) * Math.min(1, w.skyMul);
-    this.scene.environmentIntensity = this.base.env * w.skyMul;
-    this.scene.backgroundIntensity = this.base.bg * w.skyMul;
-    const fog = this.scene.fog as THREE.FogExp2 | null;
-    if (fog && (fog as THREE.FogExp2).isFogExp2) {
-      fog.density = this.base.fog * w.fogMul;
-      fog.color.copy(this.base.fogColor).multiplyScalar(w.skyMul);
-      if (w.fogColor && w.fogMix > 0) fog.color.lerp(new THREE.Color(w.fogColor), w.fogMix);
-    }
-    U.wet.value = Math.max(p.wet, w.wet);
+    if (this.place === 'outdoor') this.applyCurrent();
   }
 
   get time() {
     return tod;
   }
+  /** the light settings in effect right now (mid-transition, with overcast blended in) */
+  get preset() {
+    return this.cur;
+  }
 
   /** for screenshots / the console: window.__world.lighting.debug() */
   debug() {
+    const lights = this.countLights();
     return {
-      tod, place: this.place, night, hdri: this.hdriKey, status: this.status, csm: this.csm?.cascades ?? 0,
-      csmMats: this.csmMats.size, csmWraps: this.csmWraps, frame: this.frame, programs: this.renderer.info.programs?.length ?? 0, lamps: this.markers.length, emissives: this.emissives.size,
-      sun: this.sunDir.toArray().map((v) => +v.toFixed(2)), envI: +this.scene.environmentIntensity.toFixed(3),
-      rot: +this.scene.environmentRotation.y.toFixed(2), exposure: this.renderer.toneMappingExposure,
+      tod, place: this.place, night: +night.toFixed(3), env: this.envKey, status: this.status, t: +this.t.toFixed(2), csm: this.csm?.cascades ?? 0,
+      csmMats: this.csmMats.size, csmWraps: this.csmWraps, frame: this.frame, programs: this.renderer.info.programs?.length ?? 0,
+      lamps: this.markers.length, lights, sun: this.sunDir.toArray().map((v) => +v.toFixed(2)),
+      envI: +this.scene.environmentIntensity.toFixed(3), exposure: +this.renderer.toneMappingExposure.toFixed(3),
     };
   }
 
   // ------------------------------------------------------------ public API
 
   setQuality(q: Quality) {
+    const changed = q !== this.quality;
     this.quality = q;
     // real lamp lights near the viewer: each one costs every lit pixel, so fewer on lower settings
     const n = q === 'ultra' ? LAMP_POOL : q === 'high' ? 4 : 2;
     this.lamps.forEach((l, i) => (l.visible = i < n));
-    if (this.csm) {
+    if (changed || !this.csm) {
       this.disposeCsm();
       this.makeCsm();
     }
-    if (this.place === 'outdoor') this.loadOutdoor();
+    if (this.place === 'outdoor') this.retarget(true);
   }
 
   cycle(dir = 1) {
@@ -538,25 +735,32 @@ export class Lighting {
     return PRESETS[tod].label;
   }
 
-  setTime(t: TimeOfDay) {
+  /** change the time of day; smooth over TRANSITION_S unless instant */
+  setTime(t: TimeOfDay, instant = false) {
     tod = t;
-    if (this.place === 'outdoor') this.applyOutdoor();
+    if (this.place === 'outdoor') this.retarget(instant);
   }
 
   /** a new level (or lab scene) */
   apply(env: Env, place: Place) {
+    const wasOutdoor = this.place === 'outdoor';
     this.env = env;
     this.place = place;
-    this.scene.backgroundRotation.set(0, 0, 0);
-    this.scene.environmentRotation.set(0, 0, 0);
-    this.scene.backgroundIntensity = 1;
     if (place === 'outdoor') {
-      this.applyOutdoor();
+      this.lampGroup.visible = true;
+      this.hemi.intensity = 0;
+      this.ambient.intensity = 0;
+      this.camera.far = 900;
+      this.camera.updateProjectionMatrix();
+      this.csm?.updateFrustums();
+      this.sunOn = true;
+      if (!wasOutdoor) this.retarget(true);
       return;
     }
-    this.disposeCsm();
+    this.loadToken++;
     this.lampGroup.visible = false;
     this.sky.visible = false;
+    this.dome.visible = false;
     this.setNight(0, 0, 0);
     this.applyBasic(env);
     if (place !== 'studio') this.loadIndoor(place);
@@ -565,33 +769,37 @@ export class Lighting {
   /** call once per frame before rendering, with the point the player/orbit camera is at */
   update(dt: number, focus: THREE.Vector3) {
     if (this.place === 'outdoor') {
+      if (this.t < 1) {
+        this.t = this.dur > 0 ? Math.min(1, this.t + dt / this.dur) : 1;
+        this.applyCurrent();
+      }
       this.scanT -= dt;
       if (this.scanT <= 0) {
         this.scanT = 0.5;
         this.scanMarkers();
-      }
-      if (this.csm) {
-        // ?shadows=0 / ?fast=1: no CSM shader patch (a much smaller program per material); one plain sun light
-        if (FLAGS.shadows) this.setupCsmMaterials();
-        this.camera.updateMatrixWorld();
-        this.csm.update();
-        // the near cascade re-renders every frame; the wider ones every 2nd / 3rd frame, staggered.
-        // A skipped cascade keeps its previous map and matching shadow matrix, so it stays consistent.
-        this.frame++;
-        this.csm.lights.forEach((l, i) => {
-          l.shadow.autoUpdate = false;
-          if (i === 0 || this.frame % (i + 1) === i % (i + 1) || this.frame < 4) l.shadow.needsUpdate = true;
-        });
       }
       this.lampT -= dt;
       if (this.lampT <= 0 && night > 0.05) {
         this.lampT = 0.2;
         this.placeLamps(focus);
       }
-    } else if (this.sun.visible) {
-      this.sun.position.copy(focus).addScaledVector(this.sunDir, 150);
-      this.sun.target.position.copy(focus);
     }
+    if (this.csm) {
+      // ?shadows=0 / ?fast=1: no CSM shader patch (a much smaller program per material); one plain sun light
+      this.setupCsmMaterials(FLAGS.shadows);
+      this.frame++;
+      if (this.sunOn) {
+        this.camera.updateMatrixWorld();
+        this.csm.update();
+        // the near cascade re-renders every frame; the wider ones every 2nd / 3rd frame, staggered.
+        // A skipped cascade keeps its previous map and matching shadow matrix, so it stays consistent.
+        this.csm.lights.forEach((l, i) => {
+          l.shadow.autoUpdate = false;
+          if (i === 0 || this.frame % (i + 1) === i % (i + 1) || this.frame < 4) l.shadow.needsUpdate = true;
+        });
+      } else for (const l of this.csm.lights) l.shadow.autoUpdate = false;
+    }
+    this.padLights();
     this.boostEmissives(dt);
   }
 
@@ -600,27 +808,79 @@ export class Lighting {
     if (this.csm) this.csm.updateFrustums();
   }
 
+  // ------------------------------------------------------------ fixed light budget
+
+  private kindOf(l: THREE.Light): LightKind | null {
+    if ((l as THREE.PointLight).isPointLight) return l.castShadow ? 'pointShadow' : 'point';
+    if ((l as THREE.SpotLight).isSpotLight) return l.castShadow ? 'spotShadow' : 'spot';
+    return null;
+  }
+
+  private countLights() {
+    const n: Record<LightKind, number> = { point: 0, spot: 0, pointShadow: 0, spotShadow: 0 };
+    this.scene.traverseVisible((o) => {
+      if (!(o as THREE.Light).isLight || o.parent === this.padGroup) return;
+      const k = this.kindOf(o as THREE.Light);
+      if (k) n[k]++;
+    });
+    return n;
+  }
+
+  /** top every kind of light up to LIGHT_BUDGET with dark padding lights (counts from this frame's scan) */
+  private padLights() {
+    const n = this.lightCount;
+    for (const k of Object.keys(LIGHT_BUDGET) as LightKind[]) {
+      const need = LIGHT_BUDGET[k] - n[k];
+      if (need < 0 && !this.warned.has(k + n[k])) {
+        this.warned.add(k + n[k]);
+        console.warn(`lighting: ${n[k]} ${k} lights in the scene, budget ${LIGHT_BUDGET[k]} (shaders will recompile)`);
+      }
+      const pads = this.pads[k];
+      while (pads.length < need) {
+        const l = k.startsWith('point') ? new THREE.PointLight('#000000', 0, 0.01) : new THREE.SpotLight('#000000', 0, 0.01);
+        l.position.set(0, -1e4, 0);
+        if (k.endsWith('Shadow')) {
+          l.castShadow = true;
+          l.shadow.autoUpdate = false;
+          l.shadow.needsUpdate = false;
+          l.shadow.mapSize.set(16, 16);
+        }
+        l.name = `pad-${k}`;
+        pads.push(l);
+        this.padGroup.add(l);
+      }
+      pads.forEach((l, i) => (l.visible = i < need));
+    }
+  }
+
   // ------------------------------------------------------------ non-outdoor (studio / indoor)
 
   private applyBasic(env: Env) {
     this.scene.environment = this.roomEnv;
+    this.envKey = 'room';
+    this.scene.environmentIntensity = env.envIntensity;
     this.scene.background = skyTex(env.skyTop, env.skyBottom, env.stars, hashStr(env.skyTop));
-    this.scene.fog = env.fog ? new THREE.Fog(env.fog, env.fogNear, env.fogFar) : null;
+    this.scene.backgroundIntensity = 1;
+    // always exponential fog (density 0 = none) so materials keep one variant everywhere
+    const fog = this.fog();
+    if (env.fog) {
+      fog.color.set(env.fog);
+      fog.density = Math.sqrt(3) / Math.max(1, env.fogFar);
+    } else fog.density = 0;
     this.hemi.color.set(env.hemi.sky);
     this.hemi.groundColor.set(env.hemi.ground);
     this.hemi.intensity = env.hemi.intensity;
     this.ambient.intensity = env.ambient;
-    this.scene.environmentIntensity = env.envIntensity;
     this.renderer.toneMappingExposure = env.exposure;
+    this.sunOn = !!env.sun;
     if (env.sun) {
-      this.sun.visible = true;
-      this.sun.color.set(env.sun.color);
-      this.sun.intensity = env.sun.intensity;
       const el = THREE.MathUtils.degToRad(env.sun.elev), az = THREE.MathUtils.degToRad(env.sun.azim);
       this.sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
-    } else this.sun.visible = false;
+      this.setSun(env.sun.color, env.sun.intensity);
+    } else this.setSun('#000000', 0);
     this.camera.far = env.fog ? env.fogFar + 60 : 220;
     this.camera.updateProjectionMatrix();
+    this.csm?.updateFrustums();
     this.setBloom({ strength: 0.28, radius: 0.5, threshold: 2.2 });
     this.setGrade({ gain: '#ffffff', lift: '#000000', sat: 1.02, contrast: 1.03, vignette: 0.22 });
   }
@@ -628,108 +888,146 @@ export class Lighting {
   private async loadIndoor(place: Exclude<Place, 'outdoor' | 'studio'>) {
     const spec = INDOOR_HDRI[place];
     const token = ++this.loadToken;
-    const pr = this.hdri(spec.hdri, '1k', 1e9);
+    const pr = this.hdri(spec.hdri, '1k', 1e9, 1, null);
     this.ready = pr;
     const h = await pr;
     if (!h || token !== this.loadToken || !this.env) return;
     if (!(h.mean > 1e-5 && Number.isFinite(h.mean))) return;
     this.scene.environment = h.env;
+    this.envKey = spec.hdri;
     // normalise: the HDRI's mean radiance becomes spec.mean, scaled by the level's own envIntensity
     this.scene.environmentIntensity = (spec.mean / Math.max(1e-5, h.mean)) * this.env.envIntensity;
   }
 
-  // ------------------------------------------------------------ outdoor
+  // ------------------------------------------------------------ outdoor: time of day
 
-  private applyOutdoor() {
-    const p = PRESETS[tod];
-    this.sun.visible = false;
-    this.hemi.color.set(p.bounce.sky);
-    this.hemi.groundColor.set(p.bounce.ground);
-    this.hemi.intensity = p.bounce.intensity;
-    this.ambient.intensity = 0;
-    if (!this.csm) this.makeCsm();
-    this.lampGroup.visible = true;
-    this.setNight(p.night, p.lit, p.wet);
-    this.renderer.toneMappingExposure = p.exposure;
-    this.camera.far = 900;
-    this.camera.updateProjectionMatrix();
-    this.csm?.updateFrustums();
-    this.setBloom(p.bloom);
-    this.setGrade(p.grade);
-    // until the HDRI arrives: the physical sky
-    if (!this.hdriKey.startsWith(p.hdri)) {
-      this.setSunDir(p.sunAz, p.sunElev);
-      this.physicalSky();
-      this.scene.fog = new THREE.FogExp2(new THREE.Color(p.fogTint ?? '#aab6c2'), p.fog);
-      this.base.fog = p.fog;
-      this.base.fogColor.copy((this.scene.fog as THREE.FogExp2).color);
-    }
-    this.setSunLight(p);
-    this.applyWeather();
-    this.loadOutdoor();
+  private res() {
+    return this.quality === 'low' ? '1k' : '2k';
   }
 
-  private physicalSky() {
+  /** (re)aim at the current time of day: load its HDRI, then blend to it */
+  private retarget(instant: boolean) {
     const p = PRESETS[tod];
-    const d = this.sunDir.clone();
-    if (p.align === false) d.y = Math.max(d.y, 0.02);
+    const token = ++this.loadToken;
+    this.status = `loading ${p.hdri}`;
+    const pr = this.source(p);
+    this.ready = pr;
+    // overcast sky (weather), loaded on demand
+    if (weather.overcast > 0 && !this.srcC) this.source(OVERCAST).then((s) => (this.srcC = s));
+    pr.then((src) => {
+      if (token !== this.loadToken || this.place !== 'outdoor') return;
+      this.status = src ? '' : NO_HDRI ? 'no HDRI (notex)' : `HDRI unavailable: ${p.hdri}`;
+      // freeze wherever we are now as the start of the blend
+      this.from = this.cur;
+      this.sunFrom.copy(this.sunDir);
+      this.srcA = this.t < 0.5 && this.srcA ? this.srcA : this.srcB;
+      this.srcB = src;
+      if (!src || !this.srcA || instant) this.srcA = null;
+      this.to = p;
+      if (src) this.sunTo.copy(src.sun);
+      else this.sunTo.copy(dirOf(p.sunAz, p.sunElev));
+      this.t = instant ? 1 : 0;
+      this.dur = instant ? 0 : TRANSITION_S;
+      if (!src) this.physicalSky(this.sunTo);
+      this.applyCurrent();
+    });
+  }
+
+  /** load (cached) the HDRI for a preset and work out its scale and sun */
+  private async source(p: Preset): Promise<Src | null> {
+    const h = await this.hdri(p.hdri, this.res(), p.clampMul, p.envSat, p.align ? p.sunAz : null);
+    if (!h || !(h.skyMean > 1e-5 && Number.isFinite(h.skyMean))) return null;
+    const sun = p.align && h.sun ? dirOf(p.sunAz, Math.max(4, THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(h.sun.y, -1, 1))))) : dirOf(p.sunAz, p.sunElev);
+    return { name: p.hdri, h, scale: p.sky / h.skyMean, sun };
+  }
+
+  /** apply the blended preset, sky and environment for the current transition state */
+  private applyCurrent() {
+    const e = smooth(this.t);
+    const daylight = 1 - THREE.MathUtils.clamp(blendPreset(this.from.night, this.to.night, e) * 1.4, 0, 1);
+    const o = this.srcC || NO_HDRI ? THREE.MathUtils.clamp(weather.overcast, 0, 1) * daylight : 0;
+    if (weather.overcast > 0 && !this.srcC && !NO_HDRI) this.source(OVERCAST).then((s) => { this.srcC = s; this.applyCurrent(); });
+    let p = blendPreset(this.from, this.to, e);
+    if (o > 0) p = blendPreset(p, { ...OVERCAST, night: p.night, lit: p.lit, wet: p.wet, exposure: blendPreset(p.exposure, OVERCAST.exposure, 0.7) }, o);
+    this.cur = p;
+    const w = weather;
+    // sun
+    this.sunDir.copy(this.sunFrom).lerp(this.sunTo, e).normalize();
+    this.setSun(p.sunColor, p.sunIntensity * w.sunMul);
+    this.renderer.toneMappingExposure = p.exposure;
+    this.hemi.color.set(p.bounce.sky);
+    this.hemi.groundColor.set(p.bounce.ground);
+    // bounce comes from sunlit walls: it fades with the sun under cloud, but sky light still bounces a little
+    this.hemi.intensity = p.bounce.intensity * (0.35 + 0.65 * w.sunMul) * Math.min(1, w.skyMul);
+    this.setBloom(p.bloom);
+    this.setGrade(p.grade);
+    this.setNight(p.night, p.lit, Math.max(p.wet, w.wet));
+    // sky + image-based light: crossfade srcA -> srcB, overcast srcC on top
+    const A = this.srcA, B = this.srcB, C = o > 0 ? this.srcC : null;
+    const wa = A ? (1 - e) * (1 - o) : 0, wb = B ? (A ? e : 1) * (1 - o) : 0, wc = C ? o : 0;
+    const fog = this.fog();
+    if (B || C) {
+      this.sky.visible = false;
+      this.dome.visible = true;
+      this.scene.background = null;
+      const du = this.dome.material.uniforms, eu = this.blendQuad.material.uniforms;
+      du.tA.value = A?.h.tex ?? null; du.tB.value = B?.h.tex ?? null; du.tC.value = C?.h.tex ?? null;
+      du.wA.value = wa * (A?.scale ?? 0) * w.skyMul; du.wB.value = wb * (B?.scale ?? 0) * w.skyMul; du.wC.value = wc * (C?.scale ?? 0) * w.skyMul;
+      eu.eA.value = A?.h.env ?? null; eu.eB.value = B?.h.env ?? null; eu.eC.value = C?.h.env ?? null;
+      eu.wA.value = wa * (A?.scale ?? 0); eu.wB.value = wb * (B?.scale ?? 0); eu.wC.value = wc * (C?.scale ?? 0);
+      const key = `${A?.name}:${eu.wA.value.toFixed(4)}|${B?.name}:${eu.wB.value.toFixed(4)}|${C?.name}:${eu.wC.value.toFixed(4)}`;
+      if (key !== this.envKey) {
+        this.envKey = key;
+        const prev = this.renderer.getRenderTarget();
+        const xr = this.renderer.xr.enabled;
+        this.renderer.xr.enabled = false;
+        this.renderer.setRenderTarget(this.envRT);
+        this.renderer.render(this.blendQuad, this.blendCam);
+        this.renderer.setRenderTarget(prev);
+        this.renderer.xr.enabled = xr;
+      }
+      this.scene.environment = this.envRT.texture;
+      this.scene.environmentIntensity = w.skyMul;
+      // atmospheric perspective: fog takes the colour of the HDRIs' own horizon
+      const fc = new THREE.Color(0, 0, 0);
+      for (const [s, wt] of [[A, wa], [B, wb], [C, wc]] as const) if (s && wt > 0) fc.add(s.h.horizon.clone().multiplyScalar(s.scale * wt));
+      fc.lerp(new THREE.Color(p.fogTint).multiplyScalar(p.sky * 1.2), p.fogTintMix);
+      fog.color.copy(fc).multiplyScalar(w.skyMul);
+    } else {
+      // physical sky fallback (no HDRI): already baked by physicalSky()
+      this.dome.visible = false;
+      this.scene.environmentIntensity = 0.55 * (1 - p.night * 0.95) * w.skyMul;
+      fog.color.set(p.fogTint).multiplyScalar(w.skyMul * (1 - 0.9 * p.night));
+    }
+    fog.density = p.fog * w.fogMul;
+    if (w.fogColor && w.fogMix > 0) fog.color.lerp(new THREE.Color(w.fogColor), w.fogMix);
+  }
+
+  private physicalSky(dir: THREE.Vector3) {
+    const d = dir.clone();
+    d.y = Math.max(d.y, 0.02);
     this.sky.material.uniforms.sunPosition.value.copy(d);
     this.skyForEnv.material.uniforms.sunPosition.value.copy(d);
     this.skyEnv?.dispose();
     this.skyEnv = this.pmrem.fromScene(this.skyScene as unknown as THREE.Scene, 0, 1, 2000);
     this.scene.environment = this.skyEnv.texture;
-    this.scene.environmentIntensity = 0.55 * (1 - night * 0.95);
-    this.base.env = this.scene.environmentIntensity;
-    this.base.bg = 1;
+    this.envKey = 'physical';
     this.scene.background = null;
+    this.dome.visible = false;
     this.sky.visible = true;
     this.sky.scale.setScalar(this.camera.far * 0.9);
   }
 
-  private async loadOutdoor() {
-    const p = PRESETS[tod];
-    const res = this.quality === 'low' ? '1k' : '2k';
-    const key = `${p.hdri}@${res}`;
-    const token = ++this.loadToken;
-    this.status = `loading ${p.hdri}`;
-    const pr = this.hdri(p.hdri, res, p.clampMul, p.envSat);
-    this.ready = pr;
-    const h = await pr;
-    if (!h || token !== this.loadToken || this.place !== 'outdoor') return;
-    // a black or broken image would blow the normalisation up: keep the physical sky instead
-    if (!(h.skyMean > 1e-5 && Number.isFinite(h.skyMean))) {
-      this.status = `bad HDRI ${p.hdri}`;
-      return;
+  private fog() {
+    let f = this.scene.fog as THREE.FogExp2 | null;
+    if (!f || !(f as THREE.FogExp2).isFogExp2) {
+      f = new THREE.FogExp2('#000000', 0);
+      this.scene.fog = f;
     }
-    this.status = '';
-    this.hdriKey = key;
-    const scale = p.sky / Math.max(1e-6, h.skyMean);
-    // rotate the HDRI so its sun sits where the light comes from (keeps the street grid's shadows)
-    let rot = 0;
-    if (p.align && h.sun) {
-      const want = THREE.MathUtils.degToRad(p.sunAz);
-      const have = Math.atan2(h.sun.x, h.sun.z);
-      rot = want - have;
-      const el = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(h.sun.y, -1, 1)));
-      this.setSunDir(p.sunAz, Math.max(4, el));
-    } else this.setSunDir(p.sunAz, p.sunElev);
-    this.setSunLight(p);
-    this.scene.environmentRotation.set(0, rot, 0);
-    this.scene.backgroundRotation.set(0, rot, 0);
-    this.scene.environment = h.env;
-    this.scene.environmentIntensity = scale;
-    this.scene.background = h.tex;
-    this.scene.backgroundIntensity = scale;
-    this.sky.visible = false;
-    // atmospheric perspective: fog takes the colour of the HDRI's own horizon
-    const fc = h.horizon.clone().multiplyScalar(scale);
-    if (p.fogTint) fc.lerp(new THREE.Color(p.fogTint).multiplyScalar(p.sky * 1.2), 0.8);
-    this.scene.fog = new THREE.FogExp2(fc, p.fog);
-    this.base = { env: scale, bg: scale, fog: p.fog, fogColor: fc.clone() };
-    this.applyWeather();
+    return f;
   }
 
-  private hdri(name: string, res: string, clampMul: number, sat = 1): Promise<Hdri | null> {
+  private hdri(name: string, res: string, clampMul: number, sat: number, alignAz: number | null): Promise<Hdri | null> {
     if (NO_HDRI) return Promise.resolve(null);
     const key = `${name}@${res}`;
     let pr = hdriCache.get(key);
@@ -740,9 +1038,17 @@ export class Lighting {
         .loadAsync(url)
         .then((tex) => {
           const a = analyse(tex, clampMul, sat);
+          // bake the rotation that puts the HDRI's sun at the light's azimuth into the pixels
+          if (alignAz !== null && a.sun) {
+            const alpha = THREE.MathUtils.degToRad(alignAz) - Math.atan2(a.sun.x, a.sun.z);
+            rotateEquirect(tex, alpha);
+            a.sun.applyAxisAngle(new THREE.Vector3(0, 1, 0), alpha);
+          }
           tex.mapping = THREE.EquirectangularReflectionMapping;
           tex.colorSpace = THREE.LinearSRGBColorSpace;
-          const env = this.pmrem.fromEquirectangular(tex).texture;
+          const small = downsampleEquirect(tex, ENV_SIZE * 4);
+          const env = this.pmrem.fromEquirectangular(small).texture;
+          if (small !== tex) small.dispose();
           return { tex, env, ...a };
         })
         .catch((e) => {
@@ -754,17 +1060,12 @@ export class Lighting {
     return pr;
   }
 
-  private setSunDir(azDeg: number, elDeg: number) {
-    const el = THREE.MathUtils.degToRad(elDeg), az = THREE.MathUtils.degToRad(azDeg);
-    this.sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
-  }
-
-  private setSunLight(p: Preset) {
+  private setSun(color: string, intensity: number) {
     if (!this.csm) return;
     this.csm.lightDirection.copy(this.sunDir).negate();
     for (const l of this.csm.lights) {
-      l.color.set(p.sunColor);
-      l.intensity = p.sunIntensity;
+      l.color.set(color);
+      l.intensity = intensity;
     }
   }
 
@@ -773,10 +1074,13 @@ export class Lighting {
     U.night.value = n;
     U.lit.value = lit;
     U.wet.value = wet;
-    for (const l of this.lamps) l.intensity = 0;
+    if (n <= 0.05) for (const l of this.lamps) l.intensity = 0;
     (this.pools.material as THREE.MeshBasicMaterial).opacity = 0.7 * n;
     this.pools.visible = n > 0.05;
-    for (const fn of listeners) fn(tod, n);
+    if (Math.abs(n - this.lastNight) > 0.002 || (n !== this.lastNight && (n === 0 || n === 1))) {
+      this.lastNight = n;
+      for (const fn of listeners) fn(tod, n);
+    }
   }
 
   private setBloom(b: { strength: number; radius: number; threshold: number }) {
@@ -813,15 +1117,17 @@ export class Lighting {
       lightMargin: 300,
     });
     csm.fade = q !== 'low';
+    fixCsmChunk();
     csm.lights.forEach((l, i) => {
       l.shadow.bias = -0.00025 * (i + 1);
       l.shadow.normalBias = [0.02, 0.06, 0.15][i] ?? 0.15;
       l.shadow.radius = 2;
+      l.intensity = 0;
     });
     if (!FLAGS.shadows) csm.lights.forEach((l, i) => (l.visible = i === 0));
     this.csm = csm;
     this.csmMats.clear();
-    this.setSunLight(PRESETS[tod]);
+    if (this.place === 'outdoor') this.applyCurrent();
   }
 
   private disposeCsm() {
@@ -844,7 +1150,7 @@ export class Lighting {
   }
 
   /** every lit material must know about the cascades (else each cascade light would light it fully) */
-  private setupCsmMaterials() {
+  private setupCsmMaterials(wrap = true) {
     const csm = this.csm!;
     const u = this.csmUniforms;
     csm.getExtendedBreaks(u.breaks.value);
@@ -852,9 +1158,18 @@ export class Lighting {
     u.far.value = Math.min(this.camera.far, csm.maxFar);
     const fade = csm.fade;
     // only what will be drawn this frame needs it (hidden things are wrapped when they show up)
+    const n = this.lightCount;
+    n.point = n.spot = n.pointShadow = n.spotShadow = 0;
     this.scene.traverseVisible((o) => {
+      if ((o as THREE.Light).isLight) {
+        if (o.parent !== this.padGroup) {
+          const k = this.kindOf(o as THREE.Light);
+          if (k) n[k]++;
+        }
+        return;
+      }
       const mats = (o as THREE.Mesh).material;
-      if (!mats) return;
+      if (!mats || !wrap) return;
       for (const m of Array.isArray(mats) ? mats : [mats]) {
         if (!(m as THREE.MeshStandardMaterial).isMeshStandardMaterial && !(m as THREE.MeshLambertMaterial).isMeshLambertMaterial && !(m as THREE.MeshPhongMaterial).isMeshPhongMaterial) continue;
         if (m.userData.csmHook && m.onBeforeCompile === m.userData.csmHook && m.defines?.CSM_CASCADES === csm.cascades) continue;

@@ -28,8 +28,7 @@ const scene: LabScene = {
       const s = new THREE.SpotLight('#fff1dc', 40, 12, 0.5, 0.6, 1.5);
       s.position.set(i * 3, H - 0.1, 1);
       s.target.position.set(i * 3, 0.8, -1.5);
-      s.castShadow = true;
-      s.shadow.mapSize.setScalar(1024);
+      // no shadows: the museum rig's spots don't cast them either (lighting.ts LIGHT_BUDGET)
       group.add(s, s.target);
     }
     // material probes on plinths: chrome, brushed, gold, glossy red, satin red, matte white
