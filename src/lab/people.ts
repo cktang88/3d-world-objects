@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
-import { Person, Pedestrians, loadPeopleAssets, type Activity } from '../nyc/people';
+import { Person, Pedestrians, loadPeopleAssets, peopleWeather, type Activity } from '../nyc/people';
 import { Rng } from '../rng';
 import { AX, AVE, SW, CURB, SZ, ST } from '../nyc/common';
 import type { Rect } from '../level';
@@ -97,6 +97,7 @@ const scene: LabScene = {
       p.root.position.set((i - (n - 1) / 2) * 0.9, 0, 0);
       p.root.rotation.y = face === 'back' ? Math.PI : face === 'side' ? Math.PI / 2 : 0;
       p.setActivity(act, i * 0.37);
+      p.applyWeather(peopleWeather);
       p.setShadows(true);
       if (params.get('lod')) p.setLod(Number(params.get('lod')));
       group.add(p.root);

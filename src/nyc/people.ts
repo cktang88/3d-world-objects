@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
 import { FarCrowd } from './peopleFar';
-import { Dog, coffeeGeo, handBagGeo, propVcMat, strollerGeo } from './peopleProps';
+import { Dog, coffeeGeo, handBagGeo, propVcMat, strollerGeo, umbrellaGeo } from './peopleProps';
 import { Rng, hashN } from '../rng';
 import { CURB, AX, SZ, AVE, ST, SW, CYCLE, lightFor } from './common';
 import { walkable } from './districts'; // [districts]
@@ -64,6 +64,26 @@ let season: Season = (() => {
     return 'cold';
   }
 })();
+/** Rain / snow as the pedestrians see it (0..1 each). src/weather.ts (or anything else) calls
+ *  setPeopleWeather(); ?weather=rain|snow sets it for testing. */
+export interface PeopleWeather {
+  rain: number;
+  snow: number;
+}
+export const peopleWeather: PeopleWeather = (() => {
+  try {
+    const w = new URLSearchParams(location.search).get('weather');
+    return { rain: w === 'rain' ? 1 : 0, snow: w === 'snow' ? 1 : 0 };
+  } catch {
+    return { rain: 0, snow: 0 };
+  }
+})();
+let weatherVersion = 0;
+export function setPeopleWeather(w: Partial<PeopleWeather>) {
+  if ((w.rain ?? peopleWeather.rain) === peopleWeather.rain && (w.snow ?? peopleWeather.snow) === peopleWeather.snow) return;
+  Object.assign(peopleWeather, w);
+  weatherVersion++;
+}
 export function setPeopleSeason(s: Season) {
   season = s;
 }
@@ -336,6 +356,9 @@ const propGeo = {
   beanie: new THREE.SphereGeometry(0.112, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
   cuff: new THREE.CylinderGeometry(0.106, 0.11, 0.05, 20, 1, true),
   hood: new THREE.SphereGeometry(0.13, 18, 10, Math.PI, Math.PI, 0, Math.PI * 0.62),
+  // a raised hood: a shell over the head, open at the face (+z)
+  hoodUp: new THREE.SphereGeometry(0.13, 18, 10, Math.PI / 2 + 0.55, Math.PI * 2 - 1.1, 0, Math.PI * 0.62),
+  scarf: new THREE.TorusGeometry(0.075, 0.032, 8, 18).rotateX(Math.PI / 2),
 };
 /** a sneaker / boot: low toe box, higher heel collar, separate sole; colours baked into vertex
  *  colours so one shoe is one draw call. Built around the origin, toe toward +z. */
@@ -367,6 +390,17 @@ function shoeGeo(upper: string, sole: string, len: number, boot: boolean) {
   g = mergeGeometries([paint(up.toNonIndexed(), upper), paint(so.toNonIndexed(), sole)])!;
   shoeGeos.set(k, g);
   return g;
+}
+const UMBRELLA = ['#111113', '#111113', '#111113', '#16161a', '#1c2638', '#5a1a1c', '#1f3d5a', '#2f3a2a', '#c8282e', '#e8d23a', '#3a3a3e'];
+const SNOWHAT = ['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a', '#b03a3a'];
+const SCARF = ['#7a1d1d', '#2a2c30', '#c8b48c', '#1f3d5a', '#3b4232', '#8a8a86', '#b8282e', '#e0d8c8'];
+const umbrellaMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, side: THREE.DoubleSide });
+const clothMats2 = new Map<string, THREE.MeshStandardMaterial>();
+function clothMatFor(c: THREE.Color) {
+  const k = c.getHexString();
+  let m = clothMats2.get(k);
+  if (!m) clothMats2.set(k, (m = new THREE.MeshStandardMaterial({ color: c.clone(), roughness: 0.85, side: THREE.DoubleSide })));
+  return m;
 }
 const leashMat = new THREE.LineBasicMaterial({ color: '#1a1a1a' });
 
@@ -578,9 +612,13 @@ export class Person {
       return obj;
     };
     const hat = r.chance(season === 'mild' ? 0.04 : 0.22);
+    this.hasHat = hat;
+    this.weatherRoll = r.next();
+    this.bindInvOf = (bone) => A.bindInv.get(bone)!;
     if (style && !hat) {
       const h = assets.hair.get(style);
-      if (h) attach('Head', new THREE.Mesh(h.geo, hm), h.matrix);
+      if (h) this.hairMesh = attach('Head', new THREE.Mesh(h.geo, hm), h.matrix) as THREE.Mesh;
+      this.longHair = style === 'Hair_Long';
     }
     if (gender === 'male' && r.chance(0.25)) {
       const h = assets.hair.get('Hair_Beard');
@@ -814,6 +852,69 @@ export class Person {
   frozen = false;
   /** skeleton updates performed (all people), for perf readouts */
   static skeletonUpdates = 0;
+  hasHat = false;
+  longHair = false;
+  hairMesh: THREE.Mesh | null = null;
+  /** fixed per person: decides umbrella / hood / hat / scarf in bad weather */
+  weatherRoll = 0;
+  umbrella: THREE.Object3D | null = null;
+  umbrellaOn = false;
+  private weatherProps: { hoodUp?: THREE.Object3D; beanie?: THREE.Object3D; scarf?: THREE.Object3D } = {};
+  private bindInvOf: (bone: string) => THREE.Matrix4 = () => new THREE.Matrix4();
+  /** walking speed multiplier from the weather (rain: hurry, snow: careful) */
+  weatherSpeed = 1;
+  /** dress for the weather: umbrellas and raised hoods in rain, hats and scarves in snow */
+  applyWeather(w: PeopleWeather) {
+    const rain = w.rain > 0.25, snow = w.snow > 0.25;
+    const b = BODY[this.gender];
+    const at = (x: number, y: number, z: number, rx = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, 0, 0)), new THREE.Vector3(1, 1, 1));
+    const put = (bone: string, obj: THREE.Mesh, m: THREE.Matrix4) => {
+      obj.matrixAutoUpdate = false;
+      obj.matrix.multiplyMatrices(this.bindInvOf(bone), m);
+      this.bones.get(bone)!.add(obj);
+      this.meshes.push(obj);
+      obj.castShadow = !!this.shadowOn;
+      return obj;
+    };
+    const headTop = this.gender === 'male' ? 1.712 : 1.655;
+    // umbrella: 65 % of people with a free right hand
+    const wantUmbrella = rain && this.weatherRoll < 0.65 && !this.noPhone;
+    if (wantUmbrella && !this.umbrella) {
+      const holder = new THREE.Object3D();
+      new THREE.Matrix4().multiplyMatrices(this.bindInvOf('hand_r'), at(-b.wristX - 0.07, b.armY - 0.02, b.armZ + 0.02)).decompose(holder.position, holder.quaternion, holder.scale);
+      this.bones.get('hand_r')!.add(holder);
+      const u = new THREE.Mesh(umbrellaGeo(UMBRELLA[Math.floor(this.weatherRoll * 97) % UMBRELLA.length]), umbrellaMat);
+      u.castShadow = true;
+      holder.add(u);
+      this.meshes.push(u);
+      this.umbrella = holder;
+    }
+    this.umbrellaOn = wantUmbrella;
+    if (this.umbrella) this.umbrella.visible = wantUmbrella;
+    // hood up when it rains or snows and there is no umbrella
+    const hoodUp = (rain || snow) && this.hood && !wantUmbrella;
+    if (hoodUp && !this.weatherProps.hoodUp) {
+      const m = new THREE.Mesh(propGeo.hoodUp, clothMatFor(this.far.top));
+      this.weatherProps.hoodUp = put('Head', m, at(0, headTop - 0.07, -0.02).multiply(new THREE.Matrix4().makeScale(1.05, 1.12, 1.12)));
+    }
+    if (this.weatherProps.hoodUp) this.weatherProps.hoodUp.visible = hoodUp;
+    // snow: beanies on most bare heads, scarves
+    const beanie = snow && !this.hasHat && !hoodUp && this.weatherRoll > 0.25;
+    if (beanie && !this.weatherProps.beanie) {
+      const col = SNOWHAT[Math.floor(this.weatherRoll * 131) % SNOWHAT.length];
+      const m = new THREE.Mesh(propGeo.beanie, propMat(col, 0.95));
+      this.weatherProps.beanie = put('Head', m, at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)));
+    }
+    if (this.weatherProps.beanie) this.weatherProps.beanie.visible = beanie;
+    if (this.hairMesh && !this.longHair) this.hairMesh.visible = !beanie && !hoodUp;
+    const scarf = snow && this.weatherRoll > 0.4;
+    if (scarf && !this.weatherProps.scarf) {
+      const col = SCARF[Math.floor(this.weatherRoll * 173) % SCARF.length];
+      this.weatherProps.scarf = put('neck_01', new THREE.Mesh(propGeo.scarf, propMat(col, 0.95)), at(0, b.neck - 0.02, -0.02).multiply(new THREE.Matrix4().makeScale(1, 1, 1.05)));
+    }
+    if (this.weatherProps.scarf) this.weatherProps.scarf.visible = scarf;
+    this.weatherSpeed = rain ? 1.12 : snow ? 0.88 : 1;
+  }
   /** pushes a stroller or walks a dog: never stops to look at a phone */
   noPhone = false;
   dog: Dog | null = null;
@@ -843,7 +944,7 @@ export class Person {
   private model() {
     return this.root.children[0];
   }
-  private shadowOn: boolean | null = null;
+  shadowOn: boolean | null = null;
   setShadows(on: boolean) {
     if (on === this.shadowOn) return;
     this.shadowOn = on;
@@ -853,7 +954,7 @@ export class Person {
     this.mixer.update(dt);
     this.dog?.update(dt, this.speed);
     const phone = this.activity === 'phone';
-    if (!phone && !this.slow && !this.pose) return;
+    if (!phone && !this.slow && !this.pose && !this.umbrellaOn) return;
     this.model().updateMatrixWorld(true);
     this.rq.copy(this.model().getWorldQuaternion(_q0));
     if (this.slow) {
@@ -863,6 +964,12 @@ export class Person {
     }
     if (phone) this.phonePose();
     this.pose?.(this);
+    if (this.umbrellaOn && !phone) {
+      // umbrella held up in the right hand, a little ahead of the head
+      this.aim('upperarm_r', 'lowerarm_r', _v3.set(-0.05, -0.55, 0.5));
+      this.aim('lowerarm_r', 'hand_r', _v3.set(0.25, 0.95, 0.05));
+      this.upright(this.umbrella!);
+    }
   }
   twoHands = false;
   walkClip = 'Walk_Loop';
@@ -1092,7 +1199,7 @@ export class Pedestrians {
     for (let i = 0; i < 6 && this.blocked(pd, pd.t, pd.line); i++) pd.line = this.clampLine(pd, pd.line + r.range(-1.2, 1.2));
     pd.state = 'walk';
     pd.wait = 0;
-    if (ahead && r.chance(0.12) && !pd.p.slow) {
+    if (ahead && r.chance(peopleWeather.rain > 0.25 ? 0.03 : 0.12) && !pd.p.slow) {
       // loiterers: on the phone or chatting near the shopfronts
       pd.state = 'stand';
       pd.wait = r.range(8, 40) + (pd.buddy ? 20 : 0);
@@ -1111,9 +1218,14 @@ export class Pedestrians {
     this.frame++;
     this.clock = time ?? this.clock + dt;
     if (colliders) this.grid.set(colliders);
+    if (this.weatherSeen !== weatherVersion) {
+      this.weatherSeen = weatherVersion;
+      for (const pd of this.peds) pd.p.applyWeather(peopleWeather);
+    }
     // spawn a few per frame so building the skinned clones does not hitch one frame
     for (let n = 0; n < 8 && this.peds.length < COUNT; n++) {
       const person = new Person(this.assets, this.rng);
+      person.applyWeather(peopleWeather);
       this.group.add(person.root);
       const pd: Ped = { p: person, axis: 'x', dir: 1, c: 0, s: 1, line: 0, t: 0, v: 1.3, v0: 0, off: 0, state: 'walk', wait: 0, wd: 1, tick: this.peds.length, acc: 0, yaw: 0, dist: 0, pos: new THREE.Vector3(), rot: 0 };
       // about one in five people is out with a companion
@@ -1235,6 +1347,7 @@ export class Pedestrians {
   }
   private order: Ped[] = [];
   private farCrowd: FarCrowd | null = null;
+  private weatherSeen = 0;
   private bakeMs = 0;
   /** finish any pending far-crowd bake now (lab / loading screens) */
   warmUp() {
@@ -1283,7 +1396,7 @@ export class Pedestrians {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
     const u = pd.t / CP - 0.5;
     const inRoad = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) < ch;
-    let v = pd.v;
+    let v = pd.v * pd.p.weatherSpeed;
     let queue = false;
     if (!inRoad) {
       // the next kerb ahead, and the crossing signal

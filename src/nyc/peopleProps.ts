@@ -134,3 +134,17 @@ export class Dog {
     this.tail.rotation.z = Math.sin(this.ph * (speed > 0.05 ? 1 : 0) + performance.now() * 0.006) * 0.35;
   }
 }
+
+/** an open umbrella, grip at the origin: 8-panel canopy (r ≈ 0.5 m) about 0.6 m above the grip */
+export function umbrellaGeo(color: string) {
+  return cached(`umbrella|${color}`, () => {
+    const parts: THREE.BufferGeometry[] = [];
+    const canopy = new THREE.ConeGeometry(0.52, 0.24, 8, 1, true);
+    canopy.translate(0, 0.62, 0);
+    parts.push(paint(canopy, color));
+    parts.push(paint(xf(new THREE.CylinderGeometry(0.008, 0.008, 0.76, 6), 0, 0.38, 0), '#2a2a2a'));
+    parts.push(paint(xf(new THREE.TorusGeometry(0.03, 0.008, 4, 8, Math.PI), 0, -0.01, 0, 0, Math.PI / 2, Math.PI), '#1a1a1a'));
+    parts.push(paint(xf(new THREE.SphereGeometry(0.012, 6, 4), 0, 0.76, 0), '#3a3a3a'));
+    return mergeGeometries(parts)!;
+  });
+}
