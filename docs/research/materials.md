@@ -127,7 +127,10 @@ Filament's material guide (https://google.github.io/filament/Materials.html) —
 - **Bug found**: `scripts/rebuild.py` used `scene.unit_settings.scale_length` (always 1) as
   metres per Blender unit, but sand3d models in millimetres (`sand3d._core.MM`), so every rebuilt
   GLB had UVs 1000x too dense and the photo textures averaged to their mean colour (no grain).
-  Fixed in the script; existing GLBs are detected at load (UV span vs mesh size) and rescaled.
+  Fixed in the script, and all 1438 GLBs in public/rebuilt were rebuilt with metric UVs and the
+  AO bake (4 chunks of ~10 min, 2 workers at nice 19, 0 failures, total size unchanged at 36 MB;
+  `scripts/meshopt_dir.mjs` compresses in one process). The viewer still detects mm UVs (UV span
+  vs mesh size) and rescales, for any old GLB. `npm run qa -- materials` checks both.
 - Quantized (meshopt) GLBs put a node scale on every part: triplanar positions are multiplied by
   the model matrix's column lengths so texture density is metric.
 - **Vertex AO bake** (`rebuild.py --bake`): works and costs ~10 s/object on CPU, +10% GLB size.
