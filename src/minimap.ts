@@ -402,7 +402,7 @@ export class Minimap {
         g.beginPath();
         g.arc(sx, sy, (l.kind === 'door' ? 2 : 4) * k, 0, Math.PI * 2);
         g.fill();
-        if (l.kind === 'showcase' && ppm / k > 0.35) {
+        if (l.kind === 'showcase' && ppm / k > 1.1) { // names only when zoomed in: dots otherwise
           g.font = `500 ${Math.round(10 * k)}px system-ui, sans-serif`;
           g.fillStyle = '#ffe9a8';
           g.fillText(l.text, sx, sy - 10 * k);
