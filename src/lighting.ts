@@ -603,6 +603,15 @@ export const TRANSITION_S = typeof location !== 'undefined' && /[?&]todsec=([\d.
  */
 export const LIGHT_BUDGET = { point: 16, spot: 10, pointShadow: 1, spotShadow: 0 };
 type LightKind = keyof typeof LIGHT_BUDGET;
+/**
+ * [museum] places with their own, smaller budget, set once on entering (one recompile there, none
+ * between its rooms). The museum: museum/base.ts's rig (4 spots handed to the exhibits nearest the
+ * visitor, a fill point and a preview point) plus seamless.ts's 2 preview points and vertical.ts's
+ * lift light; no shadow lights,
+ * and the sun's cascades are out of the scene (no sun indoors): every lit pixel of its close, full-
+ * screen walls pays for 8 lights instead of 30 and samples no shadow maps.
+ */
+const PLACE_BUDGET: Partial<Record<Place, typeof LIGHT_BUDGET>> = { museum: { point: 5, spot: 4, pointShadow: 0, spotShadow: 0 } };
 
 interface Src {
   name: string;
@@ -875,6 +884,7 @@ export class Lighting {
     this.env = env;
     this.place = place;
     if (place === 'outdoor') {
+      this.cascadesShown();
       this.lampGroup.visible = true;
       this.hemi.intensity = 0;
       this.ambient.intensity = 0;
@@ -886,6 +896,7 @@ export class Lighting {
       return;
     }
     this.loadToken++;
+    this.cascadesShown();
     this.lampGroup.visible = false;
     this.sky.visible = false;
     this.dome.visible = false;
@@ -1008,11 +1019,12 @@ export class Lighting {
   /** top every kind of light up to LIGHT_BUDGET with dark padding lights (counts from this frame's scan) */
   private padLights() {
     const n = this.lightCount;
+    const budget = PLACE_BUDGET[this.place] ?? LIGHT_BUDGET;
     for (const k of Object.keys(LIGHT_BUDGET) as LightKind[]) {
-      const need = LIGHT_BUDGET[k] - n[k];
+      const need = budget[k] - n[k];
       if (need < 0 && !this.warned.has(k + n[k])) {
         this.warned.add(k + n[k]);
-        console.warn(`lighting: ${n[k]} ${k} lights in the scene, budget ${LIGHT_BUDGET[k]} (shaders will recompile)`);
+        console.warn(`lighting: ${n[k]} ${k} lights in the scene, budget ${budget[k]} (shaders will recompile)`);
       }
       const pads = this.pads[k];
       while (pads.length < need) {
@@ -1241,6 +1253,12 @@ export class Lighting {
     return pr;
   }
 
+  /** [museum] the cascade lights are in every shader except where the place has its own budget (no sun there) */
+  private cascadesShown() {
+    const off = !!PLACE_BUDGET[this.place];
+    this.csm?.lights.forEach((l, i) => (l.visible = !off && (FLAGS.shadows || i === 0)));
+  }
+
   private setSun(color: string, intensity: number) {
     if (!this.csm) return;
     this.csm.lightDirection.copy(this.sunDir).negate();
@@ -1306,8 +1324,8 @@ export class Lighting {
       l.shadow.radius = 2;
       l.intensity = 0;
     });
-    if (!FLAGS.shadows) csm.lights.forEach((l, i) => (l.visible = i === 0));
     this.csm = csm;
+    this.cascadesShown();
     activeCsm = csm; // [hlod]
     applyCascadeHook(csm); // [hlod]
     layerAwareShadows(this.renderer, csm); // per-cascade layer masks actually apply

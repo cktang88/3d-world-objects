@@ -329,7 +329,7 @@ export class GalleryLevel extends MuseumBase {
     this.previewLight(new THREE.Vector3(0, H - 1, -Math.min(7, D / 3)), st.light, Math.min(140, (st.dark ? 1.4 : 0.7) * W * Math.sqrt(D)), Math.min(D, 18));
     this.fillLevel = st.dark ? 0.3 : 0.5;
     if (st.outdoor && st.arch === 'openair') return;
-    this.maxSpots = st.dark ? MuseumBase.RIG_SPOTS : 5;
+    this.maxSpots = st.dark ? 10 : 5; // requests: the rig's few real spots follow the visitor
     const high = H > 7.5;
     const trackY = high ? Math.min(H - 0.5, 6.5) : H - 0.06;
     const lit = plan.floor.filter((p) => p.u.items.length);
@@ -373,10 +373,9 @@ export class GalleryLevel extends MuseumBase {
     }
     // bright rooms: a little fill so the far corners are not flat
     if (!st.dark) {
+      // one point light for the room (each costs every lit pixel), as bright as the two or three it replaces
       const n = Math.min(3, Math.max(1, Math.round(D / 14)));
-      for (let i = 0; i < n; i++) {
-        this.point(new THREE.Vector3(0, H - 1, -D * ((i + 0.5) / n)), st.light, 0.6 * W * D ** 0.5, Math.max(W, D) * 1.4, 1.2);
-      }
+      this.point(new THREE.Vector3(0, H - 1, -D / 2), st.light, 0.6 * W * D ** 0.5 * Math.min(2, n), Math.max(W, D) * 1.4, 1.2);
     }
   }
 

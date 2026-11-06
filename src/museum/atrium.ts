@@ -199,7 +199,8 @@ export class AtriumLevel extends MuseumBase {
       this.bx(i % 2 ? light : dark, 0.12, 0.012, len, 0, 0, 0, f);
     }
     // a warm fill under the coffers
-    for (const z of [-6, -16, -26]) this.point(new THREE.Vector3(0, H - 2.5, z), '#ffe2bd', 70, 26, 1.2);
+    // one point light (the rig's fill; each light costs every lit pixel), as bright as the two it replaces
+    this.point(new THREE.Vector3(0, H - 2.5, -11), '#ffe2bd', 130, 34, 1.2);
   }
 
   /** a tall banner in the wing's colour over its doorway */

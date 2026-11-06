@@ -245,6 +245,8 @@ function proportionsMatch(o: THREE.Object3D, raw: THREE.Vector3) {
   return a.every((v, i) => Math.abs(v / ga - r[i] / ra) < 0.35 * Math.max(r[i] / ra, 0.25));
 }
 
+const _pl = new THREE.Vector3();
+
 /** run `f` when the browser is idle (one queue, one job per idle period: no frame pays for more than one) */
 const idleQueue: (() => void)[] = [];
 let idleArmed = false;
@@ -398,6 +400,7 @@ export abstract class MuseumBase implements Level {
   }
 
   update(dt: number, player: THREE.Vector3, time: number) {
+    this.steerSpots(dt, this.group.worldToLocal(_pl.copy(player)));
     if (++this.tick % 30 === 0) this.scanDetail(player);
     if (this.tick % 15 === 0) this.cullOutside(player);
     for (const s of this.slots) {
@@ -492,13 +495,21 @@ export abstract class MuseumBase implements Level {
   /**
    * Every museum room carries the same light rig (RIG_SPOTS spotlights, RIG_POINTS point lights,
    * no shadows), unused ones dark: the light count never changes between rooms, so moving from
-   * room to room never recompiles a shader.
+   * room to room never recompiles a shader (lighting.ts's museum budget matches it).
+   *
+   * Lights are paid for by every lit pixel, and a gallery's walls fill the screen: so a room asks
+   * for as many spots as its design wants (requests), and the few real ones go to the requests
+   * nearest the visitor, fading across when they move on. The floor pools, the case lights and
+   * the fixtures' lenses (emissive, merged) keep the far displays reading lit.
    */
-  static readonly RIG_SPOTS = 10;
-  static readonly RIG_POINTS = 3;
+  static readonly RIG_SPOTS = 4;
+  static readonly RIG_POINTS = 2;
   private rigSpots: THREE.SpotLight[] = [];
   private rigPoints: THREE.PointLight[] = [];
   private points = 0;
+  private spotReqs: { from: THREE.Vector3; to: THREE.Vector3; color: THREE.Color; intensity: number; angle: number }[] = [];
+  /** per real spot: the request it shows now and the one it is fading over to (-1: none) */
+  private spotOn: { cur: number; want: number; k: number }[] = [];
   private rig() {
     if (this.rigSpots.length) return;
     for (let i = 0; i < MuseumBase.RIG_SPOTS; i++) {
@@ -508,6 +519,7 @@ export abstract class MuseumBase implements Level {
       // lights nearest the viewer, and an unused one must never be the nearest
       l.position.set(0, -1e4, 0);
       this.rigSpots.push(l);
+      this.spotOn.push({ cur: -1, want: -1, k: 0 });
       this.group.add(l, l.target);
     }
     for (let i = 0; i < MuseumBase.RIG_POINTS; i++) {
@@ -519,18 +531,54 @@ export abstract class MuseumBase implements Level {
     }
   }
 
-  /** a real spotlight from the rig, if the room's budget allows */
+  /** a spotlight request, if the room's budget allows: lit by one of the rig's real spots while near the visitor */
   spot(from: THREE.Vector3, to: THREE.Vector3, opts: { color?: string; boost?: number; angle?: number } = {}) {
     this.rig();
-    if (this.spots >= Math.min(this.maxSpots, MuseumBase.RIG_SPOTS)) return false;
-    const l = this.rigSpots[this.spots++];
+    if (this.spots >= this.maxSpots) return false;
+    this.spots++;
     const d = from.distanceTo(to);
-    l.color.set(opts.color ?? '#fff1dc');
-    l.intensity = (opts.boost ?? 8) * d * d;
-    l.angle = opts.angle ?? 0.38;
-    l.position.copy(from);
-    l.target.position.copy(to);
+    this.spotReqs.push({ from: from.clone(), to: to.clone(), color: new THREE.Color(opts.color ?? '#fff1dc'), intensity: (opts.boost ?? 8) * d * d, angle: opts.angle ?? 0.38 });
+    // until the visitor is placed: the first requests are lit
+    const i = this.spotReqs.length - 1;
+    if (i < MuseumBase.RIG_SPOTS) {
+      this.spotOn[i] = { cur: i, want: i, k: 1 };
+      this.aimSpot(i);
+    }
     return true;
+  }
+
+  private aimSpot(i: number) {
+    const l = this.rigSpots[i], on = this.spotOn[i], r = this.spotReqs[on.cur];
+    if (!r) {
+      l.intensity = 0;
+      l.position.set(0, -1e4, 0);
+      return;
+    }
+    l.color.copy(r.color);
+    l.intensity = r.intensity * on.k;
+    l.angle = r.angle;
+    l.position.copy(r.from);
+    l.target.position.copy(r.to);
+  }
+
+  /** hand the real spots to the requests nearest p (in the room's frame), fading out before moving */
+  private steerSpots(dt: number, p: THREE.Vector3) {
+    const n = this.rigSpots.length;
+    if (!n || this.spotReqs.length <= n) return;
+    if (this.tick % 10 === 0) {
+      const near = this.spotReqs.map((r, i) => ({ i, d: r.to.distanceToSquared(p) })).sort((a, b) => a.d - b.d).slice(0, n).map((x) => x.i);
+      const keep = new Set(this.spotOn.map((o) => o.cur).filter((c) => near.includes(c)));
+      const free = near.filter((c) => !keep.has(c));
+      for (const o of this.spotOn) o.want = keep.has(o.cur) ? o.cur : (free.shift() ?? -1);
+    }
+    const rate = dt / 0.35;
+    this.spotOn.forEach((o, i) => {
+      if (o.cur !== o.want) {
+        o.k = Math.max(0, o.k - rate);
+        if (o.k === 0) o.cur = o.want;
+      } else if (o.cur >= 0) o.k = Math.min(1, o.k + rate);
+      this.aimSpot(i);
+    });
   }
 
   /** a point light from the rig (the last one is kept for previewLight) */
@@ -565,6 +613,8 @@ export abstract class MuseumBase implements Level {
   /** give the rig back (e.g. when a waiting room is replaced by the real one) */
   protected resetRig() {
     this.spots = this.points = 0;
+    this.spotReqs = [];
+    for (const o of this.spotOn) Object.assign(o, { cur: -1, want: -1, k: 0 });
     for (const l of [...this.rigSpots, ...this.rigPoints]) {
       l.intensity = 0;
       l.position.set(0, -1e4, 0);
