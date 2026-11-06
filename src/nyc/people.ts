@@ -663,7 +663,10 @@ export class Person {
   private model() {
     return this.root.children[0];
   }
+  private shadowOn: boolean | null = null;
   setShadows(on: boolean) {
+    if (on === this.shadowOn) return;
+    this.shadowOn = on;
     for (const m of this.meshes) m.castShadow = on;
   }
   update(dt: number) {
@@ -761,6 +764,8 @@ interface Ped {
   yaw: number;
   /** a companion: walks beside this person, or stands facing them talking */
   buddy?: Ped;
+  /** distance to the player this frame */
+  dist: number;
   /** set on the companion: the person it follows */
   lead?: Ped;
 }
@@ -773,6 +778,7 @@ const COUNT = (() => {
     return 110;
   }
 })();
+const SHADOWS = 20;
 const yawOf = (axis: 'x' | 'z', dir: number) => (axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI);
 /** walking along x crosses avenues, along z crosses streets */
 const crossPeriod = (axis: 'x' | 'z') => (axis === 'x' ? AX : SZ);
@@ -849,7 +855,7 @@ export class Pedestrians {
     pd.dir = r.chance(0.5) ? 1 : -1;
     pd.off = 0;
     // a stroller or a dog out front needs more room before the kerb
-    pd.wd = pd.p.noPhone ? r.range(1.5, 2.0) : r.range(0.5, 1.5);
+    pd.wd = pd.p.noPhone ? r.range(1.5, 2.0) : r.range(0.5, 1.2);
     const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
     const P2 = pd.axis === 'x' ? SZ : AX; // spacing of the parallel roads
     const k = Math.round(across / P2 - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
@@ -895,7 +901,7 @@ export class Pedestrians {
     for (let n = 0; n < 8 && this.peds.length < COUNT; n++) {
       const person = new Person(this.assets, this.rng);
       this.group.add(person.root);
-      const pd: Ped = { p: person, axis: 'x', dir: 1, c: 0, s: 1, line: 0, t: 0, v: 1.3, v0: 0, off: 0, state: 'walk', wait: 0, wd: 1, tick: this.peds.length, acc: 0, yaw: 0 };
+      const pd: Ped = { p: person, axis: 'x', dir: 1, c: 0, s: 1, line: 0, t: 0, v: 1.3, v0: 0, off: 0, state: 'walk', wait: 0, wd: 1, tick: this.peds.length, acc: 0, yaw: 0, dist: 0 };
       // about one in five people is out with a companion
       const prev = this.peds[this.peds.length - 1];
       if (prev && !prev.lead && !prev.buddy && !prev.p.slow && this.rng.chance(0.25)) {
@@ -931,10 +937,17 @@ export class Pedestrians {
         pd.p.update(pd.acc);
         pd.acc = 0;
       }
-      pd.p.setShadows(d < 30);
+      pd.dist = d;
       pd.p.setLod(d < 22 ? 0 : 1);
     }
+    // shadows only for the nearest SHADOWS people (skinned shadow casters cost a full skinning pass)
+    const order = this.order;
+    order.length = 0;
+    for (const pd of this.peds) order.push(pd);
+    order.sort((a, b) => a.dist - b.dist);
+    order.forEach((pd, i) => pd.p.setShadows(i < SHADOWS && pd.dist < 30));
   }
+  private order: Ped[] = [];
   /** distance to the next kerb ahead */
   private nearKerb(pd: Ped) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
@@ -946,13 +959,16 @@ export class Pedestrians {
   private groundAt(pd: Ped) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
     const u = pd.t / CP - 0.5;
-    return Math.abs(pd.t - (Math.round(u) + 0.5) * CP) < ch ? 0 : CURB;
+    // step down / up the kerb over a short stride instead of snapping
+    const e = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) - ch;
+    return CURB * THREE.MathUtils.smoothstep(e, -0.12, 0.25);
   }
   private walk(pd: Ped, dt: number, along: number, across: number) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
     const u = pd.t / CP - 0.5;
     const inRoad = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) < ch;
     let v = pd.v;
+    let queue = false;
     if (!inRoad) {
       // the next kerb ahead, and the crossing signal
       const kNext = pd.dir > 0 ? Math.floor(u) + 1 : Math.ceil(u) - 1;
@@ -973,6 +989,7 @@ export class Pedestrians {
         }
       } else if (!go && dist < pd.wd + 2.5 && dist > -0.05) {
         // slow down into the waiting cluster; stop pd.wd back from the kerb
+        queue = true;
         v *= THREE.MathUtils.clamp((dist - pd.wd) / 2.5, 0, 1);
         if (dist - pd.wd < 0.05) {
           pd.state = 'kerb';
@@ -1021,9 +1038,11 @@ export class Pedestrians {
     }
     target = this.clampLine(pd, pd.line + target) - pd.line;
     if (inRoad || (pd.state === 'walk' && v > 0 && this.nearKerb(pd) < 3)) {
-      // on the crosswalk: keep within the painted band (0.4–3.4 m in from the kerb line)
+      // on the crosswalk: keep within the painted band (0.4–3.4 m in from the kerb line). While
+      // queueing, keep to its outer part so the cluster waiting to cross the other road (which
+      // stands within 1.2 m of its own kerb) stays a separate group at the corner.
       const h = sideHalf(pd.axis);
-      const a = pd.c + pd.s * (h + 0.6), b = pd.c + pd.s * (h + 3.2);
+      const a = pd.c + pd.s * (h + (queue ? 1.5 : 0.6)), b = pd.c + pd.s * (h + 3.2);
       target = THREE.MathUtils.clamp(pd.line + target, Math.min(a, b), Math.max(a, b)) - pd.line;
     }
     pd.off += THREE.MathUtils.clamp(target - pd.off, -1.1 * dt, 1.1 * dt);
