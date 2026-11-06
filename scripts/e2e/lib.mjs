@@ -284,7 +284,7 @@ export async function harness(name, scriptUrl) {
   const args = parseArgs();
   underLock(scriptUrl);
   const port = args.port ?? process.env.PORT ?? '5173';
-  const MAX = Math.min(240, Number(args.max ?? 240));
+  const MAX = Math.min(300, Number(args.max ?? 240)); // default 240 s; --max up to 300 for the long memory journeys
   const outDir = args.out ?? path.join(process.env.E2E_OUT ?? '/tmp/claude-0/e2e', name);
   fs.mkdirSync(outDir, { recursive: true });
   const t0 = Date.now();

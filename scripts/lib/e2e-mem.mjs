@@ -57,7 +57,7 @@ export async function memProbe(h) {
       cdp.off('HeapProfiler.addHeapSnapshotChunk', onChunk);
       fs.closeSync(out);
       const sum = summarise(file);
-      fs.unlinkSync(file);
+      if (!process.env.E2E_KEEP_SNAPSHOTS) fs.unlinkSync(file); // keep them for an offline retainer hunt
       return sum;
     },
   };

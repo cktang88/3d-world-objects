@@ -12,7 +12,7 @@ import { memProbe, growth, save } from '../lib/e2e-mem.mjs';
 import path from 'path';
 
 await journey('memory-museum', import.meta.url, async (h) => {
-  await h.boot('/?mode=museum&fast=1');
+  await h.boot('/?mode=museum&fast=1&precompile=0');
   const mem = await memProbe(h);
   await mem.sample('boot');
   const ROUNDS = Number(h.args.rounds ?? 3), ROOMS = 6;

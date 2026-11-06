@@ -13,7 +13,8 @@ import { memProbe, growth, save } from '../lib/e2e-mem.mjs';
 import path from 'path';
 
 await journey('memory-world', import.meta.url, async (h) => {
-  await h.boot('/?mode=world&fast=1&r=0');
+  // precompile=0: no up-front shader compile (minutes and GBs at boot in SwiftShader)
+  await h.boot('/?mode=world&fast=1&r=0&precompile=0');
   const mem = await memProbe(h);
   await mem.sample('boot');
   const doors = await h.run((e) => {
