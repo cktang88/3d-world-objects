@@ -29,6 +29,7 @@ import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
 import { Seamless, descKey, doorOf, floorStackStep, type Slot } from './seamless';
 import { Lazy, type LazyContainer } from './lazy';
+import { warmUp } from './lazy-furniture';
 import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
 import { Vertical } from './vertical';
 import { preloadFleet } from './nyc/vehicleFleet';
@@ -897,6 +898,9 @@ mark('quality applied');
 ready.then(() => {
   // after the world is up and you have been playing a while (boot memory/time: e2e finding 4)
   if (!params.has('lab') && seam.enabled && !FLAGS.fast) setTimeout(prewarmShops, 20000);
+  // lazy-furniture.ts: compile the furniture-opening code on a tiny chest, so the first real cut isn't cold
+  if ('requestIdleCallback' in window) requestIdleCallback(() => warmUp(), { timeout: 3000 });
+  else setTimeout(warmUp, 1000);
   hud.loading.classList.add('hidden');
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => (b.disabled = false));
   $('museum-count').textContent = museum().total.toLocaleString();

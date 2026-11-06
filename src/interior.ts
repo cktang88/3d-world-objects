@@ -13,7 +13,7 @@ import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
-import { readFront, detectDrawers, cutOpenings, compartment, frontSampleAt, paintWith, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
+import { readFrontSteps, cutOpeningsSteps, drain, runIdle, detectDrawers, compartment, frontSampleAt, paintWith, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
 import { adoptContainer, type LazyContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
@@ -93,7 +93,7 @@ export interface Container {
   /** the dark empty slot shown over the model's own front while the drawer is out */
   slot?: THREE.Object3D;
   /** lazy.ts: cut the library model's openings when you come close or press E (see libDrawerSet) */
-  prepare?: (() => LazyContainer[] | null) & { ready?: () => boolean };
+  prepare?: ((now?: boolean) => LazyContainer[] | null) & { ready?: () => boolean };
 }
 interface Frame {
   x: number;
@@ -1211,22 +1211,38 @@ export class InteriorLevel implements Level {
     const lib = this.lastLib, cur = this.cur, wood = this.pal.wood;
     if (!lib) return;
     // the read and cut cost a few ms: done only for pieces you come up to (lazy.ts prepare), once the model is in
+    // reading and cutting a piece costs a few ms: done only for pieces you come up to (lazy.ts prepare:
+    // started from 4 m while you face it, run in idle slices; finished at once if you press E first)
     let model: THREE.Object3D | null = null;
     let result: LazyContainer[] | null = null;
-    const prepare = Object.assign(() => {
+    let job: Generator<void, LazyContainer[]> | null = null;
+    let running = false;
+    const st = { ms: 0, slices: 0, maxSlice: 0 };
+    const prepare = Object.assign((now?: boolean) => {
       if (result || !model) return result;
-      result = [];
-      refit(model);
-      return result;
+      job ??= refitSteps(model);
+      if (now) return (result = drain(job) ?? []);
+      if (!running) {
+        running = true;
+        void runIdle(job, 4, st).then((r) => {
+          result ??= r ?? [];
+          ((globalThis as unknown as { __drawerSlices?: unknown[] }).__drawerSlices ??= []).push({ ...st });
+        });
+      }
+      return null;
     }, { ready: () => !!model });
     for (const e of entries) e.prepare = prepare;
     lib.loaded.then((m) => (model = m));
-    const refit = (model: THREE.Object3D) => {
-      if (lib.holder.userData.disposed || this.group.userData.disposed) return;
+    const lv = this;
+    // the read and the cut in slices (each under SLICE_MS); the rest is quick
+    function* refitSteps(model: THREE.Object3D): Generator<void, LazyContainer[]> {
+      const result: LazyContainer[] = [];
+      const L = lib!;
+      if (L.holder.userData.disposed || lv.group.userData.disposed) return result;
       // the model's front as a depth grid (one pass over its triangles), the layout read off it
       const t0 = performance.now();
-      const front = readFront(model, lib.holder, size);
-      const bands = detectDrawers(model, lib.holder, size, kind, front);
+      const front = yield* readFrontSteps(model, L.holder, size);
+      const bands = detectDrawers(model, L.holder, size, kind, front);
       // (for the lab and perf notes)
       const note = { gridMs: +front.ms.toFixed(1), tris: front.meshes.reduce((n, m) => n + (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3, 0), bands: bands?.length ?? 0, totalMs: 0, cut: 0 };
       ((globalThis as unknown as { __drawerProbe?: unknown[] }).__drawerProbe ??= []).push(note);
@@ -1234,13 +1250,13 @@ export class InteriorLevel implements Level {
         // no layout: the added drawers stay (drawn only while out), in the model's main colour
         const mat = frontMaterial(model);
         if (mat) for (const e of entries) e.drawer?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
-        return;
+        return result;
       }
       for (const e of entries) {
         e.obj.removeFromParent();
         e.obj.traverse((o) => (o.userData.disposed = true));
-        const i = this.containers.indexOf(e);
-        if (i >= 0) this.containers.splice(i, 1);
+        const i = lv.containers.indexOf(e);
+        if (i >= 0) lv.containers.splice(i, 1);
       }
       // the paint of each front (sampled low and off-centre: not the knob), before the fronts are cut out
       // four spots per front (off the centre line, where the knob is), the upper median by brightness:
@@ -1251,25 +1267,25 @@ export class InteriorLevel implements Level {
         return ms[Math.min(ms.length - 1, Math.floor(ms.length / 2))] ?? null;
       });
       // cut the fronts out of the model, and put real drawers / doors and compartments in the holes
-      const cut = cutOpenings(front, bands);
-      const prev = this.cur;
-      this.cur = cur;
+      const cut = yield* cutOpeningsSteps(front, bands);
+      const prev = lv.cur;
+      lv.cur = cur;
       const d = Math.max(0.15, size[2] - 0.12);
       const zf = (bands[0].z ?? front.zf) + 0.002;
-      entries = this.movingParts(
+      entries = lv.movingParts(
         f,
         bands.map((b) => (b.move === 'door'
           ? { move: 'door' as const, kind: 'cabinet' as const, hinge: b.hinge, x: b.x, y: b.y, z: zf, w: b.w, h: b.h, d, mat: wood }
           : { move: 'drawer' as const, kind, x: b.x, y: b.y, z: zf, w: b.w, h: b.h, d, mat: wood })),
       );
-      this.cur = prev;
+      lv.cur = prev;
       for (const e of entries) e.obj.add(compartment(e.size.x + 0.012, e.size.y + 0.006, e.size.z + 0.03));
-      this.libFill(entries, cur.room.type);
-      if (this.group.userData.containersAdopted) {
+      lv.libFill(entries, cur.room.type);
+      if (lv.group.userData.containersAdopted) {
         for (const e of entries) {
-          this.containers.splice(this.containers.indexOf(e), 1);
+          lv.containers.splice(lv.containers.indexOf(e), 1);
           const lc = adoptContainer(e);
-          if (lc) result!.push(lc);
+          if (lc) result.push(lc);
         }
       }
       // fronts and doors in the paint of the model's own front there
@@ -1280,7 +1296,8 @@ export class InteriorLevel implements Level {
       });
       note.totalMs = +(performance.now() - t0).toFixed(1);
       note.cut = cut;
-    };
+      return result;
+    }
   }
 
   private movingParts(f: Frame, parts: F.Part[] | undefined, hideClosed = false): Container[] {

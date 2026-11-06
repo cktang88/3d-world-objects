@@ -49,10 +49,11 @@ export interface ContainerSpec {
   slot?: THREE.Object3D;
   /**
    * expensive set-up done only when wanted (lazy-furniture.ts: cutting a library model's openings):
-   * run when you come within 2.5 m facing it, or on the first E. It may replace this container with
-   * others (returned, already registered); null while it can't run yet (model still loading).
+   * started when you come within 4 m facing it (it then runs in idle slices; null until it is done),
+   * finished at once on the first E (`now`). It may replace this container with others (returned,
+   * already registered); null while it can't run yet (model still loading) or is still running.
    */
-  prepare?: () => LazyContainer[] | null;
+  prepare?: (now?: boolean) => LazyContainer[] | null;
   /** contents can't be seen while shut (default true). False (glass coolers, display cases): generated when near and facing */
   closedOpaque?: boolean;
 }
@@ -199,7 +200,7 @@ export interface ContainerLike {
   closedOpaque?: boolean;
   hideClosed?: boolean;
   slot?: THREE.Object3D;
-  prepare?: () => LazyContainer[] | null;
+  prepare?: (now?: boolean) => LazyContainer[] | null;
   label?: string;
 }
 const NAMES: Record<string, string> = { dresser: 'dresser', nightstand: 'nightstand drawer', cabinet: 'cabinet', upper: 'cupboard', fridge: 'fridge', closet: 'closet', cooler: 'cooler', freezer: 'freezer' };
@@ -381,7 +382,7 @@ export class Lazy {
       // set-up that waits for you to come close and look (e.g. cutting a piece's openings)
       if (glassCheck && c.spec.prepare && !c.prepared) {
         const p = c.worldBox().getCenter(V());
-        if (p.distanceTo(eye) < 2.5 && p.clone().sub(eye).normalize().dot(fwd) > 0.5 && c.spec.prepare()) c.prepared = true;
+        if (p.distanceTo(eye) < 4 && p.clone().sub(eye).normalize().dot(fwd) > 0.5 && c.spec.prepare()) c.prepared = true;
       }
     }
     this.stats.open = open;
@@ -408,7 +409,7 @@ export class Lazy {
   toggle(c: LazyContainer) {
     // not set up yet: do it now and open what replaced this container, the one nearest to it
     if (c.spec.prepare && !c.prepared) {
-      const made = c.spec.prepare();
+      const made = c.spec.prepare(true);
       c.prepared = !!made;
       if (made?.length) {
         const at = c.worldBox().getCenter(V());

@@ -44,7 +44,20 @@ const scene: LabScene = {
       const poll = () => (!prep?.ready || prep.ready() || performance.now() - t0 > cap ? res() : setTimeout(poll, 300));
       poll();
     });
+    // as walking up to it does: start the read and cut in idle slices, wait for them
+    const prepared = () => new Promise<LazyContainer[]>((res) => {
+      const poll = () => {
+        const r = prep?.() ?? null;
+        if (r || !prep || performance.now() - t0 > cap) res(r ?? []);
+        else setTimeout(poll, 50);
+      };
+      poll();
+    });
     return loaded().then(() => {
+      // (lazy.ts adopts the level's containers first, so the refitted ones get registered)
+      new Lazy().update(0, new THREE.PerspectiveCamera(), level);
+      return prepared();
+    }).then((made) => {
       const lazy = new Lazy();
       const cam = new THREE.PerspectiveCamera();
       lazy.update(0.1, cam, level);
@@ -52,7 +65,7 @@ const scene: LabScene = {
       const which = params.get('open');
       if (which && prep) {
         // the refitted drawers and doors: &open=doors|drawers|all|none
-        const made = prep() ?? [];
+        void made;
         // the read timed again, warmed up (the first one in a page includes the JIT): window.__drawers.warmMs
         let holder: THREE.Object3D | null = null;
         level.group.traverse((o) => { if (o.userData.attribution && o.position.distanceTo(p0.obj.position) < 1.0) holder = o; });

@@ -51,11 +51,29 @@ export interface Front {
   local: Float32Array[];
   /** the front plane: where most of the front face is */
   zf: number;
+  /** ms spent reading it (summed over its slices) */
   ms: number;
 }
 
 export function readFront(model: THREE.Object3D, holder: THREE.Object3D, size: readonly number[], cell = 0.008): Front {
+  return drain(readFrontSteps(model, holder, size, cell));
+}
+
+/** run a sliced job to the end at once */
+export function drain<T>(job: Generator<void, T>): T {
+  for (;;) {
+    const r = job.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** how long one slice of a sliced job may run before it yields (ms) */
+export const SLICE_MS = 3;
+
+/** readFront in slices: yields whenever a slice has run SLICE_MS (checked every 16 triangles) */
+export function* readFrontSteps(model: THREE.Object3D, holder: THREE.Object3D, size: readonly number[], cell = 0.008): Generator<void, Front> {
   const t0 = performance.now();
+  let last = t0, busy = 0;
   const [w, h] = size;
   const x0 = -w / 2 - 0.02, y0 = 0, nx = Math.ceil((w + 0.04) / cell), ny = Math.ceil((h + 0.02) / cell);
   const z = new Float32Array(nx * ny).fill(-Infinity);
@@ -87,12 +105,18 @@ export function readFront(model: THREE.Object3D, holder: THREE.Object3D, size: r
   let zmax = -Infinity;
   for (const p of local) for (let i = 2; i < p.length; i += 3) if (p[i] > zmax) zmax = p[i];
   const zmin = zmax - 0.12;
-  meshes.forEach((m, mi) => {
+  for (let mi = 0; mi < meshes.length; mi++) {
+    const m = meshes[mi];
     const p = local[mi];
     const idx = m.geometry.index;
     const ix = idx ? idx.array : null;
     const n = idx ? idx.count / 3 : p.length / 9;
     for (let t = 0; t < n; t++) {
+      if ((t & 15) === 0 && performance.now() - last > SLICE_MS) {
+        busy += performance.now() - last;
+        yield;
+        last = performance.now();
+      }
       const a0 = ix ? ix[t * 3] : t * 3, b0 = ix ? ix[t * 3 + 1] : t * 3 + 1, c0 = ix ? ix[t * 3 + 2] : t * 3 + 2;
       if (p[a0 * 3 + 2] < zmin && p[b0 * 3 + 2] < zmin && p[c0 * 3 + 2] < zmin) continue;
       const a = a0, b = b0, c = c0;
@@ -124,11 +148,12 @@ export function readFront(model: THREE.Object3D, holder: THREE.Object3D, size: r
         }
       }
     }
-  });
+  }
   // the front plane: a high percentile of the cells (knobs and a top board stand out further)
   const all = Array.from(z).filter(Number.isFinite).sort((a, b) => a - b);
   const zf = all.length ? all[Math.floor(all.length * 0.75)] : 0;
-  return { cell, x0, y0, nx, ny, z, tri, meshes, local, zf, ms: performance.now() - t0 };
+  // ms: the time spent working (not waiting between slices)
+  return { cell, x0, y0, nx, ny, z, tri, meshes, local, zf, ms: busy + performance.now() - last };
 }
 
 /** max z of the front at (x, y) */
@@ -218,11 +243,18 @@ export function detectDrawers(model: THREE.Object3D, holder: THREE.Object3D, siz
  * a drawer slides out of a real hole and a door opens onto a real cavity. Returns the pieces dropped.
  */
 export function cutOpenings(f: Front, bands: Band[]): number {
+  return drain(cutOpeningsSteps(f, bands));
+}
+
+/** cutOpenings in slices (yields whenever a slice has run SLICE_MS) */
+export function* cutOpeningsSteps(f: Front, bands: Band[]): Generator<void, number> {
   let dropped = 0;
+  let last = performance.now();
   const zcut = Math.min(...bands.map((q) => q.z ?? f.zf)) - 0.03;
   // the openings, with a 1 mm margin
   const rects = bands.map((b) => [b.x - b.w / 2 - 0.001, b.x + b.w / 2 + 0.001, b.y - 0.001, b.y + b.h + 0.001] as const);
-  f.meshes.forEach((m, mi) => {
+  for (let mi = 0; mi < f.meshes.length; mi++) {
+    const m = f.meshes[mi];
     const p = f.local[mi];
     const g = m.geometry;
     const idx = g.index;
@@ -231,27 +263,44 @@ export function cutOpenings(f: Front, bands: Band[]): number {
     // which triangles are touched (in the front band and overlapping an opening)
     const touched: number[] = [];
     for (let t = 0; t < n; t++) {
+      if ((t & 15) === 0 && performance.now() - last > SLICE_MS) {
+        yield;
+        last = performance.now();
+      }
       const a = vi(t, 0), b = vi(t, 1), c = vi(t, 2);
       if (Math.min(p[a * 3 + 2], p[b * 3 + 2], p[c * 3 + 2]) <= zcut) continue;
       const xmin = Math.min(p[a * 3], p[b * 3], p[c * 3]), xmax = Math.max(p[a * 3], p[b * 3], p[c * 3]);
       const ymin = Math.min(p[a * 3 + 1], p[b * 3 + 1], p[c * 3 + 1]), ymax = Math.max(p[a * 3 + 1], p[b * 3 + 1], p[c * 3 + 1]);
       if (rects.some(([x0, x1, y0, y1]) => xmax > x0 && xmin < x1 && ymax > y0 && ymin < y1)) touched.push(t);
     }
-    if (!touched.length) return;
+    if (!touched.length) continue;
     // rebuild the geometry non-indexed: untouched triangles as they are, touched ones clipped
     // against each opening (split along its four edges, the pieces inside dropped)
     const names = Object.keys(g.attributes);
     const src = names.map((k) => g.getAttribute(k));
-    const out: number[][] = names.map(() => []);
+    // typed output, grown as needed (building number[]s and converting them at the end, or sizing for
+    // the worst case up front, were each one 15 ms step on a dense mesh)
+    let cap = (n + touched.length * 2) * 3;
+    const out = src.map((a) => new Float32Array(cap * a.itemSize));
+    const len = src.map(() => 0);
+    const grow = () => {
+      cap *= 2;
+      out.forEach((o, k) => {
+        const bigger = new Float32Array(cap * src[k].itemSize);
+        bigger.set(o);
+        out[k] = bigger;
+      });
+    };
     /** a vertex: index weights over source vertices (for interpolating every attribute) and its local x, y */
     type V = { w: [number, number][]; x: number; y: number };
     const emit = (vs: V[]) => {
       for (let i = 1; i + 1 < vs.length; i++) for (const v of [vs[0], vs[i], vs[i + 1]]) {
+        if (len[0] + src[0].itemSize > out[0].length) grow();
         src.forEach((a, k) => {
           for (let c = 0; c < a.itemSize; c++) {
             let s = 0;
             for (const [j, wt] of v.w) s += wt * a.getComponent(j, c);
-            out[k].push(s);
+            out[k][len[k]++] = s;
           }
         });
       }
@@ -283,8 +332,12 @@ export function cutOpenings(f: Front, bands: Band[]): number {
     const newGroups: { start: number; count: number; materialIndex?: number }[] = [];
     let cut = 0;
     for (const gr of groups) {
-      const start = out[0].length / src[0].itemSize;
+      const start = len[0] / src[0].itemSize;
       for (let t = gr.start / 3; t < (gr.start + gr.count) / 3 && t < n; t++) {
+        if ((t & 15) === 0 && performance.now() - last > SLICE_MS) {
+          yield;
+          last = performance.now();
+        }
         const tri: V[] = [0, 1, 2].map((k) => { const j = vi(t, k); return { w: [[j, 1]], x: p[j * 3], y: p[j * 3 + 1] }; });
         if (!isTouched[t]) {
           emit(tri);
@@ -309,20 +362,28 @@ export function cutOpenings(f: Front, bands: Band[]): number {
         }
         for (const poly of pieces) emit(poly);
       }
-      const end = out[0].length / src[0].itemSize;
+      const end = len[0] / src[0].itemSize;
       newGroups.push({ start, count: end - start, materialIndex: gr.materialIndex });
     }
-    if (!cut) return;
+    if (!cut) continue;
     dropped += cut;
     // the loader shares geometry between copies of a model: this is a new one
     const ng = new THREE.BufferGeometry();
-    names.forEach((k, i) => ng.setAttribute(k, new THREE.Float32BufferAttribute(out[i], src[i].itemSize)));
+    yield;
+    for (let i = 0; i < names.length; i++) {
+      ng.setAttribute(names[i], new THREE.BufferAttribute(out[i].slice(0, len[i]), src[i].itemSize));
+      yield;
+    }
     if (g.groups.length) for (const q of newGroups) ng.addGroup(q.start, q.count, q.materialIndex);
+    yield;
     ng.computeBoundingSphere();
+    yield;
     ng.computeBoundingBox();
+    yield;
+    last = performance.now();
     m.geometry = ng;
     m.userData.owned = true;
-  });
+  }
   return dropped;
 }
 
@@ -581,4 +642,58 @@ export function paintWith(o: THREE.Object3D, from: THREE.Material, sample: { mat
     }
     m.material = sample.material;
   });
+}
+
+/**
+ * Run a sliced job in idle time (requestIdleCallback, at most `budget` ms a slice; a timeout keeps it
+ * moving while frames are busy). Resolves with its result. stats: total ms, slices, longest slice.
+ */
+export function runIdle<T>(job: Generator<void, T>, budget = 4, stats?: { ms: number; slices: number; maxSlice: number }): Promise<T> {
+  return new Promise((resolve) => {
+    const step = () => {
+      const t0 = performance.now();
+      let r = job.next();
+      while (!r.done && performance.now() - t0 < budget - SLICE_MS) r = job.next();
+      if (stats) {
+        const ms = performance.now() - t0;
+        stats.ms += ms;
+        stats.slices++;
+        stats.maxSlice = Math.max(stats.maxSlice, ms);
+      }
+      if (r.done) resolve(r.value);
+      else schedule();
+    };
+    const schedule = () => (typeof requestIdleCallback === 'function' ? requestIdleCallback(step, { timeout: 60 }) : setTimeout(step, 0));
+    schedule();
+  });
+}
+
+let warmed = false;
+/**
+ * Run the read / detect / cut code once on a tiny synthetic chest (two drawers over two doors) so the
+ * engine has compiled it before the first real piece is cut (that first, cold run took ~200 ms).
+ */
+export function warmUp() {
+  if (warmed) return;
+  warmed = true;
+  const t0 = performance.now();
+  const model = new THREE.Group();
+  const add = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), innerMat);
+    m.position.set(x, y + h / 2, z);
+    model.add(m);
+  };
+  add(0.8, 0.9, 0.38, 0, 0, -0.01);
+  for (const sx of [-1, 1]) {
+    add(0.35, 0.18, 0.02, sx * 0.2, 0.66, 0.19);
+    add(0.35, 0.5, 0.02, sx * 0.2, 0.08, 0.19);
+  }
+  const holder = new THREE.Group();
+  holder.add(model);
+  const front = readFront(model, holder, [0.8, 0.9, 0.4]);
+  const bands = detectDrawers(model, holder, [0.8, 0.9, 0.4], 'dresser', front);
+  if (bands) cutOpenings(front, bands);
+  frontSampleAt(front, 0.1, 0.3);
+  model.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+  return performance.now() - t0;
 }
