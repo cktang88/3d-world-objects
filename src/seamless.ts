@@ -19,6 +19,8 @@ import { queueHold } from './remote';
  */
 
 const V = () => new THREE.Vector3();
+const _pv = new THREE.Matrix4();
+const _fr = new THREE.Frustum();
 
 // ---------------------------------------------------------------- keys and frames
 
@@ -176,6 +178,8 @@ export interface Slot {
   foot: Rect | null;
   /** lights taken out while previewed (adding lights to the street would recompile every shader) */
   stripped: [THREE.Light, THREE.Object3D][];
+  /** meshes whose shadow casting is off while previewed (casters: the current room's only) */
+  shadowOff?: THREE.Object3D[];
   compiled: 'no' | 'pending' | 'yes';
   shown: boolean;
   /** the portal it was last placed at */
@@ -322,8 +326,9 @@ export class Seamless {
       built.then(() => {
         s.waiting = false;
         s.tris = countTris(s.level.group);
+        if (s.byDoor && !s.entered) this.precompile(s);
       });
-    }
+    } else if (s.byDoor) this.precompile(s);
     s.tris = countTris(s.level.group);
     this.stats.lastBuildMs = s.ms;
     this.log(`built ${s.key.slice(0, 90)} in ${s.ms.toFixed(1)} ms`);
@@ -492,9 +497,10 @@ export class Seamless {
   policy = {
     street: { range: 14, dot: 0.5, near: 3, dwell: 0, max: 2 },
     inside: { range: 4.5, dot: 0.85, near: 0, dwell: 0.4, max: 1 },
-    // museum halls are big and their doorways show the next room: look further, two at a time
-    museum: { range: 34, dot: 0.6, near: 4, dwell: 0, max: 2 },
-  };
+    // museum halls are big and their doorways show the next room: look further, three at a time;
+    // a doorway you approach (within `close` m, facing it at all) always builds and shows first
+    museum: { range: 34, dot: 0.6, near: 4, dwell: 0, max: 3, close: 20, closeDot: -0.2 },
+  } as Record<'street' | 'inside' | 'museum', { range: number; dot: number; near: number; dwell: number; max: number; close?: number; closeDot?: number }>;
   private dwell = new Map<string, number>();
   /** door prebuilds wait until you move 1.5 m or this many seconds after a new game */
   settleAfter = 8;
@@ -519,12 +525,15 @@ export class Seamless {
       if (d > pol.range) continue;
       const dir = c.sub(player).normalize();
       const dot = dir.dot(fwd);
-      if (d < pol.near || dot > pol.dot) cands.push({ p, d, dot });
+      if (d < pol.near || dot > pol.dot || (pol.close && d < pol.close && dot > (pol.closeDot ?? 0))) cands.push({ p, d, dot });
     }
-    // museum halls: the doorways you look at most squarely first (from the atrium's entrance the
-    // north wings, 31 m away, matter more than side doors 26 m away); elsewhere the nearest
-    if (pol === this.policy.museum) cands.sort((a, b) => b.dot - a.dot);
-    else cands.sort((a, b) => a.d - b.d);
+    // museum halls: a doorway you are walking up to first, then the ones you look at most squarely
+    // (from the atrium's entrance the north wings, 31 m away, matter more than side doors 26 m away);
+    // elsewhere the nearest
+    if (pol === this.policy.museum) {
+      const rank = (x: { d: number; dot: number }) => (x.d < (pol.close ?? 0) && x.dot > (pol.closeDot ?? 0) ? 2 - x.d / 100 : x.dot);
+      cands.sort((a, b) => rank(b) - rank(a));
+    } else cands.sort((a, b) => a.d - b.d);
     this.wanted.clear();
     const now = this.clock * 1000; // game time: dwell counts frames, not wall clock
     const seen = new Map<string, number>();
@@ -535,7 +544,7 @@ export class Seamless {
       seen.set(key, since);
       if (now - since < pol.dwell * 1000 && !this.slots.has(key)) continue;
       this.wanted.add(key);
-      if (!this.slots.has(key) && this.queue.length < 2) {
+      if (!this.slots.has(key) && this.queue.length < Math.max(2, pol.max)) {
         this.prebuild(desc);
         this.slots.get(key)!.byDoor = true;
       }
@@ -563,18 +572,25 @@ export class Seamless {
       const s = this.slots.get(descKey(p.target));
       if (!s || !s.ready || s.waiting || s === this.active) continue;
       const d = p.door.pos.distanceTo(player);
-      if (d < (p.door.range ?? 11)) show.push({ s, p, d: p.door.range ? -viewDot(this.camera, p.door.pos) : d });
+      // long-range (museum) doorways by how squarely you look at them; one you are walking up to first
+      const v = p.door.range ? viewDot(this.camera, p.door.pos) : 0;
+      if (d < (p.door.range ?? 11)) show.push({ s, p, d: p.door.range ? (d < 9 && v > 0.25 ? -2 + d / 100 : -v) : d });
     }
     // nearest first; doors with a long range (museum doorways) by how squarely you look at them
     show.sort((a, b) => a.d - b.d);
-    const keep = new Set(show.slice(0, 2).map((x) => x.s));
+    const keep = new Set(show.slice(0, 3).map((x) => x.s));
     for (const s of this.slots.values()) if (s.shown && !keep.has(s)) this.hidePreview(s);
     const holes: THREE.Box3[] = [];
-    for (const { s, p } of show.slice(0, 2)) {
+    for (const { s, p } of show.slice(0, 3)) {
       if (!s.shown) this.showPreview(s, p);
       if (s.shown && p.door?.hole) holes.push(this.holeFor(s, p));
     }
     setHoles(holes);
+    // portal culling: a room seen through a doorway is drawn only while that doorway is in view
+    this.camera.updateMatrixWorld();
+    _pv.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    _fr.setFromProjectionMatrix(_pv);
+    for (const { s, p } of show.slice(0, 3)) if (s.shown) s.level.group.visible = _fr.intersectsBox(p.box);
     this.lightPreview(show.find((x) => x.s.shown)?.s ?? null, player);
     void level;
   }
@@ -630,15 +646,34 @@ export class Seamless {
     return true;
   }
 
+  /** take a previewed level's own lights out (the shared pool stands in for them) */
+  private strip(s: Slot) {
+    if (s.stripped.length) return;
+    s.level.group.traverse((o) => {
+      if ((o as THREE.Light).isLight && o.parent) s.stripped.push([o as THREE.Light, o.parent]);
+    });
+    for (const [l] of s.stripped) l.removeFromParent();
+  }
+
+  /**
+   * Compile a door prebuild's shaders as soon as it is built (in its preview state: own lights out),
+   * so it can be shown the moment you look through its doorway instead of after a compile.
+   */
+  private precompile(s: Slot) {
+    if (s.compiled !== 'no' || !this.renderer.compileAsync) return;
+    this.strip(s);
+    s.compiled = 'pending';
+    const t = performance.now();
+    this.renderer.compileAsync(s.level.group, this.camera, this.scene).then(() => {
+      s.compiled = 'yes';
+      this.log(`precompiled ${s.key.slice(0, 50)} in ${(performance.now() - t).toFixed(0)} ms (async)`);
+    }, () => (s.compiled = 'yes'));
+  }
+
   private showPreview(s: Slot, p: Portal) {
     if (!this.place(s, p)) return;
     const g = s.level.group;
-    if (!s.stripped.length) {
-      g.traverse((o) => {
-        if ((o as THREE.Light).isLight && o.parent) s.stripped.push([o as THREE.Light, o.parent]);
-      });
-      for (const [l] of s.stripped) l.removeFromParent();
-    }
+    this.strip(s);
     for (const o of s.entry?.hide ?? []) o.visible = false;
     s.placement!.decompose(g.position, g.quaternion, g.scale);
     g.updateMatrixWorld(true);
@@ -652,6 +687,13 @@ export class Seamless {
       }, () => (s.compiled = 'yes'));
     }
     if (s.compiled !== 'yes') return;
+    // a previewed room casts no shadows into the room you stand in (its own lights are out anyway)
+    if (!s.shadowOff) {
+      s.shadowOff = [];
+      g.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh && o.castShadow) (o.castShadow = false), s.shadowOff!.push(o);
+      });
+    }
     this.scene.add(g);
     s.shown = true;
     p.onPreview?.(true);
@@ -659,6 +701,7 @@ export class Seamless {
 
   private hidePreview(s: Slot) {
     s.level.group.removeFromParent();
+    s.level.group.visible = true;
     if (s.shown) s.portal?.onPreview?.(false);
     s.shown = false;
     setHoles([]);
@@ -668,6 +711,8 @@ export class Seamless {
   private restore(s: Slot) {
     for (const [l, parent] of s.stripped) parent.add(l);
     s.stripped = [];
+    for (const o of s.shadowOff ?? []) o.castShadow = true;
+    s.shadowOff = undefined;
     for (const o of s.entry?.hide ?? []) o.visible = true;
   }
 
