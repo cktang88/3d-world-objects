@@ -35,7 +35,25 @@ export interface FarInstance {
   style: THREE.Vector4;
   /** coat skirt bottom y, or -1 */
   coat: number;
+  /** bit 1 backpack, 2 crossbody bag, 4 bag in the left hand */
+  props: number;
+  bag: THREE.Color;
+  /** an open umbrella overhead (rain), or null */
+  umbrella: THREE.Color | null;
 }
+/** rigid props baked into the far-crowd body (shown per instance from FarInstance.props) */
+function farProps(b: FarBody, female: boolean) {
+  const sp = female ? 1.22 : 1.25;
+  const m = (x: number, y: number, z: number, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, 0)), new THREE.Vector3(1, 1, 1));
+  return [
+    { id: 1, bone: 'spine_03', geo: new THREE.BoxGeometry(0.3, 0.42, 0.15), m: m(0, sp - 0.04, -0.2) },
+    { id: 2, bone: 'pelvis', geo: new THREE.BoxGeometry(0.22, 0.16, 0.07), m: m(-0.19, b.waist - 0.04, 0.02, -Math.PI / 2 + 0.25) },
+    // in the T-pose the left arm points along +x: the bag hangs on along the arm, so it hangs
+    // below the hand once the arm is down
+    { id: 3, bone: 'hand_l', geo: new THREE.BoxGeometry(0.34, 0.1, 0.3), m: m(b.wristX + 0.24, b.armY, b.armZ) },
+  ];
+}
+const _bm = new THREE.Matrix4(), _nm = new THREE.Matrix3();
 
 const CLIPS = [
   { name: 'Walk_Loop', frames: 32 },
@@ -93,7 +111,7 @@ const _t = new THREE.Vector3();
 
 export class FarCrowd {
   meshes: THREE.InstancedMesh[] = [];
-  private attrs: { anim: THREE.InstancedBufferAttribute; top: THREE.InstancedBufferAttribute; bottom: THREE.InstancedBufferAttribute; shoe: THREE.InstancedBufferAttribute; skin: THREE.InstancedBufferAttribute; hair: THREE.InstancedBufferAttribute; style: THREE.InstancedBufferAttribute; coat: THREE.InstancedBufferAttribute }[] = [];
+  private attrs: Record<string, THREE.InstancedBufferAttribute>[] = [];
   private counts = [0, 0];
   /** true once both genders are baked and added */
   ready = false;
@@ -164,9 +182,28 @@ export class FarCrowd {
       skinIn.push(p.applyMatrix4(geoInv));
       skinN.push(_n.clone().applyMatrix3(nGeoInv).normalize());
     }
+    // props: appended vertices, rigid on one bone each
+    const props = farProps(b, female);
+    const boneIdx = (n: string) => Math.max(0, sk.skeleton.bones.findIndex((bn) => bn.name === n));
+    const pv: { body: THREE.Vector3; geo: THREE.Vector3; n: THREE.Vector3; bone: number; id: number }[] = [];
+    const pIdx: number[] = [];
+    for (const pr of props) {
+      const g2 = pr.geo.index ? pr.geo : pr.geo;
+      const base = nv + pv.length;
+      const ps = g2.attributes.position, ns = g2.attributes.normal;
+      const nm = new THREE.Matrix3().getNormalMatrix(pr.m);
+      for (let i = 0; i < ps.count; i++) {
+        const bp = new THREE.Vector3().fromBufferAttribute(ps, i).applyMatrix4(pr.m);
+        const bn = new THREE.Vector3().fromBufferAttribute(ns, i).applyMatrix3(nm).normalize();
+        pv.push({ body: bp, geo: bp.clone().applyMatrix4(geoInv), n: bn.clone().applyMatrix3(nGeoInv).normalize(), bone: boneIdx(pr.bone), id: pr.id });
+      }
+      const ix = g2.index!;
+      for (let i = 0; i < ix.count; i++) pIdx.push(base + ix.getX(i));
+    }
+    const nAll = nv + pv.length;
     // bake every frame of each clip
     const rows = CLIPS.reduce((a, c) => a + c.frames, 0);
-    const pTex = new Float32Array(nv * rows * 4), nTex = new Float32Array(nv * rows * 4);
+    const pTex = new Float32Array(nAll * rows * 4), nTex = new Float32Array(nAll * rows * 4);
     const mixer = new THREE.AnimationMixer(model);
     const meshWorld = new THREE.Matrix4();
     let row = 0;
@@ -191,14 +228,26 @@ export class FarCrowd {
           _w.copy(skinIn[i]).addScaledVector(skinN[i], 0.01 / src.geo.getMaxScaleOnAxis());
           sk.applyBoneTransform(used[i], _w);
           _w.applyMatrix4(meshWorld).sub(_v).normalize();
-          const o = (row * nv + i) * 4;
+          const o = (row * nAll + i) * 4;
+          pTex[o] = _v.x; pTex[o + 1] = _v.y; pTex[o + 2] = _v.z; pTex[o + 3] = 1;
+          nTex[o] = _w.x; nTex[o + 1] = _w.y; nTex[o + 2] = _w.z; nTex[o + 3] = 0;
+        }
+        // rigid props: geometry space -> bind -> bone -> back, then the mesh's world matrix
+        for (let j = 0; j < pv.length; j++) {
+          const q = pv[j];
+          _bm.multiplyMatrices(sk.bindMatrixInverse, sk.skeleton.bones[q.bone].matrixWorld).multiply(sk.skeleton.boneInverses[q.bone]).multiply(sk.bindMatrix);
+          _bm.premultiply(meshWorld);
+          _v.copy(q.geo).applyMatrix4(_bm);
+          _nm.getNormalMatrix(_bm);
+          _w.copy(q.n).applyMatrix3(_nm).normalize();
+          const o = (row * nAll + nv + j) * 4;
           pTex[o] = _v.x; pTex[o + 1] = _v.y; pTex[o + 2] = _v.z; pTex[o + 3] = 1;
           nTex[o] = _w.x; nTex[o + 1] = _w.y; nTex[o + 2] = _w.z; nTex[o + 3] = 0;
         }
       }
     }
     const tex = (d: Float32Array) => {
-      const t = new THREE.DataTexture(d, nv, rows, THREE.RGBAFormat, THREE.FloatType);
+      const t = new THREE.DataTexture(d, nAll, rows, THREE.RGBAFormat, THREE.FloatType);
       t.minFilter = t.magFilter = THREE.NearestFilter;
       t.needsUpdate = true;
       return t;
@@ -206,19 +255,36 @@ export class FarCrowd {
     const posTex = tex(pTex), nrmTex = tex(nTex);
 
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(bind, 3));
-    geo.setAttribute('vatIndex', new THREE.BufferAttribute(col, 1));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    const bindAll = new Float32Array(nAll * 3), colAll = new Float32Array(nAll), propId = new Float32Array(nAll);
+    bindAll.set(bind);
+    colAll.set(col);
+    for (let j = 0; j < pv.length; j++) {
+      pv[j].body.toArray(bindAll, (nv + j) * 3);
+      colAll[nv + j] = nv + j;
+      propId[nv + j] = pv[j].id;
+    }
+    const idxAll = new Uint32Array(idx.length + pIdx.length);
+    idxAll.set(idx);
+    idxAll.set(pIdx, idx.length);
+    geo.setAttribute('position', new THREE.BufferAttribute(bindAll, 3));
+    // (attribute slots are scarce: 16 at most, instanceMatrix takes 4) vertex index + prop id
+    const vat = new Float32Array(nAll * 2);
+    for (let i = 0; i < nAll; i++) {
+      vat[i * 2] = colAll[i];
+      vat[i * 2 + 1] = propId[i];
+    }
+    geo.setAttribute('vatIndex', new THREE.BufferAttribute(vat, 2));
+    geo.setIndex(new THREE.BufferAttribute(idxAll, 1));
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.3);
     const ia = (n: number) => new THREE.InstancedBufferAttribute(new Float32Array(capacity * n), n).setUsage(THREE.DynamicDrawUsage);
-    const a = { anim: ia(4), top: ia(3), bottom: ia(3), shoe: ia(3), skin: ia(3), hair: ia(3), style: ia(4), coat: ia(1) };
+    const a = { anim: ia(4), top: ia(3), bottom: ia(3), shoe: ia(3), skin: ia(3), hair: ia(3), style: ia(4), misc: ia(2) };
     for (const [k, v] of Object.entries(a)) geo.setAttribute(`i_${k}`, v);
     this.attrs.push(a);
 
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
     const u = {
       uPos: { value: posTex }, uNrm: { value: nrmTex },
-      uVat: { value: new THREE.Vector4(nv, rows, 0, 0) },
+      uVat: { value: new THREE.Vector4(nAll, rows, 0, 0) },
       uClip: { value: new THREE.Vector4(clipRows[0], CLIPS[0].frames, clipRows[1], CLIPS[1].frames) },
       uB0: { value: new THREE.Vector4(b.waist, b.neck, b.shoulderX, b.ankle) },
       uB1: { value: new THREE.Vector4(b.wristX, b.knee, b.height, 0) },
@@ -231,14 +297,14 @@ export class FarCrowd {
           `#include <common>
           uniform sampler2D uPos, uNrm;
           uniform vec4 uVat, uClip;
-          attribute float vatIndex;
+          attribute vec2 vatIndex;
           attribute vec4 i_anim, i_style;
           attribute vec3 i_top, i_bottom, i_shoe, i_skin, i_hair;
-          attribute float i_coat;
-          varying vec3 vBody, vTop, vBottom, vShoe, vSkin, vHair;
+          attribute vec2 i_misc; // coat bottom y, props bitmask
+          varying vec3 vBody, vTop, vBottom, vShoe, vSkin, vHair, vBag;
           varying vec4 vStyle;
           varying float vCoat;
-          varying float vFade;
+          varying float vFade, vProp;
           vec2 vatRow(float clip, float phase) {
             float start = clip < 0.5 ? uClip.x : uClip.z, n = clip < 0.5 ? uClip.y : uClip.w;
             float fr = fract(phase) * n;
@@ -250,7 +316,8 @@ export class FarCrowd {
           '#include <beginnormal_vertex>',
           `vec2 rr = vatRow(i_anim.x, i_anim.y);
           float ft = fract(fract(i_anim.y) * (i_anim.x < 0.5 ? uClip.y : uClip.w));
-          float cx = (vatIndex + 0.5) / uVat.x;
+          float cx = (vatIndex.x + 0.5) / uVat.x;
+          float propId = vatIndex.y, i_coat = i_misc.x, i_props = i_misc.y;
           vec3 objectNormal = normalize(mix(texture2D(uNrm, vec2(cx, (rr.x + 0.5) / uVat.y)).xyz, texture2D(uNrm, vec2(cx, (rr.y + 0.5) / uVat.y)).xyz, ft));
           #ifdef USE_TANGENT
             vec3 objectTangent = vec3( tangent.xyz );
@@ -259,6 +326,12 @@ export class FarCrowd {
         .replace(
           '#include <begin_vertex>',
           `vec3 transformed = mix(texture2D(uPos, vec2(cx, (rr.x + 0.5) / uVat.y)).xyz, texture2D(uPos, vec2(cx, (rr.y + 0.5) / uVat.y)).xyz, ft);
+          // props this person does not carry collapse to a point (degenerate triangles)
+          if (propId > 0.5 && mod(floor(i_props / pow(2.0, propId - 1.0)), 2.0) < 0.5) transformed = vec3(0.0);
+          vProp = propId; // bag colour packed as 8-bit RGB in i_anim.w (attribute slots are scarce)
+          float pk = i_anim.w;
+          vec3 bagc = vec3(floor(pk / 65536.0), mod(floor(pk / 256.0), 256.0), mod(pk, 256.0)) / 255.0;
+          vBag = pow(bagc, vec3(2.2)) * (propId > 2.5 ? 1.0 : 0.85);
           vBody = position; vTop = i_top; vBottom = i_bottom; vShoe = i_shoe; vSkin = i_skin; vHair = i_hair; vStyle = i_style; vCoat = i_coat; vFade = i_anim.z;`,
         );
       s.fragmentShader = s.fragmentShader
@@ -269,7 +342,8 @@ export class FarCrowd {
           varying vec3 vBody, vTop, vBottom, vShoe, vSkin, vHair;
           varying vec4 vStyle;
           varying float vCoat;
-          varying float vFade;
+          varying float vFade, vProp;
+          varying vec3 vBag;
           ${BAYER_GLSL}`,
         )
         .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vFade > 0.0 && pedBayer(gl_FragCoord.xy) <= vFade) discard;')
@@ -295,11 +369,12 @@ export class FarCrowd {
             float hy = neck + mix(0.1, 0.225, smoothstep(-0.05, 0.05, p.z));
             if (!arm && p.y > hy && vStyle.w > -0.5) c = vHair;
             if (!arm && vStyle.w > 0.5 && p.z < -0.03 && p.y > neck - 0.12 && ax < 0.13) c = vHair;
+            if (vProp > 0.5) c = vBag;
             diffuseColor.rgb = c;
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'ped-far-vat-v2';
+    mat.customProgramCacheKey = () => 'ped-far-vat-v3';
     const mesh = new THREE.InstancedMesh(geo, mat, capacity);
     mesh.count = 0;
     mesh.frustumCulled = false;
@@ -309,6 +384,19 @@ export class FarCrowd {
   }
   begin() {
     this.counts[0] = this.counts[1] = 0;
+    this.nUmb = 0;
+  }
+  /** open umbrellas of far people in the rain: one instanced draw */
+  umbrellas: THREE.InstancedMesh | null = null;
+  private nUmb = 0;
+  setUmbrellaGeometry(geo: THREE.BufferGeometry, mat: THREE.Material, group: THREE.Group, capacity: number) {
+    const m = new THREE.InstancedMesh(geo, mat, capacity);
+    m.count = 0;
+    m.frustumCulled = false;
+    m.name = 'far-umbrellas';
+    m.setColorAt(0, new THREE.Color(1, 1, 1));
+    group.add(m);
+    this.umbrellas = m;
   }
   add(female: boolean, inst: FarInstance) {
     const gi = female ? 1 : 0;
@@ -318,17 +406,29 @@ export class FarCrowd {
     this.counts[gi]++;
     mesh.setMatrixAt(i, inst.matrix);
     const a = this.attrs[gi];
-    a.anim.setXYZW(i, inst.clip, inst.phase, inst.fade, 0);
+    const c8 = (v: number) => Math.round(THREE.MathUtils.clamp(Math.pow(v, 1 / 2.2), 0, 1) * 255);
+    a.anim.setXYZW(i, inst.clip, inst.phase, inst.fade, c8(inst.bag.r) * 65536 + c8(inst.bag.g) * 256 + c8(inst.bag.b));
     a.top.setXYZ(i, inst.top.r, inst.top.g, inst.top.b);
     a.bottom.setXYZ(i, inst.bottom.r, inst.bottom.g, inst.bottom.b);
     a.shoe.setXYZ(i, inst.shoe.r, inst.shoe.g, inst.shoe.b);
     a.skin.setXYZ(i, inst.skin.r, inst.skin.g, inst.skin.b);
     a.hair.setXYZ(i, inst.hair.r, inst.hair.g, inst.hair.b);
     a.style.setXYZW(i, inst.style.x, inst.style.y, inst.style.z, inst.style.w);
-    a.coat.setX(i, inst.coat);
+    a.misc.setXY(i, inst.coat, inst.props);
+    if (inst.umbrella && this.umbrellas && this.nUmb < this.umbrellas.instanceMatrix.count) {
+      // canopy over the head, a little ahead: in the person's frame (scale included)
+      _bm.makeTranslation(0.08, 1.45, 0.15).premultiply(inst.matrix);
+      this.umbrellas.setMatrixAt(this.nUmb, _bm);
+      this.umbrellas.setColorAt(this.nUmb++, inst.umbrella);
+    }
     return true;
   }
   end() {
+    if (this.umbrellas) {
+      this.umbrellas.count = this.nUmb;
+      this.umbrellas.instanceMatrix.needsUpdate = true;
+      if (this.umbrellas.instanceColor) this.umbrellas.instanceColor.needsUpdate = true;
+    }
     this.meshes.forEach((m, gi) => {
       m.count = this.counts[gi];
       m.instanceMatrix.needsUpdate = true;

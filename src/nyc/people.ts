@@ -980,6 +980,8 @@ export class Person {
       top: new THREE.Color(o.top), bottom: new THREE.Color(o.bottom), shoe: new THREE.Color(o.shoe), skin: new THREE.Color(o.skin), hair: new THREE.Color(o.hair),
       style: new THREE.Vector4(o.topStyle, o.topStyle === 0 ? b0.shoulderX + 0.13 : b0.wristX - 0.035, o.bottomStyle === 2 ? b0.knee + 0.07 : b0.ankle, hat ? 0 : style === 'Hair_Long' ? 1 : style ? 0 : -1),
       coat: o.coatLen >= 0 ? b0.knee - o.coatLen : -1,
+      props: 0,
+      bag: new THREE.Color('#151517'),
     };
     // rigid props (hat, bags, hood, shoes) and the coat skirt are merged into ONE skinned mesh
     // per person: rigid parts are weighted 100 % to their bone, the skirt keeps its blend
@@ -997,10 +999,14 @@ export class Person {
     if (bagRoll < 0.22) {
       const bc = r.pick(['#151517', '#22262e', '#3a3f45', '#2f3a2a', '#5a1a1c', '#1f3d5a']);
       parts.push({ geo: propGeo.backpack, bone: 'spine_03', m: at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)), color: bc });
+      this.far.props |= 1;
+      this.far.bag.set(bc);
       for (const s of [-1, 1]) parts.push({ geo: propGeo.strap, bone: 'spine_03', m: at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0), color: bc });
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       parts.push({ geo: propGeo.crossbody, bone: 'pelvis', m: at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0), color: bc });
+      this.far.props |= 2;
+      this.far.bag.set(bc);
     }
     // hoods lying on the upper back (hoodies, most puffers)
     this.hood = o.topStyle === 4 || (o.topStyle === 2 && r.chance(0.6));
@@ -1092,6 +1098,8 @@ export class Person {
       const col = kind === 'shopping' ? r.pick(['#f2efe6', '#1a1a1a', '#c8a878', '#b8282e', '#e8e0d0', '#2a4a7a']) : r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c']);
       const grip = holder('hand_l', b.wristX + 0.06, b.armY - 0.03, b.armZ);
       const bag = new THREE.Mesh(handBagGeo(kind, col), propVcMat);
+      this.far.props |= 4;
+      if (!(this.far.props & 3)) this.far.bag.set(col);
       grip.add(bag);
       this.meshes.push(bag);
       this.pose = (p) => p.upright(grip);
@@ -1121,7 +1129,8 @@ export class Person {
       };
     }
   }
-  far!: { top: THREE.Color; bottom: THREE.Color; shoe: THREE.Color; skin: THREE.Color; hair: THREE.Color; style: THREE.Vector4; coat: number };
+  far!: { top: THREE.Color; bottom: THREE.Color; shoe: THREE.Color; skin: THREE.Color; hair: THREE.Color; style: THREE.Vector4; coat: number; props: number; bag: THREE.Color };
+  umbrellaColor = new THREE.Color('#111113');
   /** the far crowd's animation state: clip 0 walk / 1 idle, phase 0..1 */
   vatClip = 0;
   vatPhase = Math.random();
@@ -1248,6 +1257,7 @@ export class Person {
       const holder = new THREE.Object3D();
       new THREE.Matrix4().multiplyMatrices(this.bindInvOf('hand_r'), at(-b.wristX - 0.07, b.armY - 0.02, b.armZ + 0.02)).decompose(holder.position, holder.quaternion, holder.scale);
       this.bones.get('hand_r')!.add(holder);
+      this.umbrellaColor.set(UMBRELLA[Math.floor(this.weatherRoll * 97) % UMBRELLA.length]);
       const u = new THREE.Mesh(umbrellaGeo(UMBRELLA[Math.floor(this.weatherRoll * 97) % UMBRELLA.length]), umbrellaMat);
       u.castShadow = true;
       holder.add(u);
@@ -1724,6 +1734,7 @@ export class Pedestrians {
     if (!this.farCrowd && FAR && this.assets && this.peds.length >= COUNT) {
       const A = this.assets.body;
       this.farCrowd = new FarCrowd(this.group, { male: A.male, female: A.female }, BODY, COUNT);
+      this.farCrowd.setUmbrellaGeometry(umbrellaGeo('#ffffff'), umbrellaMat, this.group, COUNT);
     }
     if (this.farCrowd && !this.farCrowd.ready) {
       // bake the VAT a few ms per frame; until it is ready everyone stays a skinned person
@@ -1782,7 +1793,7 @@ export class Pedestrians {
           const f = pd.p.far;
           _q.setFromAxisAngle(_up, pd.rot);
           _s.setScalar(pd.p.scaleH);
-          far!.add(pd.p.gender === 'female', { matrix: _m4.compose(pd.pos, _q, _s), clip: pd.p.vatClip, phase: pd.p.vatPhase, fade: fadeNear, top: f.top, bottom: f.bottom, shoe: f.shoe, skin: f.skin, hair: f.hair, style: f.style, coat: f.coat });
+          far!.add(pd.p.gender === 'female', { matrix: _m4.compose(pd.pos, _q, _s), clip: pd.p.vatClip, phase: pd.p.vatPhase, fade: fadeNear, top: f.top, bottom: f.bottom, shoe: f.shoe, skin: f.skin, hair: f.hair, style: f.style, coat: f.coat, props: f.props, bag: f.bag, umbrella: pd.p.umbrellaOn && fadeNear <= 0 ? pd.p.umbrellaColor : null });
         }
         if (farOnly) continue;
       }
