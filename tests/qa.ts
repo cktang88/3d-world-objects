@@ -134,6 +134,7 @@ export class Grid {
 
 // ------------------------------------------------------------ run
 
+const TIMEOUT = Number(process.env.QA_TEST_TIMEOUT ?? 20000);
 const t0 = performance.now();
 setTimeout(async () => {
   let pass = 0, failn = 0, skip = 0;
@@ -141,7 +142,10 @@ setTimeout(async () => {
     if (filter && !filter.test(t.name)) { skip++; continue; }
     const s = performance.now();
     try {
-      await t.fn();
+      // hard per-test limit (QA_TEST_TIMEOUT ms, default 20 s): nothing may hang
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([t.fn(), new Promise((_, rej) => (timer = setTimeout(() => rej(new QAError(`timed out after ${TIMEOUT} ms`)), TIMEOUT)))]);
+      clearTimeout(timer);
       pass++;
       console.log(`  PASS ${t.name} (${Math.round(performance.now() - s)} ms)`);
     } catch (e) {

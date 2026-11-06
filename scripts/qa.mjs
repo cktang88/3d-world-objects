@@ -6,7 +6,10 @@
  *   npm run qa                    all test files
  *   npm run qa -- museum shop     files whose path matches any pattern
  *   npm run qa -- -t "door"       only tests whose name matches (QA_TEST)
- *   QA_VERBOSE=1 npm run qa       show the shim's suppressed warnings
+ *   QA_VERBOSE=1 npm run qa       show passing tests, KNOWN notes and the shim's suppressed warnings
+ *
+ * Hard limits (nothing may run long): QA_TEST_TIMEOUT per test (default 20 s), QA_FILE_TIMEOUT
+ * per file (default 45 s, the process is killed), QA_MAX for the whole run (default 120 s).
  *
  * esbuild bundles each test file (three stays external, so Node loads it once from
  * node_modules), then up to QA_JOBS (default 3) node processes run them in parallel, each with
@@ -51,8 +54,17 @@ try {
 const tBuild = performance.now() - t0;
 
 const jobs = Number(process.env.QA_JOBS ?? 3);
+const FILE_TIMEOUT = Number(process.env.QA_FILE_TIMEOUT ?? 45000);
+const MAX = Number(process.env.QA_MAX ?? 120000);
+const children = new Set();
+const cap = setTimeout(() => {
+  console.log(`qa: total cap of ${MAX / 1000} s reached, killing ${children.size} running file(s)`);
+  for (const c of children) c.kill('SIGKILL');
+  queue.length = 0;
+}, MAX);
+cap.unref();
 const results = [];
-let failed = 0;
+let failed = 0, notes = 0;
 const queue = [...files];
 async function worker() {
   for (let f; (f = queue.shift()); ) {
@@ -65,7 +77,9 @@ async function worker() {
       });
       let text = '';
       p.stdout.on('data', (d) => (text += d)); p.stderr.on('data', (d) => (text += d));
-      const kill = setTimeout(() => { text += '\n  FAIL timeout (60 s)'; p.kill('SIGKILL'); }, 60000);
+      const kill = setTimeout(() => { text += `\n  FAIL file timed out after ${FILE_TIMEOUT / 1000} s (killed)`; p.kill('SIGKILL'); }, FILE_TIMEOUT);
+      children.add(p);
+      p.on('close', () => children.delete(p));
       p.on('close', (code) => { clearTimeout(kill); res({ code, text }); });
     });
     const m = /@@QA (.*)/.exec(text);
@@ -74,12 +88,16 @@ async function worker() {
     failed += r.fail;
     results.push({ name, ...r, ms: Math.round(performance.now() - s) });
     console.log(`${r.fail ? 'FAIL' : 'ok  '} ${name}  ${r.pass} passed${r.fail ? `, ${r.fail} failed` : ''}  ${Math.round(performance.now() - s)} ms`);
-    const body = text.replace(/@@QA .*\n?/, '').split('\n').filter((l) => r.fail || process.env.QA_VERBOSE === '1' || /NOTE|FAIL/.test(l) || !/^\s+PASS/.test(l)).join('\n').trim();
+    const verbose = process.env.QA_VERBOSE === '1';
+    const lines = text.replace(/@@QA .*\n?/, '').split('\n');
+    notes += lines.filter((l) => /^\s+NOTE/.test(l)).length;
+    const body = lines.filter((l) => verbose || (!/^\s+PASS/.test(l) && !/^\s+NOTE/.test(l))).join('\n').trim();
     if (body) console.log(body.split('\n').map((l) => '  ' + l).join('\n'));
   }
 }
 await Promise.all(Array.from({ length: Math.min(jobs, files.length) }, worker));
 rmSync(OUT, { recursive: true, force: true });
 const pass = results.reduce((a, r) => a + r.pass, 0);
-console.log(`\nqa: ${pass} passed, ${failed} failed in ${files.length} files — ${((performance.now() - t0) / 1000).toFixed(1)} s (build ${Math.round(tBuild)} ms)`);
+clearTimeout(cap);
+console.log(`\nqa: ${pass} passed, ${failed} failed${notes ? `, ${notes} known-issue notes (QA_VERBOSE=1 to list; docs/research/qa-findings.md)` : ''} in ${files.length} files — ${((performance.now() - t0) / 1000).toFixed(1)} s (build ${Math.round(tBuild)} ms)`);
 process.exit(failed ? 1 : 0);

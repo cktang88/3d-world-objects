@@ -188,7 +188,8 @@ try { g.navigator.userAgent ??= 'node-qa'; } catch { /* read-only */ }
 // Quiet the expected "remote fetch blocked" / 404 noise unless QA_VERBOSE=1
 if (process.env.QA_VERBOSE !== '1') {
   const warn = console.warn.bind(console), err = console.error.bind(console);
-  const quiet = (a: unknown[]) => a.some((x) => /qa shim|404|Not Found|Failed to load|THREE\.GLTFLoader|Couldn't load texture/i.test(String((x as any)?.message ?? x)));
+  const quiet = (a: unknown[]) => a.some((x) => /qa shim|404|Not Found|Failed to load|THREE\.GLTFLoader|Couldn't load texture|already non-indexed/i.test(String((x as any)?.message ?? x)));
   console.warn = (...a: unknown[]) => { if (!quiet(a)) warn(...a); };
+  console.info = () => {};
   console.error = (...a: unknown[]) => { if (!quiet(a)) err(...a); };
 }
