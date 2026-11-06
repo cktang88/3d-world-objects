@@ -473,7 +473,7 @@ export class Seamless {
     street: { range: 14, dot: 0.5, near: 3, dwell: 0, max: 2 },
     inside: { range: 4.5, dot: 0.85, near: 0, dwell: 0.4, max: 1 },
     // museum halls are big and their doorways show the next room: look further, two at a time
-    museum: { range: 25, dot: 0.6, near: 4, dwell: 0, max: 2 },
+    museum: { range: 34, dot: 0.6, near: 4, dwell: 0, max: 2 },
   };
   private dwell = new Map<string, number>();
   private clock = 0;

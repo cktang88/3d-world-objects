@@ -25,7 +25,7 @@ const CENTRE = new THREE.Vector3(0, 0, -16);
 /**
  * The great hall (after the British Museum's Great Court, the Met's Great Hall and the Smithsonian
  * Castle): a coffered ceiling round a skylight, a real Apollo 11 capsule on the central plinth, the
- * Bell X-1 overhead, six wing doorways each opening onto a lit vestibule framing the wing's
+ * Bell X-1 and the Wright Flyer overhead, six wing doorways each opening onto a lit vestibule framing the wing's
  * best object, banners and text panels per wing, an information desk and benches.
  */
 export class AtriumLevel extends MuseumBase {
@@ -100,7 +100,7 @@ export class AtriumLevel extends MuseumBase {
       const d = doors[i];
       const theme = m.themes[w.theme];
       doorSign(this, d, W, D, `Wing ${i + 1} · ${theme.collection}`, w.name, colors[i]);
-      doorPortal(this, d, W, D, `Enter the ${w.name} wing`, w.blurb, { kind: 'gallery', theme: w.theme, page: 0, wing: w.name }, seeThrough(i));
+      doorPortal(this, d, W, D, `Enter the ${w.name} wing`, w.blurb, { kind: 'gallery', theme: w.theme, page: 0, wing: w.name }, seeThrough(i), 34);
       this.banner(d, w.name, `Wing ${i + 1}`, colors[i]);
       this.wallText(d, i, w.name, w.blurb, theme.size, colors[i]);
       loads.push(
@@ -121,7 +121,7 @@ export class AtriumLevel extends MuseumBase {
     const siDoors: [number, number][] = [[6, 0], [7, 3]];
     for (const [di, k] of siDoors) {
       doorSign(this, doors[di], W, D, 'Smithsonian · real museum scans', SI_ROOMS[k].name, '#2b2a28');
-      doorPortal(this, doors[di], W, D, SI_ROOMS[k].name, SI_ROOMS[k].blurb, { kind: 'gallery', theme: SI_BASE + k, page: 0, wing: 'Smithsonian' }, seeThrough(di));
+      doorPortal(this, doors[di], W, D, SI_ROOMS[k].name, SI_ROOMS[k].blurb, { kind: 'gallery', theme: SI_BASE + k, page: 0, wing: 'Smithsonian' }, seeThrough(di), 34);
       loads.push(
         siEntries(SI_BASE + k).then((es) => {
           if (!this.alive) return;
@@ -132,7 +132,12 @@ export class AtriumLevel extends MuseumBase {
       );
     }
 
-    loads.push(this.centrepiece(ctx), this.flyer(ctx));
+    loads.push(
+      this.centrepiece(ctx),
+      this.flyer(ctx, /bell x-1/i, 1.5, -10.5, 0.55, 0.06, 2.2),
+      // the Wright Flyer, as it hung in the Smithsonian's Arts and Industries hall
+      this.flyer(ctx, /wright flyer/i, 0, -23.5, 0, -0.04, 1.4),
+    );
     this.flush();
     this.markBuilt();
     this.ready = Promise.allSettled(loads).then(() => this.settle());
@@ -266,24 +271,25 @@ export class AtriumLevel extends MuseumBase {
     this.flush();
   }
 
-  /** an aircraft overhead (the Bell X-1), at real size; low detail first, then the full scan */
-  private async flyer(ctx: Ctx) {
+  /**
+   * An aircraft overhead at real size (low detail first, then the full scan), on cables:
+   * the Bell X-1 banking between the entrance and the capsule, the Wright Flyer high over the north half.
+   */
+  private async flyer(ctx: Ctx, pick: RegExp, x: number, z: number, yaw: number, bank: number, below: number) {
     const es = await loadCatalog('smithsonian', 'air-space').catch(() => [] as LibraryEntry[]);
     if (!this.alive) return;
-    // the Bell X-1 (the Wright Flyer's catalog record points at files that 404)
-    const e = es.find((x) => /bell x-1/i.test(x.title) && x.size) ?? es.find((x) => x.size && Math.max(...x.size) <= 14 && Math.max(...x.size) > 6);
+    const e = es.find((q) => pick.test(q.title) && q.size);
     if (!e) return;
     const mm = siMeasured(e, false);
-    const y = H - 2.2 - mm.real.y;
-    // banking across the hall between the entrance and the capsule, clear of the title wall
-    const f = new Frame(1.5, -10.5, 0.55, y);
+    const y = H - below - mm.real.y;
+    const f = new Frame(x, z, yaw, y);
     const slot = this.exhibit(mm, f, 0, 0, 0, mm.real.x >= mm.real.z ? 0 : Math.PI / 2, { prio: -1, progressive: true });
-    slot.holder.rotation.z = 0.06;
+    slot.holder.rotation.z = bank;
     for (const [sx, sz] of [[-0.35, -0.3], [0.35, -0.3], [0, 0.35]]) {
       const p = f.point(sx * Math.max(mm.real.x, mm.real.z), mm.real.y * 0.7, sz * Math.min(mm.real.x, mm.real.z));
       this.rod(ctx.m.cable, p, new THREE.Vector3(p.x, H, p.z), 0.006);
     }
-    this.spot(new THREE.Vector3(-6, H - 0.4, -4), new THREE.Vector3(1.5, y + mm.real.y / 2, -10.5), { angle: 0.45, boost: 6 });
+    this.spot(new THREE.Vector3(x - 6, H - 0.4, z + 6), new THREE.Vector3(x, y + mm.real.y / 2, z), { angle: 0.45, boost: 6 });
     this.flush();
   }
 

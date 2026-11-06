@@ -281,7 +281,7 @@ export const ENTRY_Z = T + 0.5 + (CORR - 0.5) / 2;
  * places that room so its own entrance wall lands at the end of this passage) and `see` is told
  * when that preview appears or goes.
  */
-export function doorPortal(lv: MuseumBase, d: Door, W: number, D: number, label: string, sub: string, target: LevelDesc | 'back', see?: (shown: boolean) => void) {
+export function doorPortal(lv: MuseumBase, d: Door, W: number, D: number, label: string, sub: string, target: LevelDesc | 'back', see?: (shown: boolean) => void, range = 25) {
   const L = d.vest?.depth ?? CORR;
   const a = T + L - (CORR - 0.5), b = T + L;
   // the wall line, outward direction, and the yaw of someone walking out through the door
@@ -296,7 +296,7 @@ export function doorPortal(lv: MuseumBase, d: Door, W: number, D: number, label:
   const portal: Portal = { box: bx, label, sub, target, auto: true, returnPos: ret, returnYaw: w.back };
   if (see && typeof target === 'object') {
     // the next room's entrance wall (thickness T, then its passage) lands at the end of this one
-    portal.door = { pos: w.c.clone().addScaledVector(w.o, T + L + T - ENTRY_Z), yaw: w.back + Math.PI, see: true, range: 25 };
+    portal.door = { pos: w.c.clone().addScaledVector(w.o, T + L + T - ENTRY_Z), yaw: w.back + Math.PI, see: true, range };
     portal.onPreview = see;
   }
   lv.portals().push(portal);
