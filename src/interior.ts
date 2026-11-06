@@ -9,7 +9,7 @@ import { disposeTree, finishBuilding, overlaps, rect } from './level';
 import { getTimeOfDay } from './lighting';
 import { Kit } from './rooms/kit';
 import { M } from './rooms/mats';
-import { rugTex, windowViewTex } from './rooms/tex';
+import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
@@ -1373,6 +1373,8 @@ export class InteriorLevel implements Level {
     }
     this.consoleGroup(c);
     this.accentChair(c);
+    this.galleryWall(c);
+    if (Math.max(w, d) > 6) this.corners(c, 'armchair', 1);
     this.corners(c, 'plant', r.int(1, 2));
     // a dining table in the other half of a long living room
     if (Math.max(w, d) > 6.5) this.diningGroup(c, 4);
@@ -1381,7 +1383,9 @@ export class InteriorLevel implements Level {
 
   private bedroom(c: RoomCtx) {
     const r = c.r, k = this.kit;
-    const bw = area(c.room) > 14 ? 1.6 : 1.4;
+    // brownstones: sometimes the carved Poly Haven bed (1.49 x 2.04)
+    const bedId = this.style === 'house' && r.chance(0.4) ? 'GothicBed_01' : null;
+    const bw = bedId ? 1.38 : area(c.room) > 14 ? 1.6 : 1.4;
     // headboard against the wall with the longest free run, centred on it
     let bf: (Frame & { t: number }) | null = null;
     let bside: Side | null = null;
@@ -1402,7 +1406,7 @@ export class InteriorLevel implements Level {
       const [x, z] = this.at(bside, bf.t, 1.35);
       k.flat(M.mapped(`rugb${this.desc.seed % 7}`, rugTex(hashN(this.desc.seed, 77, room2n(c.room)) % 40)), bw + 1.2, 2.0, x, 0.008, z, 'keep', [1, 1], this.rotOf(bside));
     }
-    this.draw(bf, () => F.bed(k, r, bw, this.pal.wood, linen, duvet, r.pick(this.pal.accent), head));
+    this.libPiece(bf, bedId, (kk) => F.bed(kk, r, bw, this.pal.wood, linen, duvet, r.pick(this.pal.accent), head));
     // nightstands with lamps
     for (const sgn of [-1, 1]) {
       const t = bf.t + sgn * ((bw + 0.12) / 2 + 0.3);
@@ -1563,6 +1567,7 @@ export class InteriorLevel implements Level {
   private dining(c: RoomCtx) {
     const r = c.r, k = this.kit;
     this.diningGroup(c, 6);
+    this.galleryWall(c);
     for (const s of this.sidesByFreeLength(c, 1.5)) {
       const f = this.onWall(c, s.sd, 1.5, 0.48, 0.86, midFree(s.sd), 0.02) as (Frame & { t: number }) | null;
       if (!f) continue;
@@ -2016,6 +2021,35 @@ export class InteriorLevel implements Level {
       this.cur.group.add(glow('#ffd59a', 0.5, f.x, top.y + 0.4, f.z, 0.25));
       this.libTop(r, f, { ...top, x: top.w / 4, w: top.w / 2 }, 'table', 1, 0.5);
       this.painting(r, cand.sd, f.t, top.y + 1.0, Math.min(1.1, s[0] * 0.8));
+      return;
+    }
+  }
+
+  /** a cluster of small framed photos and prints over a free stretch of wall */
+  private galleryWall(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    for (const s of this.sidesByFreeLength(c, 2.0)) {
+      const [lo, hi] = longestFree(s.sd, 0.9);
+      if (hi - lo < 1.8) continue;
+      const t0 = (lo + hi) / 2;
+      const cols = r.int(2, 3), rows = 2;
+      const fw = 0.34, fh = 0.42, gap = 0.08;
+      const total = cols * fw + (cols - 1) * gap;
+      if (s.sd.used.some((u) => (u.h > 0.9 || u.h === 0) && t0 + total / 2 > u.a && t0 - total / 2 < u.b)) continue;
+      const frame = r.pick([M.black(), M.brass(), M.matte('#f4f1ea'), this.pal.wood]);
+      const [x0, z0] = this.at(s.sd, t0, 0.0);
+      this.kit.at(x0, 0, z0, this.rotOf(s.sd), () => {
+        for (let i = 0; i < cols; i++)
+          for (let j = 0; j < rows; j++) {
+            const ww = fw * r.range(0.8, 1.15), hh = fh * r.range(0.75, 1.1);
+            const x = -total / 2 + fw / 2 + i * (fw + gap) + r.range(-0.03, 0.03);
+            const y = 1.45 + j * (fh + gap) + r.range(-0.03, 0.03);
+            k.box(frame, ww + 0.04, hh + 0.04, 0.025, x, y - 0.02, 0.012);
+            if (r.chance(0.6)) k.box(M.matte('#f4f1ea'), ww, hh, 0.002, x, y, 0.026);
+            k.quad(M.mapped(`photo${(i * 7 + j * 3 + this.desc.seed) % 12}`, photoTex((i * 7 + j * 3 + this.desc.seed) % 12)), ww * 0.7, hh * 0.7, x, y + hh / 2, 0.028);
+          }
+      });
+      s.sd.used.push({ a: t0 - total / 2 - 0.1, b: t0 + total / 2 + 0.1, h: 0 });
       return;
     }
   }
