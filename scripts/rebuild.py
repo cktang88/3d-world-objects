@@ -10,7 +10,7 @@ R = ambient occlusion (Cycles AO bake), G = convexity (0.5 flat, >0.5 convex edg
 B = 1. The viewer (src/materials.ts) uses R to occlude indirect light and G for edge wear.
 
 Usage (inside a venv with `pip install sand3d`):
-    python scripts/rebuild.py list.json out_dir [--workers N] [--bake] [--samples 48]
+    python scripts/rebuild.py list.json out_dir [--workers N] [--bake] [--samples 48] [--minutes M] [--limit N]
 list.json: [[ds, split, row, id, entry], ...]   (programs are fetched from the HF rows API)
 """
 import json
@@ -183,33 +183,54 @@ def build_one(program, entry, out_path, bake=False, samples=48):
     s3d.export(obj, out_path)
 
 
-def worker(job_file, out_dir, bake=False, samples=48):
+def worker(job_file, out_dir, bake=False, samples=48, deadline=None):
     jobs = json.load(open(job_file))
+    failed = os.path.join(out_dir, ".failed")
     for ds, split, row, oid, entry in jobs:
+        if deadline and time.time() > deadline:
+            print("deadline", flush=True)
+            break
         out = os.path.join(out_dir, f"{oid}.glb")
         if os.path.exists(out):
             continue
         p = fetch_program(ds, split, row)
         if not p:
             continue
+        tmp = out[:-4] + ".part.glb"  # written then renamed: a killed run never leaves a truncated GLB
         try:
-            build_one(p["program"], p.get("entry") or entry, out, bake, samples)
+            build_one(p["program"], p.get("entry") or entry, tmp, bake, samples)
+            os.replace(tmp, out)
             print("ok", oid, os.path.getsize(out), flush=True)
         except Exception as e:  # noqa: BLE001
             print("fail", oid, repr(e)[:200], flush=True)
+            with open(failed, "a") as f:
+                f.write(oid + "\n")
+
+
+def arg(name, default=None, cast=str):
+    return cast(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
 
 
 def main():
+    """--minutes M: stop starting new objects after M minutes (resume by running again: finished
+    outputs and the ids in out_dir/.failed are skipped). --limit N: at most N objects this run."""
     bake = "--bake" in sys.argv
-    samples = int(sys.argv[sys.argv.index("--samples") + 1]) if "--samples" in sys.argv else 48
+    samples = arg("--samples", 48, int)
+    minutes = arg("--minutes", None, float)
+    deadline = time.time() + minutes * 60 if minutes else None
     if sys.argv[1] == "--worker":
-        worker(sys.argv[2], sys.argv[3], bake, samples)
+        worker(sys.argv[2], sys.argv[3], bake, samples, arg("--deadline", None, float))
         return
     lst, out_dir = sys.argv[1], sys.argv[2]
-    n = int(sys.argv[sys.argv.index("--workers") + 1]) if "--workers" in sys.argv else max(1, (os.cpu_count() or 2) - 1)
+    n = arg("--workers", max(1, (os.cpu_count() or 2) - 1), int)
     os.makedirs(out_dir, exist_ok=True)
     items = json.load(open(lst))
-    todo = [it for it in items if not os.path.exists(os.path.join(out_dir, f"{it[3]}.glb"))]
+    failed_file = os.path.join(out_dir, ".failed")
+    failed = set(open(failed_file).read().split()) if os.path.exists(failed_file) else set()
+    todo = [it for it in items if it[3] not in failed and not os.path.exists(os.path.join(out_dir, f"{it[3]}.glb"))]
+    limit = arg("--limit", None, int)
+    if limit is not None:
+        todo = todo[:limit]
     print(len(todo), "to build with", n, "workers", flush=True)
     procs = []
     for w in range(n):
@@ -218,7 +239,7 @@ def main():
             continue
         jf = os.path.join(out_dir, f".jobs-{w}.json")
         json.dump(chunk, open(jf, "w"))
-        extra = (["--bake"] if bake else []) + ["--samples", str(samples)]
+        extra = (["--bake"] if bake else []) + ["--samples", str(samples)] + (["--deadline", str(deadline)] if deadline else [])
         procs.append(subprocess.Popen([sys.executable, __file__, "--worker", jf, out_dir] + extra))
     for p in procs:
         p.wait()
