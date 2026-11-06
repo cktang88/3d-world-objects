@@ -28,6 +28,9 @@ const scene: LabScene = {
     const bus = carMesh('bus', r);
     bus.position.set(4, 0, 0);
     group.add(bus);
+    const truck = carMesh('truck', r);
+    truck.position.set(4, 0, -12);
+    group.add(truck);
   },
 };
 export default scene;

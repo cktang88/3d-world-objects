@@ -5,6 +5,7 @@ import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST } from './common';
 import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
+import { truckMesh } from './vehicleTruck';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 
 /**
@@ -15,7 +16,7 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
  * roof light. Until the models have streamed in, a cars shows a simple stand-in that is swapped on load.
  * Buses are a procedural MTA New Flyer Xcelsior (vehicleBus.ts).
  */
-export type VehicleKind = 'cab' | 'sedan' | 'bus';
+export type VehicleKind = 'cab' | 'sedan' | 'bus' | 'truck';
 
 /** which model a street car is, weighted like NYC traffic: lots of SUVs and sedans, some vans */
 const SEDANS: [string, number][] = [
@@ -188,8 +189,18 @@ function standin(color: string, len: number, wid: number, tall: boolean): THREE.
 }
 const M2 = { glass: mat('#1e2a33', { rough: 0.15, metal: 0.4 }) };
 
+/**
+ * A parked/showcase car for other areas (dealership lots, kerbs): the same detailed LOD model as street traffic
+ * (shared geometry and materials, ~1-8 draw calls by distance). userData.len/wid give its footprint; nose toward -z;
+ * stands on y=0. Call preloadFleet() first if it must be detailed on the first frame.
+ */
+export function parkedCar(kind: VehicleKind, rng: Rng): THREE.Group {
+  return carMesh(kind, rng);
+}
+
 export function carMesh(kind: VehicleKind, rng: Rng): THREE.Group {
   if (kind === 'bus') return busMesh(rng);
+  if (kind === 'truck') return truckMesh(rng);
   startLoading();
   const id = kind === 'cab' ? weighted(rng, CABS) : weighted(rng, SEDANS);
   const f = FLEET[id];
@@ -260,7 +271,7 @@ export class Traffic {
   }
   update(dt: number, p: THREE.Vector3, time: number) {
     while (this.cars.length < 26) {
-      const kind = this.rng.chance(0.08) ? 'bus' : this.rng.chance(0.55) ? 'cab' : 'sedan';
+      const kind: VehicleKind = this.rng.chance(0.07) ? 'bus' : this.rng.chance(0.07) ? 'truck' : this.rng.chance(0.5) ? 'cab' : 'sedan';
       const obj = carMesh(kind, this.rng);
       this.group.add(obj);
       const c: Car = { obj, axis: 'z', dir: 1, line: 0, t: 0, v: 0, vmax: this.rng.range(9, 14), len: obj.userData.len ?? 4.8, wid: obj.userData.wid ?? 1.9, rect: { minX: 0, minZ: 0, maxX: 0, maxZ: 0 } };
