@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
-import { ShopLevel } from '../shop';
+import { ShopLevel, SHOP_BUDGET } from '../shop';
 import { SHOPS } from '../nyc';
 
 /**
  * ?lab=shop-interior&type=deli&seed=3       one ShopLevel, seen from just inside the door
  * &view=back|front|counter|side              preset camera (or &cam=&look= as usual)
+ * &budget=<tris>                               product triangle budget (lower renders faster in software)
  * The shop's own lighting replaces the lab's: hemisphere, ambient and exposure come from ShopLevel.env.
  */
 const scene: LabScene = {
@@ -19,6 +20,7 @@ const scene: LabScene = {
     const type = params.get('type') ?? 'deli';
     const seed = Number(params.get('seed') ?? 7);
     const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
+    if (params.get('budget')) SHOP_BUDGET.tris = Number(params.get('budget'));
     const lv = new ShopLevel({ kind: 'interior', seed, name: `${info.names[0]}`, style: 'shop', floor: 0, floors: 1, biome: 'temperate', shop: type });
     group.add(lv.group);
     (window as unknown as { __shop: ShopLevel }).__shop = lv;
