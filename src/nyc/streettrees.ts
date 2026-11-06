@@ -897,18 +897,14 @@ function chunkTrees(group: THREE.Object3D): ChunkTrees {
   if (ct) return ct;
   const mk = (m: THREE.Material, v: number, i: number, part: 'bark' | 'leaves') => {
     const bm = new THREE.BatchedMesh(32, v, i, m);
+    bm.userData.capV = v;
+    bm.userData.capI = i;
     bm.customDepthMaterial = treeDepthMat(part);
     bm.castShadow = true;
     bm.receiveShadow = true;
     bm.sortObjects = false;
     bm.userData.owned = true;
-    // disposeTree() disposes the (owned) geometry: free the batch's textures with it
-    let gone = false;
-    bm.geometry.addEventListener('dispose', () => {
-      if (gone) return;
-      gone = true;
-      bm.dispose();
-    });
+    watchDispose(bm);
     group.add(bm);
     return bm;
   };
@@ -1014,6 +1010,33 @@ function addImpostor(ct: ChunkTrees, group: THREE.Object3D, x: number, y: number
   return n;
 }
 
+/**
+ * disposeTree() disposes the (owned) geometry of a chunk's batches: free the batch's textures with
+ * it. BatchedMesh.setGeometrySize() also disposes (and replaces) its geometry while growing, so
+ * that case is flagged and the listener moves to the new geometry.
+ */
+function watchDispose(bm: THREE.BatchedMesh) {
+  const g = bm.geometry;
+  const onDispose = () => {
+    g.removeEventListener('dispose', onDispose);
+    if (bm.userData.growing || bm.userData.gone) return;
+    bm.userData.gone = true;
+    bm.dispose();
+  };
+  g.addEventListener('dispose', onDispose);
+}
+function growBatch(bm: THREE.BatchedMesh, v: number, i: number) {
+  bm.userData.growing = true;
+  try {
+    bm.setGeometrySize(v, i);
+    bm.userData.capV = v;
+    bm.userData.capI = i;
+  } finally {
+    bm.userData.growing = false;
+  }
+  watchDispose(bm);
+}
+
 /** add both LODs of a model to the chunk's batched meshes (growing them if needed) */
 function ensureModel(ct: ChunkTrees, key: string, model: TreeModel) {
   if (ct.geo.has(`${key}|hi`)) return;
@@ -1025,10 +1048,8 @@ function ensureModel(ct: ChunkTrees, key: string, model: TreeModel) {
       const [v, i] = geoCount(g);
       const vk = part, ik = part === 'bark' ? 'barkI' : 'leavesI';
       const needV = ct.verts[vk] + v, needI = ct.verts[ik] + i;
-      // the batch allocates its buffers on the first addGeometry: until then use the constructor sizes
-      const pa = bm.geometry.getAttribute('position');
-      const curV = pa ? pa.count : part === 'bark' ? 24000 : 32000, curI = bm.geometry.index ? bm.geometry.index.count : part === 'bark' ? 72000 : 48000;
-      if (needV > curV || needI > curI) bm.setGeometrySize(Math.max(needV, curV * 2), Math.max(needI, curI * 2));
+      const curV = bm.userData.capV as number, curI = bm.userData.capI as number;
+      if (needV > curV || needI > curI) growBatch(bm, Math.max(needV, curV * 2), Math.max(needI, curI * 2));
       ids[part] = bm.addGeometry(g);
       ct.verts[vk] = needV;
       ct.verts[ik] = needI;

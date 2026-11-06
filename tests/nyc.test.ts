@@ -6,6 +6,8 @@ import { AVE, ST, SW, BX, BZ, LX, LZ, CURB, AX, SZ } from '../src/nyc/common';
 import { districtAt } from '../src/nyc/districts';
 import { facing } from '../src/seamless';
 import type { Rect } from '../src/level';
+import { addTree, SPECIES, TREE_VARIANTS } from '../src/nyc/streettrees';
+import { Rng } from '../src/rng';
 
 // the spawn block and its neighbour (each block costs ~1-2 s of CPU; builds are cached per file).
 // Colliders, portals and doors are block-local (NycLevel.ensure() shifts them by cx*AX, cz*SZ).
@@ -144,4 +146,19 @@ test('same seed, same block (determinism)', () => {
   expect(sceneHash(a.group) === sceneHash(b.group), `scene hash differs: ${sceneHash(a.group)} vs ${sceneHash(b.group)}`);
   expect(JSON.stringify(a.colliders) === JSON.stringify(b.colliders), 'colliders differ between builds');
   expect(sceneHash(a.group) !== sceneHash(nycChunk(1, 0, 0).group), 'two different blocks hash the same');
+});
+
+test('street trees: one group takes every species and variant (batch growth keeps working)', () => {
+  const g = new THREE.Group();
+  const r = new Rng(3);
+  let n = 0;
+  for (let k = 0; k < 3; k++)
+    for (const sp of SPECIES)
+      for (let v = 0; v < TREE_VARIANTS; v++, n++) addTree(g, sp, v, (n % 20) * 6, 0.15, Math.floor(n / 20) * 6, r);
+  const batches = g.children.filter((o) => (o as THREE.BatchedMesh).isBatchedMesh) as THREE.BatchedMesh[];
+  expect(batches.length === 2, `${batches.length} tree batches in the group (want bark + leaves)`);
+  for (const b of batches) {
+    expect(!b.userData.gone, 'a tree batch was disposed while growing');
+    expect(b.instanceCount === n, `batch holds ${b.instanceCount} trees, added ${n}`);
+  }
 });
