@@ -244,7 +244,7 @@ function glyphAtlas() {
   return glyphs;
 }
 
-let textMats: { sign: THREE.MeshStandardMaterial; neon: THREE.MeshStandardMaterial } | null = null;
+let textMats: { sign: THREE.MeshStandardMaterial; neon: THREE.MeshStandardMaterial; paint: THREE.MeshStandardMaterial } | null = null;
 function vcEmissive(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance *= vColor;');
@@ -257,6 +257,7 @@ function textMaterials() {
   const t = glyphAtlas().tex;
   textMats = {
     sign: vcEmissive(new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.45, vertexColors: true, roughness: 0.5, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 0.15 }), 'sign'),
+    paint: new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.45, vertexColors: true, roughness: 0.9 }),
     neon: vcEmissive(new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.3, vertexColors: true, roughness: 0.3, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 2.2, toneMapped: false }), 'neon'),
   };
   onNight((f) => {
@@ -276,9 +277,9 @@ export function litPanelMat() {
 }
 
 export class TextBatch {
-  sets = { sign: { p: [] as number[], u: [] as number[], c: [] as number[] }, neon: { p: [] as number[], u: [] as number[], c: [] as number[] } };
+  sets = { sign: { p: [] as number[], u: [] as number[], c: [] as number[] }, neon: { p: [] as number[], u: [] as number[], c: [] as number[] }, paint: { p: [] as number[], u: [] as number[], c: [] as number[] } };
   /** text centred at (x, y) in the frame `m`, glyph height h, squeezed to fit maxW */
-  add(m: THREE.Matrix4, text: string, x: number, y: number, z: number, h: number, maxW: number, color: string, font = 0, kind: 'sign' | 'neon' = 'sign') {
+  add(m: THREE.Matrix4, text: string, x: number, y: number, z: number, h: number, maxW: number, color: string, font = 0, kind: 'sign' | 'neon' | 'paint' = 'sign') {
     const G = glyphAtlas();
     const set = this.sets[kind];
     const col = new THREE.Color(color);
@@ -310,7 +311,7 @@ export class TextBatch {
   }
   build(parent: THREE.Object3D) {
     const M = textMaterials();
-    for (const k of ['sign', 'neon'] as const) {
+    for (const k of ['sign', 'neon', 'paint'] as const) {
       const s = this.sets[k];
       if (!s.p.length) continue;
       const g = new THREE.BufferGeometry();

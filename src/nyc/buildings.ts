@@ -681,9 +681,14 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   for (const s of sides) {
     const isFront = s === front;
     if (!isFront && !exposed(s)) {
-      // party wall: plain, it is mostly hidden by neighbours
+      // party wall: common brick, seen above shorter neighbours; sometimes a faded painted ad
       const Fp = new Face(ctx, r, s);
-      Fp.wall(plain, 0, h);
+      const pt = softTint(rng.pick(['#8c5a44', '#7a4a3a', '#9a7a62', '#6b5a4e']), 0.3);
+      Fp.wall(facadeMat('brick', 1), 0, h, pt);
+      if (h > 14 && s !== front && rng.chance(0.12) && Fp.len > 8) {
+        const ad = rng.pick(['FURS · STORAGE', 'UNEEDA BISCUIT', 'OMEGA OIL', 'FLETCHER’S CASTORIA', 'HOTEL · ROOMS $2', 'PIANOS', 'COCA-COLA']);
+        ctx.text.add(Fp.m, ad, 0, h - 3, 0.02, 1.4, Fp.len * 0.85, rng.pick(['#c9c0a8', '#b8a888', '#d8cfb8']), rng.pick([0, 1, 3]), 'paint');
+      }
       continue;
     }
     const F = new Face(ctx, r, s);
@@ -858,7 +863,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       B(F.g, pm, pw + 0.2, 0.08, 0.62, 0, h + 0.55, 0.2);
       B(F.f, pm, 0.5, 0.4, 0.3, 0, h + 0.63, 0.12, false);
       const label = rng.chance(0.6) ? String(rng.int(1868, 1912)) : rng.pick(['THE ROSALIND', 'ANNA', 'THE ELDORADO', 'KATHERINE', 'THE MARGARET', 'ESTELLE']);
-      ctx.text.add(F.m, label, 0, h - (type === 'castiron' ? 1.3 : 1.0) * 0.72, 0.075, 0.3, Math.min(L * 0.5, 3.5), shade(cColor, 0.55), 1);
+      ctx.text.add(F.m, label, 0, h - (type === 'castiron' ? 1.3 : 1.0) * 0.72, 0.075, 0.3, Math.min(L * 0.5, 3.5), shade(cColor, 0.55), 1, 'paint');
     }
     // ---- fire escape on the front
     if (isFront && (type === 'tenement' || type === 'castiron' || (type === 'midrise' && floors <= 8)) && levels.length >= 2 && rng.chance(type === 'castiron' ? 0.5 : 0.85)) {
