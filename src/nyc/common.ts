@@ -67,7 +67,9 @@ export function bake(src: THREE.Object3D): THREE.Group {
     if (tint) {
       col.set(tint);
       const c = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) { c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
+      // a baked per-vertex shade (ambient occlusion) on the geometry multiplies the tint
+      const ao = keepColor && mesh.userData.ao ? (g.getAttribute('color') as THREE.BufferAttribute) : null;
+      for (let i = 0; i < n; i++) { const k = ao ? ao.getX(i) : 1; c[i * 3] = col.r * k; c[i * 3 + 1] = col.g * k; c[i * 3 + 2] = col.b * k; }
       g.setAttribute('color', new THREE.BufferAttribute(c, 3));
       key = `${mesh.material.uuid}|${mesh.castShadow}`;
     } else if (plain) {

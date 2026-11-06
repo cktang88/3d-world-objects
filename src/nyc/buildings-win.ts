@@ -36,8 +36,21 @@ type A = [number, number]; // [anchor 0..1, offset metres]
 class AGeo {
   parts: THREE.BufferGeometry[] = [];
   /** a box between anchored corners */
-  box(x0: A, x1: A, y0: A, y1: A, z0: number, z1: number) {
-    const g = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+  /** faces: which sides to keep, of 'px nx py ny pz nz' (default: all but the back, nz) */
+  box(x0: A, x1: A, y0: A, y1: A, z0: number, z1: number, faces = 'px nx py ny pz') {
+    let g = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+    if (faces !== 'all') {
+      const keep = ['px', 'nx', 'py', 'ny', 'pz', 'nz'].map((f) => faces.includes(f));
+      const sub = new THREE.BufferGeometry();
+      for (const name of ['position', 'normal', 'uv'] as const) {
+        const at = g.getAttribute(name) as THREE.BufferAttribute;
+        const out: number[] = [];
+        for (let f = 0; f < 6; f++) if (keep[f]) for (let k = 0; k < 6 * at.itemSize; k++) out.push(at.array[f * 6 * at.itemSize + k]);
+        sub.setAttribute(name, new THREE.Float32BufferAttribute(out, at.itemSize));
+      }
+      g.dispose();
+      g = sub;
+    }
     const p = g.getAttribute('position') as THREE.BufferAttribute;
     const an = new Float32Array(p.count * 2);
     for (let i = 0; i < p.count; i++) {
@@ -92,11 +105,12 @@ function geo(key: string, make: () => THREE.BufferGeometry) {
 function revealGeo() {
   return geo('reveal', () => {
     const t = 0.05, z0 = -REVEAL - 0.02, z1 = -0.003;
+    // only the inner faces of the opening are ever seen
     return new AGeo()
-      .box(L(-t), L(0), L(-t), R(t), z0, z1)
-      .box(R(0), R(t), L(-t), R(t), z0, z1)
-      .box(L(0), R(0), R(0), R(t), z0, z1)
-      .box(L(0), R(0), L(-t), L(0), z0, z1)
+      .box(L(-t), L(0), L(-t), R(t), z0, z1, 'px')
+      .box(R(0), R(t), L(-t), R(t), z0, z1, 'nx')
+      .box(L(0), R(0), R(0), R(t), z0, z1, 'ny')
+      .box(L(0), R(0), L(-t), L(0), z0, z1, 'py')
       .done();
   });
 }
@@ -150,21 +164,19 @@ function sashGeo(kind: SashKind) {
     const a = new AGeo();
     const zf = -REVEAL + 0.04; // frame plane
     // outer frame (blind stop) against the reveal
-    a.box(L(0), L(0.06), L(0), R(0), zf - 0.02, zf + 0.05);
-    a.box(R(-0.06), R(0), L(0), R(0), zf - 0.02, zf + 0.05);
-    a.box(L(0), R(0), R(-0.06), R(0), zf - 0.02, zf + 0.05);
-    a.box(L(0), R(0), L(0), L(0.05), zf - 0.02, zf + 0.06);
+    a.box(L(0), L(0.06), L(0), R(0), zf - 0.02, zf + 0.05, 'px pz');
+    a.box(R(-0.06), R(0), L(0), R(0), zf - 0.02, zf + 0.05, 'nx pz');
+    a.box(L(0), R(0), R(-0.06), R(0), zf - 0.02, zf + 0.05, 'ny pz');
+    a.box(L(0), R(0), L(0), L(0.05), zf - 0.02, zf + 0.06, 'py pz');
     if (kind === 'dh') {
       // upper sash (back) and lower sash (front), meeting at mid-height
+      // stiles run the full height; top rail, meeting rails (the lower sash sits in front), bottom rail
       const zu = zf + 0.0, zl = zf + 0.045;
-      a.box(L(0.06), L(0.11), H(0), R(-0.06), zu, zu + 0.035);
-      a.box(R(-0.11), R(-0.06), H(0), R(-0.06), zu, zu + 0.035);
-      a.box(L(0.06), R(-0.06), R(-0.11), R(-0.06), zu, zu + 0.035);
-      a.box(L(0.06), R(-0.06), H(0.0), H(0.045), zu, zu + 0.035);
-      a.box(L(0.06), L(0.11), L(0.05), H(0.03), zl, zl + 0.035);
-      a.box(R(-0.11), R(-0.06), L(0.05), H(0.03), zl, zl + 0.035);
-      a.box(L(0.06), R(-0.06), L(0.05), L(0.13), zl, zl + 0.035);
-      a.box(L(0.06), R(-0.06), H(-0.02), H(0.03), zl, zl + 0.035);
+      a.box(L(0.06), L(0.11), L(0.05), R(-0.06), zu, zl + 0.035, 'px pz');
+      a.box(R(-0.11), R(-0.06), L(0.05), R(-0.06), zu, zl + 0.035, 'nx pz');
+      a.box(L(0.11), R(-0.11), R(-0.11), R(-0.06), zu, zu + 0.035, 'ny pz');
+      a.box(L(0.11), R(-0.11), H(-0.02), H(0.045), zu, zl + 0.035, 'py ny pz');
+      a.box(L(0.11), R(-0.11), L(0.05), L(0.13), zl, zl + 0.035, 'py pz');
     } else if (kind === 'case') {
       // tall loft window: centre mullion and a transom bar near the top
       a.box(H(-0.035), H(0.035), L(0.05), [0.78, 0], zf, zf + 0.05);
@@ -371,7 +383,7 @@ vec3 roomShade(out float lampGlow) {
     float mun = vRoomI.w;
     if (mun > 0.5) {
       vec2 g = abs(fract(pu * vec2(mun > 1.5 ? 3.0 : 2.0, 4.0)) - 0.5);
-      if (max(1.0 - smoothstep(0.47, 0.49, g.x), 1.0 - smoothstep(0.47, 0.49, g.y)) < 0.5) room *= 0.15;
+      if (min(1.0 - smoothstep(0.47, 0.49, g.x), 1.0 - smoothstep(0.47, 0.49, g.y)) < 0.5) room *= 0.15;
     }
     float lit = vInfo.y;
     float warm = h11(seed + 31.0);
@@ -446,7 +458,7 @@ export class WindowBatch {
     };
     const L = this.list;
     make(revealGeo(), M.reveal, L, (s) => s.revealColor, false);
-    for (const k of ['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]) make(trimGeo(k), M.trim, L.filter((s) => s.trim === k), (s) => s.trimColor, true);
+    for (const k of ['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]) make(trimGeo(k), M.trim, L.filter((s) => s.trim === k), (s) => s.trimColor, true, undefined, fine);
     for (const k of ['dh', 'case', 'store'] as SashKind[]) make(sashGeo(k), M.sash, L.filter((s) => s.sash === k), (s) => s.sashColor, false, undefined, fine);
     const ac = L.filter((s) => s.ac);
     make(acGeo(), M.ac, ac, (s) => s.ac!, true, undefined, fine);

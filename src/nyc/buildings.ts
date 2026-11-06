@@ -223,9 +223,14 @@ export class Face {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     g.computeVertexNormals();
+    // baked contact shadow: walls darken towards the pavement
+    const col = new Float32Array(pos.length);
+    for (let i = 0; i < pos.length; i += 3) col.fill(0.68 + 0.32 * Math.pow(Math.min(1, Math.max(0, pos[i + 1]) / 3), 0.6), i, i + 3);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const o = new THREE.Mesh(g, m);
     o.castShadow = true;
     if (tint) o.userData.tint = tint;
+    o.userData.ao = true;
     this.g.add(o);
   }
   /** a horizontal band along the whole face */

@@ -482,10 +482,10 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
     for (const s of [-1, 1]) {
       const wu = du + (s * bayW) / 2;
       // glazed returns above a bulkhead
-      const rm = new THREE.Matrix4().makeRotationY((s * Math.PI) / 2);
+      const rm = new THREE.Matrix4().makeRotationY((-s * Math.PI) / 2); // glass faces into the recess
       const base = F.m.clone().multiply(new THREE.Matrix4().makeTranslation(wu, 0, 0)).multiply(rm);
       B(G, frameM, 0.08, bulk, recess, wu, 0, -recess / 2, false);
-      ctx.shop.add(base.clone().multiply(new THREE.Matrix4().makeTranslation(s > 0 ? 0 : -recess, bulk, 0)), recess, transom - bulk, cell, 3, seed, lit);
+      ctx.shop.add(base.clone().multiply(new THREE.Matrix4().makeTranslation(s > 0 ? -recess : 0, bulk, 0)), recess, transom - bulk, cell, 3, seed, lit);
       B(G, frameM, 0.08, dispTop - transom, recess, wu, transom, -recess / 2, false);
     }
     B(G, mat(rng.pick(['#e8e2d4', '#c9c2b0', '#b8b0a0']), { rough: 0.6 }), bayW, 0.02, recess + 0.12, du, 0, -recess / 2);

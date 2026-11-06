@@ -18,6 +18,7 @@ const scene: LabScene = {
   build({ group, params }) {
     level = new NycLevel({ kind: 'nyc', seed: Number(params.get('seed') ?? 20261105), name: 'Manhattan' });
     group.add(level.group);
+    (window as unknown as { __lab: unknown }).__lab = { level };
     player.set(Number(params.get('px') ?? 0), 0, Number(params.get('pz') ?? 0));
     // stream in everything around the point before the screenshot
     for (let i = 0; i < 30; i++) level.update(0.016, player, 0);
