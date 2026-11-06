@@ -51,3 +51,42 @@ Reference photos (Wikimedia Commons, looked at one by one) and what `src/shop.ts
 **Signage.** Aisle numbers (hanging double-sided), department words on walls, yellow "SALE" / "2 for $5" shelf talkers, open/hours, EXIT sign, "No more than 2 students at a time"-style handwritten notes, ATM.
 
 **Lighting.** Chains and bodegas: cool, bright, even (troffers/tubes). Coolers glow. Antiques/music/furniture: warm spots and pools of light, darker walls.
+
+## What is built (src/shop.ts, src/shopkit/)
+
+- `shopkit/layouts.ts`: one layout per shop type (room size, ceiling, floor, walls, light, fixtures).
+  Bodega/deli: tin or drop ceiling, VCT checkerboard, glass-door coolers down one wall, gondolas, deli
+  case + slicer/grill + menu board at the back, tobacco back bar, counter with register, card reader,
+  lotto dispenser and candy, ATM, water cases, cat. Pharmacy: drop ceiling + troffers, aisles with
+  numbered hanging signs, endcaps, floor stacks, coolers, pharmacy counter, department words. Hardware:
+  pressed tin, pegboard wall, floor-to-ceiling shelving with rolling ladder, peg-backed gondolas, bin
+  cabinet, glass showcase counter. Music: exposed ceiling, brick, guitar walls (2 staggered rows),
+  amps, risers on rugs. Antiques: tin ceiling, dark walls, rugs, chandeliers, curio cabinets, one-of-each
+  shelves. Furniture: vignettes on rugs. Plus toys, electronics, kitchen supply, lighting, sports,
+  stationery/books, garden, models, machines.
+- `shopkit/fixtures.ts`: the fixtures; `shopkit/tex.ts`: canvas textures (drop tile, pressed tin with
+  normal map, VCT, pegboard, slatwall, price strips, cigarette rack, lotto tickets, menu board, rugs, book
+  spines, TV screens); `shopkit/kit.ts`: builds fixtures in a local frame and records colliders,
+  product segments and containers. Static fixtures are baked into a few meshes (`bake()`).
+- Stock: fixtures emit segments (shelf, hook, pile, stack, single, ceiling). Products (sand3d pools for
+  the shop, plus a few Google Scanned Objects / Poly Haven models from `src/libraries.ts`) are assigned
+  where they fit near real size (wanted kinds first: drinks to coolers, instruments to guitar hooks),
+  packed as fronted rows / stacks / heaps / hooks, instanced, and swapped to Objaverse originals within a
+  2.5 M triangle budget. Blocks a product can't afford, and the rest of the shelf space, get generic
+  packaging (`shopkit/filler.ts`: boxes, cans, bottles, jars, chip bags, blister cards, paint cans,
+  pots with plants, guitars; one InstancedMesh per kind, tinted printed labels).
+- Containers (coolers, showcases, curios, deli cases) stock lazily: `ShopLevel.containers[i].generate()`,
+  called by `update()` when the player is near and in front.
+- `ShopLevel.door` / `room` expose the street door (level coordinates) and room size.
+
+Lab: `/?lab=shop-interior&type=<type>&seed=<n>&budget=<tris>&containers=closed`.
+
+| | |
+|---|---|
+| ![deli](img/shop-deli.jpg) bodega aisle (cf. cstore1/cstore2) | ![counter](img/shop-deli-counter.jpg) counter, tobacco rack, lotto (cf. cstore3) |
+| ![pharmacy](img/shop-pharmacy.jpg) pharmacy (cf. cvs1) | ![music](img/shop-music.jpg) guitar walls (cf. guitar1) |
+| ![antiques](img/shop-antiques.jpg) antiques (cf. antique1) | ![furniture](img/shop-furniture.jpg) furniture vignettes (cf. furn2) |
+| ![garden](img/shop-garden.jpg) plant shop (cf. plants1) | ![electronics](img/shop-electronics.jpg) electronics |
+| ![stationery](img/shop-stationery.jpg) books & stationery | ![toys](img/shop-toys.jpg) toys (cf. toys1) |
+
+Screenshots are software-rendered at `--quality low` with a reduced product budget.
