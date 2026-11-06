@@ -107,7 +107,15 @@ items under 45 cm stand on 0.9 m plinths.
 `&src=gso&category=shoe&n=16&wrap=8`, `&src=ph&q=chair` (use `ph`, `si`, `kh` aliases: scripts/shot.mjs proxies
 every URL containing "polyhaven", including the page's own), `&src=si&id=<uuid>`, `&detail=low|full`.
 
-Screenshots: see the commit that adds them (`docs/research/img/lib-*.png`).
+Screenshots (software rendering, `--quality low`):
+
+- ![all sources](img/lib-browser.jpg) overview: Poly Haven, GSO (on plinths), Smithsonian, Khronos rows
+- ![Poly Haven chairs](img/lib-polyhaven-chairs.jpg) `&src=ph&q=chair`
+- ![GSO shoes](img/lib-gso-shoes.jpg) `&src=gso&category=shoe`
+- ![Smithsonian art](img/lib-smithsonian-art.jpg) `&src=si&category=art&detail=low`: Greenough's 3.7 m George Washington next to small bronzes
+
+Performance: a Smithsonian Medium GLB is ~150k faces + 2k textures, GSO ~10–40k faces, Poly Haven 1–30k.
+The overview (24 models, Smithsonian/GSO at `low`) is 142 draw calls / 1.25 M triangles.
 
 ## Unfinished / next
 

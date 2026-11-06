@@ -28,7 +28,7 @@ async function showcase(src: LibrarySource, n: number): Promise<LibraryEntry[]> 
     const out: LibraryEntry[] = [];
     for (const c of SI_CATS) {
       const hits = await searchLibrary({ source: 'smithsonian', category: c, maxSize: 3, minSize: 0.05, seed: 7 });
-      const one = hits.find((e) => (e.kb ?? 0) < 3000 && !e.parts);
+      const one = hits.find((e) => (e.kb ?? 0) < 3000 && (e.parts?.length ?? 1) <= 1);
       if (one) out.push(one);
     }
     return out.slice(0, n);
@@ -88,7 +88,7 @@ async function row(group: THREE.Group, entries: LibraryEntry[], z: number, title
     obj.position.y = base;
     cell.add(obj);
     const dims = `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m`;
-    const l = label([e.title, `${e.category} · ${e.licence}`, dims], Math.max(1.1, Math.min(w, 2)));
+    const l = label([e.title, `${e.category} · ${e.licence}`, dims], Math.max(0.9, Math.min(w + 0.4, 2)));
     l.position.set(0, 0.02, Math.max(size.z, 0.35) / 2 + 0.45);
     cell.add(l);
     cell.position.set(x + w / 2, 0, zz);
@@ -106,8 +106,8 @@ async function row(group: THREE.Group, entries: LibraryEntry[], z: number, title
 const scene: LabScene = {
   name: 'lib-browser',
   description: 'third-party model libraries at real scale: &source=&category=&q=&n=&id=',
-  cam: [7, 8, 17],
-  look: [7, 0, 3.5],
+  cam: [6, 6.5, 13],
+  look: [6, 0, 3],
   env: 'studio',
   async build({ group, params }) {
     // short aliases: scripts/shot.mjs proxies any URL containing 'polyhaven', including this page's own
