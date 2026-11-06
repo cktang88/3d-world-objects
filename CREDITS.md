@@ -543,7 +543,6 @@ Street cars, via the [Objaverse](https://huggingface.co/datasets/allenai/objaver
 - **prius** — "Toyota Prius" by AirplaneChef, https://sketchfab.com/3d-models/aa599d492d3d4618a1bf5f3786e1bbd9, CC-BY-4.0 (CC Attribution)
 - **accord** — "Honda Accord 2008" by David_Holiday, https://sketchfab.com/3d-models/1e3be91c28104f6489b42248884327fe, CC-BY-4.0 (CC Attribution)
 - **charger** — "Unmarked Dodge Charger" by David_Holiday, https://sketchfab.com/3d-models/2f69495ce4e040878237eb7f46e7029e, CC-BY-4.0 (CC Attribution)
-- **tahoe** — "Chevy Tahoe-Unmarked" by David_Holiday, https://sketchfab.com/3d-models/8b1db1daad3f4c1fafd41f9a36511855, CC-BY-4.0 (CC Attribution)
 - **suburban** — "Chevrolet Suburban 2015-Unmarked" by David_Holiday, https://sketchfab.com/3d-models/b01950cf99aa48c1ba2ebd0addc8a9d4, CC-BY-4.0 (CC Attribution)
 - **escalade** — "2009 Cadillac Escalade" by nekkantisrikar2007, https://sketchfab.com/3d-models/7c5516c76bd441d998af76e2240a2b8d, CC-BY-4.0 (CC Attribution)
 - **explorer** — "Ford Explorer ST" by David_Holiday, https://sketchfab.com/3d-models/a47d2d8c83b44d348329dba8f92d1adc, CC-BY-4.0 (CC Attribution)

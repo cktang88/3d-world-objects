@@ -24,7 +24,6 @@ export const FLEET: Record<string, FleetModel> = {
   prius: { id: 'prius', len: 4.54, wid: 1.76, paint: true },
   accord: { id: 'accord', len: 4.93, wid: 1.85, paint: true },
   charger: { id: 'charger', len: 5.08, wid: 1.9, paint: true },
-  tahoe: { id: 'tahoe', len: 5.13, wid: 2.0, paint: true },
   suburban: { id: 'suburban', len: 5.7, wid: 2.0, paint: true },
   escalade: { id: 'escalade', len: 5.14, wid: 2.05, paint: true },
   explorer: { id: 'explorer', len: 5.05, wid: 2.0, paint: true },
@@ -158,6 +157,31 @@ function toFloat(g: THREE.BufferGeometry) {
   return out;
 }
 
+/**
+ * Some exported bodies have normals pointing into the car (dark paint with chrome-like reflections). The winding is
+ * right (those faces are visible), so flip every vertex normal that disagrees with its triangles' geometric normals.
+ */
+function fixInverted(g: THREE.BufferGeometry) {
+  const pos = g.getAttribute('position'), nor = g.getAttribute('normal');
+  const idx = g.index!.array;
+  const acc = new Float32Array(pos.count * 3);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < idx.length; i += 3) {
+    const i0 = idx[i], i1 = idx[i + 1], i2 = idx[i + 2];
+    a.fromBufferAttribute(pos, i0);
+    b.fromBufferAttribute(pos, i1).sub(a);
+    c.fromBufferAttribute(pos, i2).sub(a);
+    b.cross(c);
+    for (const v of [i0, i1, i2]) {
+      acc[v * 3] += b.x;
+      acc[v * 3 + 1] += b.y;
+      acc[v * 3 + 2] += b.z;
+    }
+  }
+  for (let i = 0; i < nor.count; i++)
+    if (nor.getX(i) * acc[i * 3] + nor.getY(i) * acc[i * 3 + 1] + nor.getZ(i) * acc[i * 3 + 2] < 0) nor.setXYZ(i, -nor.getX(i), -nor.getY(i), -nor.getZ(i));
+}
+
 function prepare(root: THREE.Object3D, id: string): Part[] {
   root.updateMatrixWorld(true);
   const buckets = new Map<string, { mat: THREE.Material | 'paint'; geos: THREE.BufferGeometry[]; vc: boolean; double: boolean }>();
@@ -169,6 +193,7 @@ function prepare(root: THREE.Object3D, id: string): Part[] {
     const g = toFloat(mesh.geometry);
     g.applyMatrix4(mesh.matrixWorld);
     if (!g.getAttribute('normal')) g.computeVertexNormals();
+    else fixInverted(g);
     const n = g.getAttribute('position').count;
     if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
     const name = src.name || '';
@@ -177,6 +202,7 @@ function prepare(root: THREE.Object3D, id: string): Part[] {
     let mat: THREE.Material | 'paint';
     let vc = false;
     if (name === 'PAINT') {
+
       key = 'paint' + double;
       mat = 'paint';
     } else if (name === 'GLASS') {

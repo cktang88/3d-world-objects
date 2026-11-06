@@ -25,9 +25,9 @@ import path from 'path';
 export const FLEET = [
   { id: 'taxi_cv', uid: '2429a825ff1646568e8e6e1453f9c501', len: 5.38, yaw: Math.PI, paint: null, glass: /^glass/, drop: /interior/, tris: 30000, lod1: 5000 },
   { id: 'prius', uid: 'aa599d492d3d4618a1bf5f3786e1bbd9', len: 4.54, yaw: Math.PI, paint: /^dbl_boot_ok_002_ncl1_1$|^dbl_bonnet_ok_002$/, glass: /^material_0$/, drop: /interior|Belt/, tris: 40000, lod1: 6000 },
-  { id: 'accord', uid: '1e3be91c28104f6489b42248884327fe', len: 4.93, yaw: Math.PI, paint: /^Body_Color$/, glass: /Glass/, drop: /Leather|Interior|Carpet|Sophie|LCD|Wood/, tris: 40000, lod1: 6000 },
-  { id: 'charger', uid: '2f69495ce4e040878237eb7f46e7029e', len: 5.08, yaw: Math.PI, paint: /^material$/, glass: null, drop: null, tris: 40000, lod1: 6000 },
-  { id: 'tahoe', uid: '8b1db1daad3f4c1fafd41f9a36511855', len: 5.13, yaw: 0, paint: /^Paint_/, glass: /Glass/i, drop: /^Interior/, tris: 40000, lod1: 6000 },
+  { id: 'accord', uid: '1e3be91c28104f6489b42248884327fe', len: 4.93, yaw: Math.PI, paint: /^Body_Color$|^0136_Charcoal$/, glass: /Glass/, drop: /Leather|Interior|Carpet|Sophie|LCD|Wood/, tris: 40000, lod1: 6000 },
+  { id: 'charger', uid: '2f69495ce4e040878237eb7f46e7029e', len: 5.08, yaw: Math.PI, paint: /^material$/, glass: null, drop: /^material_65$/, tris: 40000, lod1: 6000 },
+  // no window glass in this model: { id: 'tahoe', uid: '8b1db1daad3f4c1fafd41f9a36511855', len: 5.13, yaw: 0, paint: /^Paint_/, glass: /Glass/i, drop: /^Interior/, tris: 40000, lod1: 6000 },
   { id: 'suburban', uid: 'b01950cf99aa48c1ba2ebd0addc8a9d4', len: 5.7, yaw: Math.PI, paint: /^default$/, glass: /^blackplast1$/, drop: /^tree$|^inter01$|^stuf$/, tris: 40000, lod1: 6000 },
   { id: 'escalade', uid: '7c5516c76bd441d998af76e2240a2b8d', len: 5.14, yaw: Math.PI, paint: /Platinum2Mtl$/, glass: /Platinum23Mtl$/, drop: null, tris: 40000, lod1: 6000 },
   { id: 'explorer', uid: 'a47d2d8c83b44d348329dba8f92d1adc', len: 5.05, yaw: Math.PI, paint: /wire_115115115_ffa/, glass: /Glass/, drop: null, tris: 40000, lod1: 6000 },

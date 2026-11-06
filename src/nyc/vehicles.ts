@@ -3,8 +3,9 @@ import { Rng, hashN } from '../rng';
 import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST } from './common';
-import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready } from './vehicleFleet';
+import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
+import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 
 /**
  * Cars, cabs and buses, and the traffic that drives them.
@@ -18,11 +19,11 @@ export type VehicleKind = 'cab' | 'sedan' | 'bus';
 
 /** which model a street car is, weighted like NYC traffic: lots of SUVs and sedans, some vans */
 const SEDANS: [string, number][] = [
-  ['accord', 18], ['prius', 12], ['charger', 8], ['tahoe', 12], ['suburban', 10], ['explorer', 12], ['escalade', 8], ['sprinter', 6],
+  ['accord', 18], ['prius', 12], ['charger', 8], ['suburban', 14], ['explorer', 12], ['escalade', 8], ['sprinter', 6],
 ];
 const CABS: [string, number][] = [['taxi_cv', 4], ['prius', 3], ['accord', 3]];
 /** black-car (livery) SUVs are usually black */
-const BLACK_CAR = new Set(['suburban', 'escalade', 'tahoe']);
+const BLACK_CAR = new Set(['suburban', 'escalade']);
 
 function weighted<T>(rng: Rng, list: [T, number][]): T {
   let t = rng.next() * list.reduce((a, [, w]) => a + w, 0);
@@ -57,7 +58,69 @@ function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean
     const sign = roofSign();
     sign.position.set(0, top - 0.02, zc);
     obj.add(sign);
+    for (const d of taxiDecals(id, p)) lod.levels[0].object.add(d);
   }
+}
+
+/** door livery for painted cabs: the black "T" roundel + NYC on the front doors, medallion number on the rear quarter */
+const decalCache = new Map<string, THREE.Mesh[]>();
+const DECAL_AT: Record<string, { door: number; quarter: number; y: number }> = {
+  prius: { door: -0.35, quarter: 1.45, y: 0.72 },
+  accord: { door: -0.45, quarter: 1.55, y: 0.68 },
+};
+let decalMats: { logo: THREE.Material; num: THREE.Material } | null = null;
+function taxiDecals(id: string, p: Prepared): THREE.Mesh[] {
+  const at = DECAL_AT[id];
+  const body = p.lod0.find((x) => x.mat === 'paint');
+  if (!at || !body) return [];
+  let out = decalCache.get(id);
+  if (!out) {
+    decalMats ??= {
+      logo: decalMat(
+        canvasTex(256, 128, (g) => {
+          g.fillStyle = '#111';
+          g.beginPath();
+          g.arc(64, 64, 58, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = TAXI_YELLOW;
+          g.fillRect(34, 30, 60, 14);
+          g.fillRect(57, 30, 14, 66);
+          g.fillStyle = '#111';
+          g.font = 'bold 44px Arial';
+          g.textBaseline = 'middle';
+          g.fillText('NYC', 134, 66);
+        }),
+      ),
+      num: decalMat(
+        canvasTex(256, 64, (g) => {
+          g.fillStyle = '#111';
+          g.font = 'bold 40px Arial';
+          g.textBaseline = 'middle';
+          g.fillText('7J42', 8, 34);
+        }),
+      ),
+    };
+    const mesh = new THREE.Mesh(body.geo);
+    mesh.updateMatrixWorld();
+    out = [];
+    for (const s of [-1, 1]) {
+      const ori = new THREE.Euler(0, (s * Math.PI) / 2, 0);
+      // sample the body surface at the door so the decal box sits on it
+      const hit = new THREE.Raycaster(new THREE.Vector3(s * 2, at.y, at.door), new THREE.Vector3(-s, 0, 0)).intersectObject(mesh)[0];
+      const x = hit ? hit.point.x : s * 0.9;
+      const flip = 1;
+      const logo = new THREE.Mesh(new DecalGeometry(mesh, new THREE.Vector3(x, at.y, at.door), ori, new THREE.Vector3(0.62 * flip, 0.31, 0.5)), decalMats.logo);
+      const hq = new THREE.Raycaster(new THREE.Vector3(s * 2, at.y + 0.05, at.quarter), new THREE.Vector3(-s, 0, 0)).intersectObject(mesh)[0];
+      const num = new THREE.Mesh(new DecalGeometry(mesh, new THREE.Vector3(hq ? hq.point.x : x, at.y + 0.05, at.quarter), ori, new THREE.Vector3(0.36 * flip, 0.09, 0.5)), decalMats.num);
+      out.push(logo, num);
+    }
+    out.forEach((m) => (m.userData.owned = false));
+    decalCache.set(id, out);
+  }
+  return out.map((m) => m.clone());
+}
+function decalMat(map: THREE.Texture) {
+  return new THREE.MeshStandardMaterial({ map, transparent: true, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -4, depthWrite: false });
 }
 
 /** NYC taxi roof light: a slim white box with "TAXI" and the medallion number, lit when the cab is free */
