@@ -323,6 +323,8 @@ export class Lazy {
       this.adopted.add(level);
       const list = (level as unknown as { containers?: ContainerLike[] }).containers;
       for (const c of list ?? []) {
+        // only containers with an anchor object (ShopLevel's glass coolers stock themselves in update())
+        if (!(c.obj as THREE.Object3D | undefined)?.isObject3D) continue;
         registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque });
       }
     }

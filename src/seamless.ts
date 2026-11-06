@@ -347,8 +347,10 @@ export class Seamless {
         this.done(s);
       }
     }
-    // 3. previews behind street doors
+    // 3. previews behind street doors (they get their own update, in their frame: e.g. a shop
+    // stocks the coolers you look into from the street)
     this.previews(level, player);
+    for (const s of this.slots.values()) if (s.shown && s.inverse) s.level.update(dt, V().copy(player).applyMatrix4(s.inverse), performance.now() / 1000);
     // 4. walking through
     for (const s of this.slots.values()) {
       if (!s.shown || !s.inverse || !s.entry || !s.foot || !s.portal) continue;
