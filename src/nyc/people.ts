@@ -452,6 +452,16 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
       for (let p: THREE.Object3D | null = m; p; p = p.parent) if (/^Hair_/.test(p.name)) name = p.name;
       hairMap.set(name, { geo: m.geometry, matrix: m.matrixWorld.clone(), mat: m.material as THREE.MeshStandardMaterial });
     });
+    const texs: (THREE.Texture | null)[] = [];
+    for (const g of ['male', 'female'] as const)
+      body[g].scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (m && !/Superhero/i.test(m.name)) texs.push(m.map);
+      });
+    for (const h of hairMap.values()) texs.push(h.mat.map);
+    buildAtlas(texs);
+    propsMat.map = ATLAS.tex;
+    propsMat.needsUpdate = true;
     return { body, hair: hairMap };
   });
   return assetsP;
@@ -587,30 +597,107 @@ interface RigidPart {
   bone: string;
   /** body (bind-pose) space placement */
   m: THREE.Matrix4;
-  /** flat colour, unless the geometry has vertex colours */
+  /** flat colour (multiplies the texture), unless the geometry has vertex colours */
   color?: string;
+  /** where its texture sits in the people atlas */
+  rect?: AtlasRect;
 }
+/** [u0, v0, width, height] in the atlas */
+type AtlasRect = [number, number, number, number];
+/** the people atlas: hair (both textures), eyes and a white cell for flat-coloured props, so a
+ *  person's head parts and props draw with one material */
+const ATLAS: { tex: THREE.Texture | null; rects: Map<string, AtlasRect>; white: AtlasRect } = { tex: null, rects: new Map(), white: [0.9, 0.62, 0.01, 0.01] };
+const atlasKey = (t: THREE.Texture) => (/Hair_1/i.test(t.name) ? 'hair1' : /Hair_2/i.test(t.name) ? 'hair2' : /Eye/i.test(t.name) ? 'eye' : '');
+function buildAtlas(texs: (THREE.Texture | null | undefined)[]) {
+  const W = 2048, H = 1024;
+  const cells: Record<string, [number, number, number, number]> = {
+    hair1: [0, 0, 896, 1024],
+    hair2: [896, 0, 896, 1024],
+    eye: [1792, 0, 256, 256],
+  };
+  const pad = 3;
+  for (const [k, [x, y, w, h]] of Object.entries(cells)) ATLAS.rects.set(k, [(x + pad) / W, (y + pad) / H, (w - 2 * pad) / W, (h - 2 * pad) / H]);
+  ATLAS.white = [(1792 + 64) / W, (512 + 64) / H, 128 / W, 128 / H];
+  if (typeof document === 'undefined') return;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const g = cv.getContext('2d');
+  if (!g) return;
+  g.fillStyle = '#5a4a3a';
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = '#ffffff';
+  g.fillRect(1792, 512, 256, 256);
+  for (const t of texs) {
+    const k = t ? atlasKey(t) : '';
+    const img = t?.image as CanvasImageSource | undefined;
+    if (!k || !img || !(img as { width?: number }).width) continue;
+    const [x, y, w, h] = cells[k];
+    try {
+      g.drawImage(img, x, y, w, h);
+    } catch {
+      /* not drawable (qa / missing): keep the fill */
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  ATLAS.tex = tex;
+}
+const atlasRect = (t: THREE.Texture | null | undefined) => (t ? ATLAS.rects.get(atlasKey(t)) : undefined);
 const propsMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide });
 /** one skinned geometry from rigid parts (100 % on their bone) plus an optional coat skirt
  *  (whose skinIndex 0/1/2 = pelvis/thigh_l/thigh_r); vertices in body space */
-function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeometry | null, skirtColor: string) {
+/** a float, non-indexed copy with just position / normal / uv (dequantized) plus any skin attributes */
+function floatCopy(src: THREE.BufferGeometry) {
+  const g0 = src.index ? src.toNonIndexed() : src;
+  const g = new THREE.BufferGeometry();
+  const n = g0.attributes.position.count;
+  for (const [k, size] of [['position', 3], ['normal', 3], ['uv', 2], ['color', 3], ['skinWeight', 4]] as const) {
+    const a = g0.attributes[k] as THREE.BufferAttribute | undefined;
+    if (!a) continue;
+    const f = new Float32Array(n * size);
+    for (let i = 0; i < n; i++) for (let c = 0; c < size; c++) f[i * size + c] = c === 0 ? a.getX(i) : c === 1 ? a.getY(i) : c === 2 ? a.getZ(i) : a.getW(i);
+    g.setAttribute(k, new THREE.BufferAttribute(f, size));
+  }
+  const si = g0.attributes.skinIndex as THREE.BufferAttribute | undefined;
+  if (si) {
+    const u = new Uint16Array(n * 4);
+    for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) u[i * 4 + c] = si.getComponent(i, c);
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(u, 4));
+  }
+  if (!g.attributes.normal) g.computeVertexNormals();
+  return g;
+}
+/** one skinned geometry from rigid parts (100 % on their bone), already-skinned parts (eyes,
+ *  brows: body space, the body skin's bone indices) and an optional coat skirt (skinIndex
+ *  0/1/2 = pelvis/thigh_l/thigh_r); vertices in body space. Textured parts get their uvs moved
+ *  into the people atlas; untextured ones point at its white cell. */
+function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeometry | null, skirtColor: string, skinned: RigidPart[] = []) {
   const out: THREE.BufferGeometry[] = [];
-  const prep = (src: THREE.BufferGeometry, color: string | undefined) => {
-    const g = src.index ? src.toNonIndexed() : src.clone();
-    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k);
-    if (!g.attributes.normal) g.computeVertexNormals();
+  const finish = (g: THREE.BufferGeometry, color: string | undefined, rect: AtlasRect | undefined) => {
     const n = g.attributes.position.count;
-    if (!g.attributes.color) {
+    if (!g.attributes.color || color) {
       const c = new THREE.Color(color ?? '#808080'), a = new Float32Array(n * 3);
       for (let i = 0; i < n; i++) c.toArray(a, i * 3);
       g.setAttribute('color', new THREE.BufferAttribute(a, 3));
     }
+    const uv = new Float32Array(n * 2);
+    const src = g.attributes.uv as THREE.BufferAttribute | undefined;
+    const r = rect ?? ATLAS.white;
+    for (let i = 0; i < n; i++) {
+      const u = rect && src ? THREE.MathUtils.clamp(src.getX(i), 0, 1) : 0.5, v = rect && src ? THREE.MathUtils.clamp(src.getY(i), 0, 1) : 0.5;
+      uv[i * 2] = r[0] + u * r[2];
+      uv[i * 2 + 1] = r[1] + v * r[3];
+    }
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     return g;
   };
   for (const p of parts) {
-    const g = prep(p.geo, p.color);
+    const g = finish(floatCopy(p.geo), p.color, p.rect);
     g.applyMatrix4(p.m);
-    const n = g.attributes.position.count, bi = names.indexOf(p.bone);
+    const n = g.attributes.position.count, bi = Math.max(0, names.indexOf(p.bone));
     const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
     for (let i = 0; i < n; i++) {
       si[i * 4] = bi;
@@ -620,20 +707,22 @@ function mergeParts(parts: RigidPart[], names: string[], skirt: THREE.BufferGeom
     g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
     out.push(g);
   }
+  for (const p of skinned) {
+    const g = finish(floatCopy(p.geo), p.color, p.rect);
+    g.applyMatrix4(p.m);
+    out.push(g);
+  }
   if (skirt) {
-    const g = prep(skirt, skirtColor);
+    const g = finish(floatCopy(skirt), skirtColor, undefined);
     const map = ['pelvis', 'thigh_l', 'thigh_r'].map((n) => names.indexOf(n));
     const si = g.attributes.skinIndex as THREE.BufferAttribute;
-    const nsi = new Uint16Array(si.count * 4);
-    for (let i = 0; i < si.count; i++) for (let k = 0; k < 4; k++) nsi[i * 4 + k] = map[si.getComponent(i, k)] ?? 0;
-    g.setAttribute('skinIndex', new THREE.BufferAttribute(nsi, 4));
-    g.setAttribute('skinWeight', new THREE.BufferAttribute(new Float32Array((g.attributes.skinWeight as THREE.BufferAttribute).array), 4));
+    for (let i = 0; i < si.count; i++) for (let k = 0; k < 4; k++) si.setComponent(i, k, map[si.getComponent(i, k)] ?? 0);
     out.push(g);
   }
   if (!out.length) {
     // nothing to carry: an empty geometry with the right attributes
     const g = new THREE.BufferGeometry();
-    for (const [k, n] of [['position', 3], ['normal', 3], ['color', 3], ['skinWeight', 4]] as const) g.setAttribute(k, new THREE.BufferAttribute(new Float32Array(0), n));
+    for (const [k, n] of [['position', 3], ['normal', 3], ['color', 3], ['uv', 2], ['skinWeight', 4]] as const) g.setAttribute(k, new THREE.BufferAttribute(new Float32Array(0), n));
     g.setAttribute('skinIndex', new THREE.BufferAttribute(new Uint16Array(0), 4));
     return g;
   }
@@ -808,6 +897,7 @@ export class Person {
     if (this.slow) o.hair = r.pick(['#8a8a86', '#b0aea8', '#d0cec8', '#6b6b6b']);
     const hm = hairMat(A.hairBase, o.hair);
     const bm = bodyMaterial(A.base, o, gender, A.geo, A.geoScale, r);
+    const headSkinned: RigidPart[] = [], dropped: THREE.Object3D[] = [];
     model.traverse((x) => {
       if ((x as THREE.Bone).isBone) this.bones.set(x.name, x as THREE.Bone);
       const m = x as THREE.SkinnedMesh;
@@ -817,7 +907,13 @@ export class Person {
         m.material = bm;
         m.customDepthMaterial = bm.userData.depth;
       }
-      else if (/Hair/i.test(name)) m.material = hm;
+      else if (MERGE_HEAD && !/Body_LOD/.test(m.name)) {
+        // eyes and brows go into the merged head/props mesh (atlas), not separate draws
+        const tex = (m.material as THREE.MeshStandardMaterial).map;
+        headSkinned.push({ geo: m.geometry, bone: '', m: A.geo, color: /Hair/i.test(name) ? o.hair : EYES[r.int(0, EYES.length - 1)], rect: atlasRect(tex) });
+        dropped.push(m);
+        return;
+      } else if (/Hair/i.test(name)) m.material = hm;
       else if (/Eye/i.test(name)) m.material = eyeMat(m.material as THREE.MeshStandardMaterial, r.int(0, EYES.length - 1));
       if (/Body_LOD/.test(m.name)) {
         this.lodMesh = m;
@@ -828,6 +924,7 @@ export class Person {
       m.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.3);
       this.meshes.push(m);
     });
+    for (const d of dropped) d.removeFromParent();
     // one skeleton per person: SkeletonUtils.clone gives every skinned mesh (body, LOD, eyes,
     // brows) its own copy of the same 65-bone skin; share the body's so it updates once a frame
     {
@@ -852,14 +949,18 @@ export class Person {
     this.hasHat = hat;
     this.weatherRoll = r.next();
     this.bindInvOf = (bone) => A.bindInv.get(bone)!;
+    const hairParts: RigidPart[] = [];
+    const hairPart = (h: { geo: THREE.BufferGeometry; matrix: THREE.Matrix4; mat: THREE.MeshStandardMaterial }) => ({ geo: h.geo, bone: 'Head', m: h.matrix, color: o.hair, rect: atlasRect(h.mat.map) });
     if (style && !hat) {
       const h = assets.hair.get(style);
-      if (h) this.hairMesh = attach('Head', new THREE.Mesh(h.geo, hm), h.matrix) as THREE.Mesh;
+      if (h && MERGE_HEAD) this.hairPart = hairPart(h);
+      else if (h) this.hairMesh = attach('Head', new THREE.Mesh(h.geo, hm), h.matrix) as THREE.Mesh;
       this.longHair = style === 'Hair_Long';
     }
     if (gender === 'male' && r.chance(0.25)) {
       const h = assets.hair.get('Hair_Beard');
-      if (h) attach('Head', new THREE.Mesh(h.geo, hm), h.matrix);
+      if (h && MERGE_HEAD) hairParts.push(hairPart(h));
+      else if (h) attach('Head', new THREE.Mesh(h.geo, hm), h.matrix);
     }
     void head;
     const b = BODY[gender];
@@ -902,22 +1003,8 @@ export class Person {
     for (const [s, bone] of [[1, 'foot_l'], [-1, 'foot_r']] as const) parts.push({ geo: sg, bone, m: at(s * b.legX, 0, gender === 'male' ? 0.02 : 0.025) });
     // long coats (most of the open coats in the reference photos reach the knee)
     const skirt = o.coatLen >= 0 ? coatSkirtGeo(gender, o.coatLen) : null;
-    {
-      // shares the body's skeleton (no extra bone update / texture): vertices go into the body
-      // geometry's space and the bone indices are the body skin's
-      const body = this.fullMesh as THREE.SkinnedMesh;
-      const names = body.skeleton.bones.map((bn) => bn.name);
-      const geo = mergeParts(parts, names, skirt, o.top);
-      geo.applyMatrix4(A.geoInv);
-      const pm = new THREE.SkinnedMesh(geo, propsMat);
-      pm.matrix.copy(body.matrix);
-      pm.matrix.decompose(pm.position, pm.quaternion, pm.scale);
-      body.parent!.add(pm);
-      pm.bind(body.skeleton, body.bindMatrix);
-      pm.boundingSphere = body.boundingSphere!.clone();
-      pm.name = 'props';
-      this.meshes.push(pm);
-    }
+    this.propSrc = { parts: [...parts, ...hairParts], skinned: headSkinned, skirt, skirtColor: o.top, geoInv: A.geoInv };
+    this.buildProps(false);
     // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
     const target = gender === 'male' ? 1.76 * r.range(0.94, 1.06) : 1.66 * r.range(0.95, 1.05);
     model.scale.setScalar(target / b.height);
@@ -1083,6 +1170,39 @@ export class Person {
     }
     this.fadeU.value = v;
   }
+  /** the merged head/props mesh: rigid props, hair, beard, eyes, brows, coat skirt; one draw */
+  private propsMesh: THREE.SkinnedMesh | null = null;
+  private hairPart: RigidPart | null = null;
+  private propSrc: { parts: RigidPart[]; skinned: RigidPart[]; skirt: THREE.BufferGeometry | null; skirtColor: string; geoInv: THREE.Matrix4 } | null = null;
+  private hairHidden = false;
+  /** (re)build the merged mesh; hair is left out under a raised hood or a snow beanie */
+  private buildProps(hideHair: boolean) {
+    const S = this.propSrc;
+    const body = this.fullMesh as THREE.SkinnedMesh;
+    if (!S || !body) return;
+    this.hairHidden = hideHair;
+    // shares the body's skeleton (no extra bone update / texture): vertices go into the body
+    // geometry's space and the bone indices are the body skin's
+    const names = body.skeleton.bones.map((bn) => bn.name);
+    const parts = this.hairPart && !hideHair ? [...S.parts, this.hairPart] : S.parts;
+    const geo = mergeParts(parts, names, S.skirt, S.skirtColor, S.skinned);
+    geo.applyMatrix4(S.geoInv);
+    let pm = this.propsMesh;
+    if (pm) {
+      pm.geometry.dispose();
+      pm.geometry = geo;
+      return;
+    }
+    pm = new THREE.SkinnedMesh(geo, propsMat);
+    pm.matrix.copy(body.matrix);
+    pm.matrix.decompose(pm.position, pm.quaternion, pm.scale);
+    body.parent!.add(pm);
+    pm.bind(body.skeleton, body.bindMatrix);
+    pm.boundingSphere = body.boundingSphere!.clone();
+    pm.name = 'props';
+    this.meshes.push(pm);
+    this.propsMesh = pm;
+  }
   /** wears a hood (raised in the rain) */
   hood = false;
   /** this frame: keep last frame's pose and matrices */
@@ -1144,6 +1264,8 @@ export class Person {
     }
     if (this.weatherProps.beanie) this.weatherProps.beanie.visible = beanie;
     if (this.hairMesh && !this.longHair) this.hairMesh.visible = !beanie && !hoodUp;
+    const hide = !this.longHair && (beanie || hoodUp);
+    if (this.hairPart && hide !== this.hairHidden) this.buildProps(hide);
     const scarf = snow && this.weatherRoll > 0.4;
     if (scarf && !this.weatherProps.scarf) {
       const col = SCARF[Math.floor(this.weatherRoll * 173) % SCARF.length];
@@ -1329,6 +1451,8 @@ const PCAP = (() => {
   }
 })();
 const SHADOWS = PCAP ? 8 : 20;
+/** hair, beard, eyes and brows merged into the props mesh (atlas): 2 draws per near person */
+const MERGE_HEAD = PCAP;
 /** switch to / from the VAT far crowd (hysteresis) */
 const FAR_IN = !PCAP ? (LOWQ ? 22 : 32) : LOWQ ? 16 : 20, FAR_OUT = !PCAP ? (LOWQ ? 18 : 28) : LOWQ ? 13 : 16;
 /** at most this many full skinned people (the nearest in view); everyone else is in the far crowd */
