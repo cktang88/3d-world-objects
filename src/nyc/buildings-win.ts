@@ -251,7 +251,10 @@ function anchored<T extends THREE.Material>(m: T, key: string): T {
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = anchorVertex + sh.vertexShader.replace('#include <begin_vertex>', anchorBegin);
   };
-  m.customProgramCacheKey = () => 'anchored:' + key;
+  // one program for every MeshStandard part (reveal, trim, sash, ac: the same code, their roughness /
+  // metalness are uniforms); the stain (basic) and depth materials keep their own
+  const shared = (m as unknown as THREE.MeshStandardMaterial).isMeshStandardMaterial ? 'std' : key;
+  m.customProgramCacheKey = () => 'anchored:' + shared;
   return m;
 }
 let stainM: THREE.MeshBasicMaterial | null = null;

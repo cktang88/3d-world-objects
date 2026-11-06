@@ -392,14 +392,24 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
 }
 `;
 
+/** road and sidewalk in one shader: gKind 0 = road, 1 = sidewalk / ramps / curb (a uniform per material) */
+const GLSL_STREET = GLSL_SIDEWALK + GLSL_CURB.replace('void gEval(', 'void gEvalWalk(') + GLSL_ROAD.replace('void gEval(', 'void gEvalRoad(') + /* glsl */ `
+uniform float gKind;
+void gEval(out vec3 alb, out float rough, out vec3 nW) {
+  if (gKind < .5) gEvalRoad(alb, rough, nW);
+  else gEvalWalk(alb, rough, nW);
+}
+`;
+
 /** weather.ts patches wxExposure() into the standard shader chunks; use it when present */
 const hasExpo = () => THREE.ShaderChunk.lights_physical_pars_fragment.includes('wxExposure');
 const EXPO = () => (hasExpo() ? '#ifndef WX_OFF\ngExpo = wxExposure(vGW + vGN * vec3(0.45, 0.08, 0.45));\n#endif\n' : '');
 
-function hook(m: THREE.MeshStandardMaterial, kind: string, body: string, defines: Record<string, string> = {}) {
+function hook(m: THREE.MeshStandardMaterial, kind: string, body: string, defines: Record<string, string> = {}, gKind?: number) {
   m.userData.pbr = true; // bake() keeps it in its own bucket
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
+    if (gKind !== undefined) sh.uniforms.gKind = { value: gKind };
     Object.assign((sh.defines ??= {}), defines);
     sh.vertexShader = 'varying vec3 vGW;\nvarying vec3 vGN;\nvarying vec2 vGUv;\n' + sh.vertexShader.replace(
       '#include <worldpos_vertex>',
@@ -421,8 +431,9 @@ vGUv = uv;`,
 const mats: Record<string, THREE.MeshStandardMaterial> = {};
 export const GM = {
   /** sidewalk flags, ramps and the curb */
-  sidewalk: () => (mats.sw ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.35 }), 'sw', GLSL_SIDEWALK + GLSL_CURB), 0.55)),
-  road: () => (mats.rd ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'rd', GLSL_ROAD))),
+  // road and sidewalk: one program (GLSL_STREET), the material's gKind picks the surface
+  sidewalk: () => (mats.sw ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.35 }), 'street', GLSL_STREET, {}, 1), 0.55)),
+  road: () => (mats.rd ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'street', GLSL_STREET, {}, 0))),
   cobbleRoad: () => (mats.rc ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'rc', GLSL_ROAD, { G_COBBLE: '1' }))),
   fixtures: () => (mats.fx ??= fixturesMaterial()),
 };

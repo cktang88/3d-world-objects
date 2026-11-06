@@ -268,8 +268,19 @@ function vcEmissive(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance *= vColor;');
   };
-  m.customProgramCacheKey = () => 'vcEmissive:' + key;
+  void key; // sign / neon / panel: one program
+  m.customProgramCacheKey = () => 'vcEmissive';
   return m;
+}
+let white1: THREE.DataTexture | null = null;
+/** a 1x1 white map: gives the map-less lit panels the same program as the sign lettering */
+function whiteTex() {
+  if (!white1) {
+    white1 = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    white1.colorSpace = THREE.SRGBColorSpace;
+    white1.needsUpdate = true;
+  }
+  return white1;
 }
 function textMaterials() {
   if (textMats) return textMats;
@@ -293,7 +304,7 @@ function textMaterials() {
 let litPanel: THREE.MeshStandardMaterial | null = null;
 export function litPanelMat() {
   if (litPanel) return litPanel;
-  litPanel = vcEmissive(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, emissive: '#ffffff', emissiveIntensity: 0.2 }), 'panel');
+  litPanel = noWeather(vcEmissive(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, emissive: '#ffffff', emissiveIntensity: 0.2, map: whiteTex(), emissiveMap: whiteTex(), alphaTest: 0.3 }), 'panel')) as THREE.MeshStandardMaterial;
   onNight((f) => (litPanel!.emissiveIntensity = 0.2 + f * 1.4));
   return litPanel;
 }
