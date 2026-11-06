@@ -11,6 +11,7 @@ import { SHOPS } from './nyc';
 import { bakeSteps } from './shopkit/bake';
 import { loadOriginal } from './detail';
 import { Kit, M, quad, surfMat, lit, type Seg, type Container } from './shopkit/kit';
+import * as F from './shopkit/fixtures';
 import { dropTile, tinTile, textTex } from './shopkit/tex';
 import { LAYOUTS, type Layout, type Style } from './shopkit/layouts';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
@@ -129,6 +130,10 @@ export class ShopLevel implements Level {
    */
   staging?: Iterator<unknown>;
   private front: THREE.Object3D | null = null;
+  /** the stockroom: its doorway collider and container (contents = the room, made when opened) */
+  private stockDoor: Rect | null = null;
+  private stockroom: { id: number; side: number; zc: number; st: Style; lazy?: LazyContainer } | null = null;
+  private shopKinds: Kind[] = [];
 
   constructor(desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean } = {}) {
     this.name = desc.name;
@@ -223,10 +228,11 @@ export class ShopLevel implements Level {
         door: c.door,
         drawer: c.drawer,
         // glass cases: nothing moves (E just looks); the stock is generated once seen
-        open: c.glass ? () => {} : undefined,
+        open: c.glass ? () => {} : c.open,
         generate: () => this.caseContents(c),
       }),
     }));
+    if (this.stockroom) this.stockroom.lazy = this.cases[this.stockroom.id].lazy;
     this.stockPromise = this.stock(kit.segs, info.pools, desc.seed, r.fork(9), type);
   }
 
@@ -248,14 +254,34 @@ export class ShopLevel implements Level {
       [-W / 2, 0, D, Math.PI / 2], // left
       [W / 2, 0, D, -Math.PI / 2], // right
     ];
+    const sr = st.stockroom;
+    const zc = sr ? -D / 2 + sr.back : 0;
+    const trim = mat(st.trim ?? '#2a2622', { rough: 0.6 });
     for (const [x, z, len, rot] of walls) {
       k.at(x, z, rot);
-      k.face(wm.m, len, H, 0, H / 2, 0, wm.tile ?? [len, H]);
-      k.box(mat(st.trim ?? '#2a2622', { rough: 0.6 }), len, 0.12, 0.02, 0, 0, 0.01);
+      const side = rot > 0 ? -1 : rot < 0 ? 1 : 0;
+      if (sr && side === sr.side) {
+        // a 1 m doorway to the stockroom: the wall in three pieces round it
+        const lx = side < 0 ? -zc : zc, a = -len / 2, b = len / 2, d0 = lx - 0.5, d1 = lx + 0.5;
+        k.face(wm.m, d0 - a, H, (a + d0) / 2, H / 2, 0, wm.tile ?? [d0 - a, H]);
+        k.face(wm.m, b - d1, H, (d1 + b) / 2, H / 2, 0, wm.tile ?? [b - d1, H]);
+        k.face(wm.m, 1.0, H - 2.15, lx, (H + 2.15) / 2, 0, wm.tile ?? [1, H - 2.15]);
+        k.box(trim, d0 - a, 0.12, 0.02, (a + d0) / 2, 0, 0.01);
+        k.box(trim, b - d1, 0.12, 0.02, (d1 + b) / 2, 0, 0.01);
+      } else {
+        k.face(wm.m, len, H, 0, H / 2, 0, wm.tile ?? [len, H]);
+        k.box(trim, len, 0.12, 0.02, 0, 0, 0.01);
+      }
     }
     this.cols.push({ minX: -W / 2 - 1, maxX: W / 2 + 1, minZ: -D / 2 - 1, maxZ: -D / 2 + 0.1 });
-    this.cols.push({ minX: -W / 2 - 1, maxX: -W / 2 + 0.1, minZ: -D / 2 - 1, maxZ: D / 2 + 1 });
-    this.cols.push({ minX: W / 2 - 0.1, maxX: W / 2 + 1, minZ: -D / 2 - 1, maxZ: D / 2 + 1 });
+    for (const sd of [-1, 1]) {
+      const r0 = sd < 0 ? { minX: -W / 2 - 1, maxX: -W / 2 + 0.1 } : { minX: W / 2 - 0.1, maxX: W / 2 + 1 };
+      if (sr && sr.side === sd) {
+        this.cols.push({ ...r0, minZ: -D / 2 - 1, maxZ: zc - 0.5 }, { ...r0, minZ: zc + 0.5, maxZ: D / 2 + 1 });
+        this.stockDoor = { ...r0, minZ: zc - 0.5, maxZ: zc + 0.5 };
+      } else this.cols.push({ ...r0, minZ: -D / 2 - 1, maxZ: D / 2 + 1 });
+    }
+    if (sr) this.stockroomDoor(k, st, sr.side, zc);
     yield;
     this.phase = 'shell ceiling';
     // ceiling
@@ -334,6 +360,86 @@ export class ShopLevel implements Level {
     void r;
   }
 
+  /** the stockroom door in a side wall: frame, a swinging leaf with its sign; the room is made on opening */
+  private stockroomDoor(k: Kit, st: Style, side: number, zc: number) {
+    const { W } = st;
+    k.at(side * (W / 2), zc, -side * Math.PI / 2);
+    const trim = mat('#5a5048', { rough: 0.6 });
+    for (const x of [-0.5, 0.5]) k.box(trim, 0.06, 2.18, 0.06, x, 0, 0.03);
+    k.box(trim, 1.06, 0.06, 0.06, 0, 2.15, 0.03);
+    const c = k.openBox(0, 0, 1.0, 2.15, 2.6, 'stockroom', false);
+    k.closeBox();
+    const hinge = new THREE.Group();
+    hinge.position.set(-0.46, 0, 0.02);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.92, 2.1, 0.04), mat('#8a8f94', { rough: 0.5, metal: 0.4 }));
+    leaf.position.set(0.46, 1.05, 0);
+    leaf.userData.owned = true;
+    hinge.add(leaf);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), M.chrome());
+    knob.position.set(0.82, 1.0, 0.04);
+    knob.userData.owned = true;
+    hinge.add(knob);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.2), lit(textTex('EMPLOYEES\nONLY', '#c62828', '#ffffff', { w: 256, h: 128, font: 'bold 44px sans-serif' })));
+    sign.position.set(0.46, 1.6, 0.021);
+    sign.userData.owned = true;
+    hinge.add(sign);
+    c.obj.add(hinge);
+    c.door = hinge;
+    this.stockroom = { id: c.id, side, zc, st };
+  }
+
+  /** the stockroom behind its door: built (in slices) only when the door is first opened */
+  private *stockroomRoom(c: Container): Generator<void, THREE.Object3D, unknown> {
+    const sr = this.stockroom!;
+    const { W } = sr.st;
+    const out = this.caseGroup(c);
+    const k = new Kit();
+    const rot = -sr.side * Math.PI / 2;
+    const at = (lx: number, lz: number, r = 0) => k.at(sr.side * (W / 2) + lx * Math.cos(rot) + lz * Math.sin(rot), sr.zc - lx * Math.sin(rot) + lz * Math.cos(rot), rot + r);
+    // the room: local -z runs into it from the doorway
+    const RW = 3.0, RD = 2.6, RH = 2.8;
+    const wall = mat('#d8d6d0', { rough: 0.95 });
+    at(0, 0);
+    const fl = k.face(mat('#7a7a76', { rough: 0.9 }), RW, RD, 0, 0.004, -RD / 2);
+    fl.rotation.x = -Math.PI / 2;
+    const ce = k.face(mat('#e6e4de', { rough: 0.95 }), RW, RD, 0, RH, -RD / 2);
+    ce.rotation.x = Math.PI / 2;
+    k.face(wall, RW, RH, 0, RH / 2, -RD);
+    k.face(wall, RD, RH, -RW / 2, RH / 2, -RD / 2, undefined, Math.PI / 2);
+    k.face(wall, RD, RH, RW / 2, RH / 2, -RD / 2, undefined, -Math.PI / 2);
+    k.face(wall, 1.0, RH, -1.0, RH / 2, -0.012, undefined, Math.PI);
+    k.face(wall, 1.0, RH, 1.0, RH / 2, -0.012, undefined, Math.PI);
+    k.face(wall, 1.0, RH - 2.15, 0, (RH + 2.15) / 2, -0.012, undefined, Math.PI);
+    k.box(M.emit('#f4f6ff', 2.2), 0.3, 0.04, 1.2, 0, RH - 0.05, -RD / 2);
+    k.col(0, -RD - 0.05, RW + 0.4, 0.1);
+    k.col(-RW / 2 - 0.05, -RD / 2, 0.1, RD);
+    k.col(RW / 2 + 0.05, -RD / 2, 0.1, RD);
+    yield;
+    // stock: a wire rack of cases along the back, cartons stacked down the sides, a mop bucket
+    const r = new Rng(hashN(Math.round(sr.zc * 100), 41));
+    at(0, -RD + 0.32);
+    F.wireRack(k, RW - 0.4, { d: 0.55, h: 2.0 });
+    yield;
+    at(-RW / 2 + 0.45, -1.05, Math.PI / 2);
+    F.boxStack(k, r, 1.0, 0.7, 1.6);
+    at(RW / 2 - 0.45, -1.05, -Math.PI / 2);
+    F.boxStack(k, r, 1.0, 0.7, 1.2);
+    at(0.9, -0.6);
+    k.cyl(mat('#f2c400', { rough: 0.5 }), 0.17, 0.3, 0, 0, 0);
+    k.box(mat('#8a6a44'), 0.025, 1.3, 0.025, 0.05, 0.2, 0).rotation.z = 0.15;
+    yield;
+    const g = new THREE.Group();
+    yield* bakeSteps(k.stat, g);
+    g.add(k.live);
+    const filler = new Filler();
+    const kinds = this.shopKinds.length ? this.shopKinds : [KINDS.carton6, KINDS.smallbox];
+    for (const s of k.segs) this.fill(filler, { ...s, messy: 0.3 }, kinds, r);
+    filler.build(g);
+    out.add(g);
+    this.cols.push(...k.cols);
+    return out;
+  }
+
   // ---------------------------------------------------------------- stock
 
   private async stock(segs: Seg[], pools: string[], seed: number, r: Rng, type: string) {
@@ -370,6 +476,7 @@ export class ShopLevel implements Level {
     loaded.push(...(await scanned));
     if (!this.alive) return;
     const kinds = (SHOP_KINDS[type] ?? []).map((n) => KINDS[n]);
+    this.shopKinds = kinds;
     const byProduct = this.assign(chunks, loaded, r, kinds.length > 0);
     // the open shop floor now; each container's contents only when it is generated
     const sets = new Map<number, Map<Loaded | 'filler', Seg[]>>();
@@ -393,7 +500,8 @@ export class ShopLevel implements Level {
   }
 
   /** the contents of a container, made on demand (lazy.ts); waits for the stock plan if needed */
-  private caseContents(c: Container): THREE.Object3D | Promise<THREE.Object3D> {
+  private caseContents(c: Container): THREE.Object3D | Promise<THREE.Object3D> | Iterator<unknown, THREE.Object3D> {
+    if (this.stockroom && c.id === this.stockroom.id) return this.stockroomRoom(c);
     const make = this.caseSets.get(c.id);
     if (make) return make();
     return this.stocked.then(() => this.caseSets.get(c.id)?.() ?? this.caseGroup(c));
@@ -769,15 +877,25 @@ export class ShopLevel implements Level {
   }
 
   colliders() {
+    // the stockroom door blocks the doorway until it is (mostly) open
+    if (this.stockDoor && !(this.stockroom && (this.stockroom.lazy?.t ?? 0) > 0.6)) return [...this.cols, this.stockDoor];
     return this.cols;
   }
   portals() {
     return this.ports;
   }
   update() {}
-  /** generate every container's contents now (lab, screenshots) */
-  generateAll() {
-    for (const c of this.cases) c.lazy.ensure();
+  /** generate every container's contents now (lab, screenshots); `open` also opens opaque ones */
+  generateAll(open = false) {
+    for (const c of this.cases) {
+      c.lazy.ensure();
+      while (c.lazy.step());
+      if (open && !c.glass) {
+        c.lazy.open = true;
+        c.lazy.t = 1;
+        c.lazy.pose();
+      }
+    }
   }
   dispose() {
     this.alive = false;

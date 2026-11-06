@@ -615,3 +615,81 @@ export function modelLayout(k: Kit, w: number, d: number) {
 }
 
 export type { Seg };
+
+// ---------------------------------------------------------------- opaque containers
+
+function liveBox(m: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number) {
+  const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  o.position.set(x, y + h / 2, z);
+  o.userData.owned = true;
+  o.receiveShadow = true;
+  return o;
+}
+
+/**
+ * A chest of drawers (antique dresser, hardware parts drawers): each drawer is a container
+ * whose contents are generated only when it is pulled open (E).
+ */
+export function drawerChest(k: Kit, cols: number, rows: number, o: { w?: number; h?: number; d?: number; wood?: string; knob?: string; y0?: number; label?: string } = {}) {
+  const W = o.w ?? cols * 0.45, Hh = o.h ?? rows * 0.2 + 0.15, D = o.d ?? 0.5, y0 = o.y0 ?? 0.1;
+  const wood = mat(o.wood ?? '#5a3a22', { rough: 0.55 });
+  const knob = mat(o.knob ?? '#c8a050', { rough: 0.3, metal: 0.9 });
+  // carcass
+  k.box(wood, W, y0, D - 0.04, 0, 0, -D / 2 - 0.02);
+  k.box(wood, W + 0.04, 0.04, D + 0.02, 0, y0 + Hh - 0.04, -D / 2);
+  k.box(wood, W, Hh, 0.02, 0, y0, -D + 0.01);
+  for (const x of [-W / 2, W / 2]) k.box(wood, 0.03, Hh, D, x, y0, -D / 2);
+  const cw = W / cols, ch = (Hh - 0.06) / rows;
+  for (let i = 0; i < cols; i++)
+    for (let j = 0; j < rows; j++) {
+      const x = -W / 2 + cw * (i + 0.5), y = y0 + j * ch + 0.01;
+      const c = k.openBox(x, 0, cw - 0.01, ch - 0.01, D - 0.04, o.label ?? 'drawer', false, y);
+      // the drawer itself (front, knob, tray) slides out of the anchor along +z
+      const dr = new THREE.Group();
+      dr.add(liveBox(wood, cw - 0.015, ch - 0.015, 0.02, 0, 0, -0.01));
+      dr.add(liveBox(knob, 0.05, 0.025, 0.03, 0, ch / 2 - 0.02, 0.012));
+      const tray = mat('#7a5a3a', { rough: 0.8 });
+      dr.add(liveBox(tray, cw - 0.05, 0.012, D - 0.08, 0, 0.005, -D / 2 + 0.02));
+      for (const sx of [-1, 1]) dr.add(liveBox(tray, 0.012, ch * 0.6, D - 0.08, sx * (cw / 2 - 0.03), 0.005, -D / 2 + 0.02));
+      dr.add(liveBox(tray, cw - 0.05, ch * 0.6, 0.012, 0, 0.005, -D + 0.06));
+      c.obj.add(dr);
+      c.drawer = dr;
+      k.seg('pile', x, y + 0.02, -0.04, cw - 0.08, D - 0.14, ch * 0.55, { messy: 1, maxRows: 3 });
+      k.closeBox();
+    }
+  // things on top
+  k.seg('pile', 0, y0 + Hh, -0.04, W - 0.12, D - 0.12, 0.45, { messy: 0.6, pitch: 0.3 });
+  k.col(0, -D / 2, W + 0.06, D + 0.04);
+}
+
+/** A cupboard with a pair of doors (armoire, base cabinet): shelves inside, stocked when opened. */
+export function cupboard(k: Kit, w: number, h: number, d: number, o: { wood?: string; shelves?: number; label?: string } = {}) {
+  const wood = mat(o.wood ?? '#4a2e1a', { rough: 0.55 });
+  const n = o.shelves ?? 3;
+  k.box(wood, w, 0.08, d, 0, 0, -d / 2);
+  k.box(wood, w + 0.04, 0.05, d + 0.03, 0, h - 0.05, -d / 2);
+  k.box(wood, w, h, 0.02, 0, 0, -d + 0.01);
+  for (const x of [-w / 2, w / 2]) k.box(wood, 0.03, h, d, x, 0, -d / 2);
+  const c = k.openBox(0, 0, w, h, d, o.label ?? 'cupboard', false);
+  for (let i = 0; i < n; i++) {
+    const y = 0.08 + (i * (h - 0.15)) / n;
+    if (i > 0) k.box(wood, w - 0.06, 0.02, d - 0.05, 0, y - 0.02, -d / 2);
+    k.seg('shelf', 0, y, -0.04, w - 0.1, d - 0.08, (h - 0.15) / n - 0.05, { messy: 0.5, maxRows: 2, pitch: 0.2 });
+  }
+  // two doors hinged at the sides
+  const leaves: THREE.Group[] = [];
+  for (const sx of [-1, 1]) {
+    const hinge = new THREE.Group();
+    hinge.position.set(sx * (w / 2 - 0.01), 0.08, 0.012);
+    hinge.add(liveBox(wood, w / 2 - 0.02, h - 0.16, 0.025, -sx * (w / 4 - 0.005), 0, 0));
+    hinge.add(liveBox(mat('#c8a050', { rough: 0.3, metal: 0.9 }), 0.025, 0.08, 0.03, -sx * (w / 2 - 0.07), (h - 0.16) / 2, 0.02));
+    c.obj.add(hinge);
+    leaves.push(hinge);
+  }
+  c.open = (t) => {
+    leaves[0].rotation.y = -1.9 * t;
+    leaves[1].rotation.y = 1.9 * t;
+  };
+  k.closeBox();
+  k.col(0, -d / 2, w + 0.06, d + 0.04);
+}

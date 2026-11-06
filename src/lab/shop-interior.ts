@@ -6,6 +6,7 @@ import { SHOPS } from '../nyc';
 /**
  * ?lab=shop-interior&type=deli&seed=3       one ShopLevel, seen from just inside the door
  * &view=back|front|counter|side              preset camera (or &cam=&look= as usual)
+ * &containers=closed|open                     leave containers empty / also open the opaque ones (stockroom, drawers)
  * &budget=<tris>                               product triangle budget (lower renders faster in software)
  * The shop's own lighting replaces the lab's: hemisphere, ambient and exposure come from ShopLevel.env.
  */
@@ -44,7 +45,7 @@ const scene: LabScene = {
     }
     await lv.stocked;
     // containers fill when you walk up to them; &containers=closed leaves them empty
-    if (params.get('containers') !== 'closed') lv.generateAll();
+    if (params.get('containers') !== 'closed') lv.generateAll(params.get('containers') === 'open');
     await new Promise((r) => setTimeout(r, Number(params.get('stockWait') ?? 4000)));
   },
 };

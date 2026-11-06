@@ -25,6 +25,8 @@ export interface Container {
   /** opaque containers: the part that moves */
   door?: THREE.Object3D;
   drawer?: THREE.Object3D;
+  /** custom pose, t 0 closed .. 1 open (e.g. a pair of doors) */
+  open?: (t: number) => void;
 }
 export type SegMode = 'shelf' | 'hang' | 'pile' | 'stack' | 'single' | 'ceil';
 export interface Seg {

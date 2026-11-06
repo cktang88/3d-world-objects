@@ -31,6 +31,8 @@ export interface Style {
   banner?: boolean;
   bannerX?: number;
   neon?: boolean;
+  /** a stockroom behind a door in a side wall (side -1 left, 1 right), `back` metres from the back wall */
+  stockroom?: { side: -1 | 1; back: number };
 }
 export interface Ctx {
   doorX: number;
@@ -97,7 +99,7 @@ const deli: Layout = {
   style(r) {
     const tin = r.chance(0.6);
     return {
-      W: r.range(6.6, 8), D: r.range(13, 17), H: tin ? 3.5 : 3.0,
+      stockroom: { side: -1, back: 1.4 }, W: r.range(6.6, 8), D: r.range(13, 17), H: tin ? 3.5 : 3.0,
       ceil: tin ? 'tin' : 'drop', tin: r.pick(['#efe9da', '#f3f1ea', '#e8e2d0']),
       floor: r.pick([vct('#efece4', '#2b2b2b'), vct('#e8e2d0', '#8a5a3a'), vct('#d9d9d4', '#9a9a96'), pbrS('floor_laminate', { color: '#c8c8c8', rough: 0.6 })]),
       wall: r.chance(0.5) ? paint(r.pick(['#f0ece2', '#e9efe6', '#f3eadb'])) : pbrS('pine', { color: '#a07850', rough: 0.85 }),
@@ -199,7 +201,7 @@ const deli: Layout = {
 const pharmacy: Layout = {
   style(r) {
     return {
-      W: r.range(12, 15), D: r.range(17, 21), H: 3.0, ceil: 'drop',
+      stockroom: { side: -1, back: 1.5 }, W: r.range(12, 15), D: r.range(17, 21), H: 3.0, ceil: 'drop',
       floor: r.chance(0.5) ? pbrS('floor_carpet', { color: '#8a8e94', rough: 1 }) : vct('#e6e6e2', '#d6d6d0'),
       wall: paint('#f4f4f2'), env: { ...COOL, exposure: 0.8 }, banner: false,
     };
@@ -274,7 +276,7 @@ const pharmacy: Layout = {
 const hardware: Layout = {
   style(r) {
     return {
-      W: r.range(7.5, 10), D: r.range(16, 21), H: 3.8, ceil: 'tin', tin: r.pick(['#e9e4d6', '#d8d2c2', '#c9c3b2']),
+      stockroom: { side: -1, back: 1.15 }, W: r.range(7.5, 10), D: r.range(16, 21), H: 3.8, ceil: 'tin', tin: r.pick(['#e9e4d6', '#d8d2c2', '#c9c3b2']),
       floor: pbrS(r.pick(['floor_laminate', 'oak']), { color: '#b89a7a', rough: 0.75 }),
       wall: paint(r.pick(['#e8e2d2', '#dfe6e0'])), env: { ...COOL, exposure: 0.9 },
     };
@@ -283,7 +285,7 @@ const hardware: Layout = {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     // left wall: low shelving with brown pegboard of hanging tools above
-    const lz0 = zb + 0.3, lz1 = zf - 1.4;
+    const lz0 = zb + 1.8, lz1 = zf - 1.4;
     k.at(-xi + 0.02, (lz0 + lz1) / 2, Math.PI / 2);
     F.gondola(k, lz1 - lz0, { double: false, height: 0.95, shelves: 3, depth: 0.5, color: '#6a4a2a', strip: '#ffffff', messy: 0.5 });
     yield;
@@ -310,6 +312,10 @@ const hardware: Layout = {
     // back wall: fastener bins
     k.at(0, zb + 0.43);
     F.binCabinet(k, Math.min(14, Math.floor((W - 1.5) / 0.3)), 6, { cell: 0.3 });
+    yield;
+    // behind the counter: a cabinet of small-parts drawers (open them: E)
+    k.at(xi - 0.02, zf - 2.2, -Math.PI / 2);
+    F.drawerChest(k, 3, 6, { w: 1.1, h: 1.25, d: 0.42, wood: '#6a6e72', knob: '#d8d8d8', label: 'parts drawer' });
     yield;
     // front: glass showcase counter and register, a bin of bargains
     k.at(xi - 1.9, zf - 2.4, -Math.PI / 2);
@@ -382,7 +388,7 @@ const electronics: Layout = {
 const toys: Layout = {
   style(r) {
     return {
-      W: r.range(10, 13), D: r.range(14, 18), H: 3.4, ceil: 'plain',
+      stockroom: { side: -1, back: 1.0 }, W: r.range(10, 13), D: r.range(14, 18), H: 3.4, ceil: 'plain',
       floor: pbrS('floor_laminate', { color: '#e8d8c0', rough: 0.6 }), wall: paint(r.pick(['#fdf6e8', '#eaf6fd', '#fdeef4'])),
       env: { ...COOL, hemi: { sky: '#fff8f0', ground: '#8a7a6a', intensity: 0.6 }, exposure: 0.85 },
     };
@@ -679,6 +685,13 @@ const antiques: Layout = {
       else F.table(k, r.range(1.0, 1.6), r.range(0.7, 0.9), r.range(0.72, 0.8), { color: r.pick(['#4a2e1a', '#5a3a22', '#3a2414']), legs: '#3a2414', messy: 0.7, lower: r.chance(0.5), pitch: 0.3 });
       yield;
     }
+    // back corners: a dresser and an armoire (open them: E)
+    k.at(-xi + 0.9, zb + 0.55);
+    F.drawerChest(k, 2, 3, { w: 1.2, h: 0.85, d: 0.5, wood: '#4a2e1a', label: 'dresser drawer' });
+    yield;
+    k.at(xi - 0.75, zb + 0.65);
+    F.cupboard(k, 1.1, 2.0, 0.6, { label: 'armoire' });
+    yield;
     // back: counter with an old brass register
     k.at(0.6, zb + 1.2);
     F.showcase(k, 2.0, { frame: '#3a2414' });
