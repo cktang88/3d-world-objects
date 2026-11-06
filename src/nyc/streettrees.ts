@@ -165,7 +165,7 @@ function drawGinkgo(g: CanvasRenderingContext2D) {
   g.fill();
 }
 
-function leafAtlas(kind: Spec['leaf']) {
+function leafCanvas(kind: Spec['leaf']) {
   const S = 1024, cell = 512;
   const [c, g] = makeCanvas(S);
   const r = new Rng(kind === 'plane' ? 11 : kind === 'locust' ? 23 : kind === 'oak' ? 41 : kind === 'ginkgo' ? 53 : 37);
@@ -271,7 +271,7 @@ function leafAtlas(kind: Spec['leaf']) {
       }
       g.restore();
     }
-  return bleedTexture(c);
+  return c;
 }
 
 function barkCanvas(kind: Spec['bark']) {
@@ -351,13 +351,17 @@ export function tickWind() {
  * the trunk so the trunk stays still and twigs move most. Leaves add a fast per-card flutter.
  */
 function windShader(sh: THREE.WebGLProgramParametersWithUniforms, leaves: boolean) {
+  // (the depth shader has no objectNormal: no flutter there)
+  leaves = leaves && sh.vertexShader.includes('beginnormal_vertex>\n\t#include <morphnormal');
   sh.uniforms.uWindTime = windTime;
   sh.uniforms.uWind = windStrength;
   sh.vertexShader = 'uniform float uWindTime;\nuniform float uWind;\n' + sh.vertexShader.replace(
     '#include <begin_vertex>',
     `#include <begin_vertex>
     {
-      #ifdef USE_INSTANCING
+      #if defined( USE_BATCHING )
+        vec2 ip = batchingMatrix[3].xz;
+      #elif defined( USE_INSTANCING )
         vec2 ip = instanceMatrix[3].xz;
       #else
         vec2 ip = vec2(0.0);
@@ -376,42 +380,74 @@ function windShader(sh: THREE.WebGLProgramParametersWithUniforms, leaves: boolea
   );
 }
 
-const barkMats = new Map<string, THREE.MeshStandardMaterial>();
-function barkMat(kind: Spec['bark']) {
-  let m = barkMats.get(kind);
-  if (!m) {
-    const c = barkCanvas(kind);
-    const map = new THREE.CanvasTexture(c);
-    map.colorSpace = THREE.SRGBColorSpace;
-    map.wrapS = map.wrapT = THREE.RepeatWrapping;
-    map.anisotropy = 8;
-    const nor = normalFrom(c, kind === 'plane' ? 1.2 : 3);
-    nor.wrapS = nor.wrapT = THREE.RepeatWrapping;
-    m = new THREE.MeshStandardMaterial({ map, normalMap: nor, roughness: 0.92, metalness: 0 });
-    m.normalScale.setScalar(kind === 'plane' ? 0.6 : 1.2);
-    m.onBeforeCompile = (sh) => windShader(sh, false);
-    m.customProgramCacheKey = () => 'nyc-bark';
-    barkMats.set(kind, m);
-  }
-  return m;
+/** species → tile index in the shared atlases */
+export const TILE: Record<Species, number> = { plane: 0, locust: 1, pear: 2, oak: 3, ginkgo: 4 };
+const NT = SPECIES.length;
+
+/**
+ * Bark for every species in ONE material: the bark canvases sit side by side in a strip and the
+ * shader wraps each branch's repeating uv inside its species tile (attribute aTile), using the
+ * unwrapped uv's derivatives so mip selection has no seams.
+ */
+let barkShared: THREE.MeshStandardMaterial | null = null;
+export function barkMat() {
+  if (barkShared) return barkShared;
+  const S = 512;
+  const [strip, g] = makeCanvas(S * NT, S);
+  const [nstrip, ng] = makeCanvas(S * NT, S);
+  SPECIES.forEach((sp, i) => {
+    const c = barkCanvas(SPECS[sp].bark);
+    g.drawImage(c, i * S, 0);
+    // normal strength baked per species (plane bark is smoother)
+    ng.drawImage(normalFrom(c, sp === 'plane' ? 0.75 : 3.6).image as HTMLCanvasElement, i * S, 0);
+  });
+  const map = new THREE.CanvasTexture(strip);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 8;
+  const nor = new THREE.CanvasTexture(nstrip);
+  const m = new THREE.MeshStandardMaterial({ map, normalMap: nor, roughness: 0.92, metalness: 0 });
+  const tile = `vec2 barkTile(vec2 uv) { return vec2((vTile + fract(uv.x)) / ${NT}.0, fract(uv.y)); }\n`;
+  m.onBeforeCompile = (sh) => {
+    windShader(sh, false);
+    sh.vertexShader = 'attribute float aTile;\nvarying float vTile;\n' + sh.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n vTile = aTile;');
+    sh.fragmentShader = 'varying float vTile;\n' + sh.fragmentShader
+      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\n' + tile)
+      .replace('texture2D( map, vMapUv )', `textureGrad( map, barkTile( vMapUv ), dFdx( vMapUv ) / vec2(${NT}.0, 1.0), dFdy( vMapUv ) / vec2(${NT}.0, 1.0) )`)
+      .replace('texture2D( normalMap, vNormalMapUv )', `textureGrad( normalMap, barkTile( vNormalMapUv ), dFdx( vNormalMapUv ) / vec2(${NT}.0, 1.0), dFdy( vNormalMapUv ) / vec2(${NT}.0, 1.0) )`);
+  };
+  m.customProgramCacheKey = () => 'nyc-bark';
+  return (barkShared = m);
 }
 
-const leafMats = new Map<string, THREE.MeshStandardMaterial>();
-export function leafMat(kind: Spec['leaf']) {
-  let m = leafMats.get(kind);
-  if (!m) {
-    m = new THREE.MeshStandardMaterial({ map: leafAtlas(kind), alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.78, metalness: 0 });
-    // the cards carry crown-shaped normals: keep them on the back faces too (soft, volumetric shading)
-    m.onBeforeCompile = (sh) => {
-      windShader(sh, true);
-      sh.fragmentShader = sh.fragmentShader.replace('normal *= faceDirection;', '');
-      // a little transmitted light: lift the shadowed side
-      sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.06;');
-    };
-    m.customProgramCacheKey = () => 'nyc-leaf';
-    leafMats.set(kind, m);
-  }
-  return m;
+/** leaves for every species in ONE alpha-tested atlas (2 × 3 blocks of 2 × 2 cards) */
+const LEAF_BLOCK = 768;
+let leafShared: THREE.MeshStandardMaterial | null = null;
+export function leafMat() {
+  if (leafShared) return leafShared;
+  const [c, g] = makeCanvas(LEAF_BLOCK * 2, LEAF_BLOCK * 3);
+  SPECIES.forEach((sp, i) => g.drawImage(leafCanvas(SPECS[sp].leaf), (i % 2) * LEAF_BLOCK, Math.floor(i / 2) * LEAF_BLOCK, LEAF_BLOCK, LEAF_BLOCK));
+  const m = new THREE.MeshStandardMaterial({ map: bleedTexture(c), alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.78, metalness: 0 });
+  // the cards carry crown-shaped normals: keep them on the back faces too (soft, volumetric shading)
+  m.onBeforeCompile = (sh) => {
+    windShader(sh, true);
+    sh.fragmentShader = sh.fragmentShader.replace('normal *= faceDirection;', '');
+    // a little transmitted light: lift the shadowed side
+    sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.06;');
+  };
+  m.customProgramCacheKey = () => 'nyc-leaf';
+  return (leafShared = m);
+}
+/** remap a card geometry's per-species 0..1 uvs into the species' block of the shared leaf atlas */
+function toLeafBlock(g: THREE.BufferGeometry, sp: Species) {
+  const i = TILE[sp];
+  const u0 = (i % 2) / 2, v0 = Math.floor(i / 2) / 3;
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+  for (let k = 0; k < uv.count; k++) uv.setXY(k, u0 + uv.getX(k) / 2, v0 + uv.getY(k) / 3);
+  return g;
+}
+function withTile(g: THREE.BufferGeometry, sp: Species) {
+  g.setAttribute('aTile', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(TILE[sp]), 1));
+  return g;
 }
 
 // ---------------------------------------------------------------- skeleton → geometry
@@ -633,7 +669,11 @@ export function treeModel(species: Species, variant: number): TreeModel {
   // far: fewer, larger cards on a subset of the tips
   const loTips = tips.filter((_, i) => i % 3 === 0);
   const loLeaves = cardGeometry(spec, loTips, seed + 2, 0.5, 2.1, H);
-  m = { hi: { bark: hiBark, leaves: hiLeaves }, lo: { bark: loBark, leaves: loLeaves }, bark: barkMat(spec.bark), leaf: leafMat(spec.leaf), height: H };
+  withTile(hiBark, species);
+  withTile(loBark, species);
+  toLeafBlock(hiLeaves, species);
+  toLeafBlock(loLeaves, species);
+  m = { hi: { bark: hiBark, leaves: hiLeaves }, lo: { bark: loBark, leaves: loLeaves }, bark: barkMat(), leaf: leafMat(), height: H };
   for (const g of [hiBark, hiLeaves, loBark, loLeaves]) g.computeBoundingSphere();
   models.set(key, m);
   return m;
@@ -653,91 +693,131 @@ export function treeMesh(species: Species, variant: number, lod: 'hi' | 'lo' = '
 }
 void mergeGeometries;
 
-// ---------------------------------------------------------------- per-chunk instancing
+// ---------------------------------------------------------------- per-chunk batching
 
-/** distance (from the chunk's centre) where trees switch to the far model */
-export const TREE_LOD_DIST = 95;
+/** per-tree distance (m) where a tree switches to its far model; hysteresis avoids flicker */
+export const TREE_LOD_DIST = 75;
+const LOD_IN = (TREE_LOD_DIST - 4) ** 2, LOD_OUT = (TREE_LOD_DIST + 4) ** 2;
 
-interface Batch {
-  hiB: THREE.InstancedMesh;
-  hiL: THREE.InstancedMesh;
-  loB: THREE.InstancedMesh;
-  loL: THREE.InstancedMesh;
-  n: number;
+interface ChunkTrees {
+  bark: THREE.BatchedMesh;
+  leaves: THREE.BatchedMesh;
+  /** geometry ids per model key + lod, in each batched mesh */
+  geo: Map<string, { bark: number; leaves: number }>;
+  verts: { bark: number; leaves: number; barkI: number; leavesI: number };
+  trees: { bark: number; leaves: number; key: string; far: boolean; pos: THREE.Vector3; world: THREE.Vector3 | null }[];
 }
 
-function makeBatch(model: TreeModel, cap: number, lod: THREE.LOD): Batch {
-  const mk = (g: THREE.BufferGeometry, m: THREE.Material, level: THREE.Object3D, colors: boolean) => {
-    const im = new THREE.InstancedMesh(g, m, cap);
-    im.count = 0;
-    im.castShadow = true;
-    im.receiveShadow = true;
-    im.onBeforeRender = tickWind;
-    if (colors) im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
-    level.add(im);
-    return im;
+const geoCount = (g: THREE.BufferGeometry) => [g.getAttribute('position').count, g.index ? g.index.count : 0] as const;
+
+function chunkTrees(group: THREE.Object3D): ChunkTrees {
+  let ct = group.userData.trees as ChunkTrees | undefined;
+  if (ct) return ct;
+  const mk = (m: THREE.Material, v: number, i: number) => {
+    const bm = new THREE.BatchedMesh(32, v, i, m);
+    bm.castShadow = true;
+    bm.receiveShadow = true;
+    bm.sortObjects = false;
+    bm.userData.owned = true;
+    // disposeTree() disposes the (owned) geometry: free the batch's textures with it
+    let gone = false;
+    bm.geometry.addEventListener('dispose', () => {
+      if (gone) return;
+      gone = true;
+      bm.dispose();
+    });
+    group.add(bm);
+    return bm;
   };
-  const [hi, lo] = [lod.levels[0].object, lod.levels[1].object];
-  return { hiB: mk(model.hi.bark, model.bark, hi, false), hiL: mk(model.hi.leaves, model.leaf, hi, true), loB: mk(model.lo.bark, model.bark, lo, false), loL: mk(model.lo.leaves, model.leaf, lo, true), n: 0 };
+  ct = {
+    bark: mk(barkMat(), 24000, 72000),
+    leaves: mk(leafMat(), 32000, 48000),
+    geo: new Map(),
+    verts: { bark: 0, leaves: 0, barkI: 0, leavesI: 0 },
+    trees: [],
+  };
+  const c = ct;
+  // per-tree LOD from the main camera, before the batch builds its draw list
+  const base = THREE.BatchedMesh.prototype.onBeforeRender;
+  const camPos = new THREE.Vector3();
+  const lodUpdate = (camera: THREE.Camera) => {
+    camPos.setFromMatrixPosition(camera.matrixWorld);
+    for (const t of c.trees) {
+      if (!t.world) t.world = t.pos.clone().applyMatrix4(c.leaves.matrixWorld);
+      const d = t.world.distanceToSquared(camPos);
+      const far = t.far ? d > LOD_IN : d > LOD_OUT;
+      if (far === t.far) continue;
+      t.far = far;
+      const g = c.geo.get(`${t.key}|${far ? 'lo' : 'hi'}`)!;
+      c.bark.setGeometryIdAt(t.bark, g.bark);
+      c.leaves.setGeometryIdAt(t.leaves, g.leaves);
+    }
+  };
+  c.leaves.onBeforeRender = function (renderer, scene, camera, geometry, material, grp) {
+    tickWind();
+    lodUpdate(camera);
+    base.call(this, renderer, scene, camera, geometry, material, grp);
+  };
+  c.bark.onBeforeRender = function (renderer, scene, camera, geometry, material, grp) {
+    tickWind();
+    lodUpdate(camera);
+    base.call(this, renderer, scene, camera, geometry, material, grp);
+  };
+  group.userData.trees = c;
+  return c;
 }
 
-function chunkLod(group: THREE.Object3D): THREE.LOD {
-  let lod = group.userData.treeLod as THREE.LOD | undefined;
-  if (!lod) {
-    lod = new THREE.LOD();
-    lod.addLevel(new THREE.Group(), 0);
-    lod.addLevel(new THREE.Group(), TREE_LOD_DIST);
-    group.add(lod);
-    group.userData.treeLod = lod;
-    group.userData.treeBatches = new Map<string, Batch>();
+/** add both LODs of a model to the chunk's batched meshes (growing them if needed) */
+function ensureModel(ct: ChunkTrees, key: string, model: TreeModel) {
+  if (ct.geo.has(`${key}|hi`)) return;
+  for (const lod of ['hi', 'lo'] as const) {
+    const ids = { bark: 0, leaves: 0 };
+    for (const part of ['bark', 'leaves'] as const) {
+      const bm = ct[part];
+      const g = model[lod][part];
+      const [v, i] = geoCount(g);
+      const vk = part, ik = part === 'bark' ? 'barkI' : 'leavesI';
+      const needV = ct.verts[vk] + v, needI = ct.verts[ik] + i;
+      // the batch allocates its buffers on the first addGeometry: until then use the constructor sizes
+      const pa = bm.geometry.getAttribute('position');
+      const curV = pa ? pa.count : part === 'bark' ? 24000 : 32000, curI = bm.geometry.index ? bm.geometry.index.count : part === 'bark' ? 72000 : 48000;
+      if (needV > curV || needI > curI) bm.setGeometrySize(Math.max(needV, curV * 2), Math.max(needI, curI * 2));
+      ids[part] = bm.addGeometry(g);
+      ct.verts[vk] = needV;
+      ct.verts[ik] = needI;
+    }
+    ct.geo.set(`${key}|${lod}`, ids);
   }
-  return lod;
 }
 
-const tmpColor = new THREE.Color();
 /**
- * Add one instanced tree to a chunk group at local (x, y, z). Instanced meshes grow as needed;
- * bounding spheres recompute lazily for frustum culling.
+ * Add one tree to a chunk at local (x, y, z). Every species and LOD of the chunk lives in two
+ * THREE.BatchedMesh (bark + leaves, both with shared atlases) = 2 draw calls per chunk; each tree
+ * switches between its near and far geometry by its own distance to the camera.
  */
 export function addTree(group: THREE.Object3D, species: Species, variant: number, x: number, y: number, z: number, rng: Rng) {
-  const lod = chunkLod(group);
-  const batches = group.userData.treeBatches as Map<string, Batch>;
+  const ct = chunkTrees(group);
   const model = treeModel(species, variant);
   const key = `${species}|${variant}`;
-  let b = batches.get(key);
-  if (!b || b.n >= b.hiB.instanceMatrix.count) {
-    const cap = b ? b.n * 2 : 16;
-    const nb = makeBatch(model, cap, lod);
-    if (b) {
-      for (const k of ['hiB', 'hiL', 'loB', 'loL'] as const) {
-        nb[k].instanceMatrix.array.set(b[k].instanceMatrix.array);
-        if (b[k].instanceColor) nb[k].instanceColor!.array.set(b[k].instanceColor!.array);
-        nb[k].count = b.n;
-        b[k].removeFromParent();
-        b[k].dispose();
-      }
-      nb.n = b.n;
-    }
-    b = nb;
-    batches.set(key, b);
-  }
+  ensureModel(ct, key, model);
   const s = rng.range(0.82, 1.12);
   const m = new THREE.Matrix4().compose(
     new THREE.Vector3(x, y, z),
     new THREE.Quaternion().setFromAxisAngle(UP, rng.range(0, Math.PI * 2)),
     new THREE.Vector3(s * rng.range(0.9, 1.1), s * rng.range(0.92, 1.1), s * rng.range(0.9, 1.1)),
   );
-  // seasonal/individual tint of the foliage
-  tmpColor.setHSL(rng.range(-0.02, 0.03), 0, 0);
+  // individual tint of the foliage
   const tint = new THREE.Color(rng.range(0.85, 1.08), rng.range(0.9, 1.08), rng.range(0.8, 1.0));
-  for (const k of ['hiB', 'hiL', 'loB', 'loL'] as const) {
-    b[k].setMatrixAt(b.n, m);
-    if (k === 'hiL' || k === 'loL') b[k].setColorAt(b.n, tint);
-    b[k].count = b.n + 1;
-    b[k].instanceMatrix.needsUpdate = true;
-    if (b[k].instanceColor) b[k].instanceColor!.needsUpdate = true;
-    b[k].boundingSphere = null;
-    b[k].boundingBox = null;
+  for (const bm of [ct.bark, ct.leaves]) {
+    if (bm.instanceCount >= bm.maxInstanceCount) bm.setInstanceCount(bm.maxInstanceCount * 2);
   }
-  b.n++;
+  const g = ct.geo.get(`${key}|hi`)!;
+  const ib = ct.bark.addInstance(g.bark);
+  const il = ct.leaves.addInstance(g.leaves);
+  ct.bark.setMatrixAt(ib, m);
+  ct.leaves.setMatrixAt(il, m);
+  ct.leaves.setColorAt(il, tint);
+  ct.trees.push({ bark: ib, leaves: il, key, far: false, pos: new THREE.Vector3(x, y + model.height * 0.4, z), world: null });
+  ct.bark.boundingSphere = ct.leaves.boundingSphere = null;
+  ct.bark.boundingBox = ct.leaves.boundingBox = null;
 }
