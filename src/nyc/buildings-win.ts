@@ -387,9 +387,9 @@ vec3 roomShade(out float lampGlow) {
     }
     float lit = vInfo.y;
     float warm = h11(seed + 31.0);
-    vec3 lampC = mix(vec3(1.0, 0.78, 0.5), vec3(0.85, 0.9, 1.0), step(0.75, warm));
+    vec3 lampC = mix(mix(vec3(1.0, 0.72, 0.42), vec3(1.0, 0.85, 0.62), warm), vec3(0.8, 0.88, 1.0), step(0.82, warm));
     float dayK = uDay * vRoomI.z;
-    float nightK = uNight * lit * (shopG ? 2.2 : 1.6);
+    float nightK = uNight * lit * (shopG ? 1.8 : 0.85);
     vec3 inside = room * (dayK + nightK * lampC) + lampGlow * nightK * lampC * 0.5;
     // grazing views mostly reflect (fresnel)
     float nv = clamp(abs(vRd.z) / length(vRd), 0.0, 1.0);

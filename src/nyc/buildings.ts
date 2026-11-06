@@ -70,7 +70,7 @@ export function setBlockDetail(group: THREE.Object3D, on: boolean) {
 // ---------------------------------------------------------------- materials
 
 const FACADE_PBR: Partial<Record<FacadeStyle, string[]>> = {
-  brick: ['nyc_brick', 'nyc_brick2'], prewar: ['nyc_brick', 'nyc_brick2'], brownstone: ['nyc_brownstone'], castiron: ['nyc_castiron'], panel: ['nyc_panel'],
+  brick: ['nyc_brick', 'nyc_brick2'], prewar: ['nyc_brick', 'nyc_brick2'], brownstone: ['nyc_castiron'], castiron: ['nyc_castiron'], panel: ['nyc_panel'],
 };
 const TILE: [number, number] = [12, 12.8];
 const facadeMats = new Map<string, THREE.MeshStandardMaterial>();
@@ -88,7 +88,7 @@ function facadeMat(style: FacadeStyle, seed: number) {
   return m;
 }
 const stoneMat = () => surface('nyc_limestone', TILE, { vertexColors: true, roughness: 1, normalScale: 1.2, envMapIntensity: 0.4 });
-const brownMat = () => surface('nyc_brownstone', TILE, { vertexColors: true, roughness: 1, normalScale: 1.4, envMapIntensity: 0.4 });
+const brownMat = () => surface('nyc_limestone', TILE, { vertexColors: true, roughness: 1, normalScale: 1.4, envMapIntensity: 0.4 });
 
 function shade(hex: string, f: number) {
   return `#${new THREE.Color(hex).multiplyScalar(f).getHexString()}`;
@@ -632,7 +632,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
     castiron: rng.pick(['#e2ddd0', '#c9cec9', '#d8ccb0', '#bfbfb8', '#a9b2a8']),
   }[type];
   const fm = facadeMat(style, rng.int(0, 2));
-  const tint = FACADE_PBR[style] ? softTint(wall, type === 'castiron' ? 0.7 : 0.35) : wall;
+  const tint = FACADE_PBR[style] ? softTint(wall, type === 'castiron' ? 0.7 : type === 'brownstone' ? 0.8 : 0.35) : wall;
   const plain = mat(shade(wall, 0.82), { rough: 0.95 });
   const sides: Side[] = ['N', 'S', 'E', 'W'];
   const exposed = (s: Side) => s === front || (front === 'E' || front === 'W' ? (s === 'N' && cornerSides[0]) || (s === 'S' && cornerSides[1]) : false);
@@ -661,7 +661,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   const trimC = new THREE.Color(type === 'brownstone' ? shade(wall, 1.05) : type === 'castiron' ? shade(tint, 0.95) : rng.pick(TRIM_STONE));
   const revealC = new THREE.Color(type === 'castiron' ? shade(tint, 0.6) : shade(wall, 0.75));
   const sashC = new THREE.Color(rng.pick(type === 'brownstone' ? ['#2a1d16', '#e8e2d6', '#1d2a22', '#3a2a20'] : type === 'castiron' ? ['#1c1c1c', '#3a4a3a', '#e8e4da', '#5a3a2a'] : PAINT));
-  const trim: TrimKind = type === 'brownstone' ? 'hood' : type === 'castiron' ? 'none' : type === 'tenement' ? rng.pick(['stone', 'stone', 'arch', 'hood', 'flat'] as const) : type === 'prewar' ? rng.pick(['stone', 'flat', 'stone'] as const) : rng.pick(['flat', 'none'] as const);
+  const trim: TrimKind = type === 'brownstone' ? 'hood' : type === 'castiron' ? 'arch' : type === 'tenement' ? rng.pick(['stone', 'stone', 'arch', 'hood', 'flat'] as const) : type === 'prewar' ? rng.pick(['stone', 'flat', 'stone'] as const) : rng.pick(['flat', 'none'] as const);
   const sash: SashKind = type === 'castiron' ? 'case' : type === 'midrise' && style === 'panel' ? 'case' : 'dh';
   const kind = type === 'castiron' ? 'loft' : type === 'midrise' && style === 'panel' ? 'office' : 'apt';
   const acRate = type === 'tenement' ? 0.22 : type === 'prewar' ? 0.15 : type === 'midrise' ? 0.12 : type === 'brownstone' ? 0.08 : 0.04;
@@ -785,16 +785,21 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
     // belt courses: sill bands (tenements, pre-war) and entablatures (cast iron)
     const bandM = type === 'castiron' ? mat(shade(tint, 1.02), { rough: 0.6 }) : mat(trimC.getStyle(), { rough: 0.85 });
     if (type === 'castiron') {
-      for (const ly of levels) F.band(bandM, ly - 0.05, 0.4, 0.14, 0.05);
-      // half-columns with capitals and bases between every bay on every floor
+      // entablature at every floor line: architrave, frieze, projecting cornice ledge
+      for (const ly of levels) {
+        F.band(bandM, ly - 0.1, 0.42, 0.16, 0.05);
+        F.band(bandM, ly + 0.32, 0.08, 0.32, 0.1);
+      }
+      // piers with half-columns, capitals and bases between every bay on every floor
       const colM = mat(shade(tint, 1.0), { rough: 0.55, metal: 0.1 });
       for (const ly of levels)
         for (let k = 0; k <= n; k++) {
           const u = -L / 2 + 0.2 + ((L - 0.4) * k) / n;
-          C(F.g, colM, 0.17, fh - 0.75, u, ly + 0.45, 0.06);
-          B(F.f, colM, 0.46, 0.2, 0.22, u, ly + fh - 0.5, 0.1, false);
-          B(F.f, colM, 0.4, 0.14, 0.2, u, ly + 0.35, 0.09, false);
-          B(F.f, colM, 0.5, 0.06, 0.26, u, ly + fh - 0.32, 0.12, false);
+          PB(F.g, fm, 0.62, fh - 0.4, 0.1, u, ly + 0.4, 0.05, tint);
+          C(F.g, colM, 0.21, fh - 1.05, u, ly + 0.62, 0.17);
+          B(F.f, colM, 0.56, 0.24, 0.4, u, ly + fh - 0.45, 0.2, false);
+          B(F.f, colM, 0.66, 0.08, 0.46, u, ly + fh - 0.21, 0.23, false);
+          B(F.f, colM, 0.5, 0.22, 0.38, u, ly + 0.4, 0.19, false);
         }
     } else if (type === 'tenement' && rng.chance(0.6)) {
       for (const ly of levels) F.band(bandM, ly + 0.7, 0.1, 0.07, 0, true);
