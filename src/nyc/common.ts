@@ -14,8 +14,10 @@ export const BZ = SZ / 2 - ST / 2; // 27
 export const LX = BX - SW; // 47.5: building line
 export const LZ = BZ - SW; // 22.5
 export const CURB = 0.15;
-export const RX = 2;
-export const RZ = 2;
+/** streamed chunk radius; `?r=0` (just your block) or `?r=1` (3×3) for fast dev/QA runs — never test with the full city */
+const R_OVERRIDE = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('r') : null;
+export const RX = R_OVERRIDE !== null ? Math.max(0, Math.min(2, Number(R_OVERRIDE) | 0)) : 2;
+export const RZ = RX;
 
 export const AVENUES = ['York Av', '1 Av', '2 Av', '3 Av', 'Lexington Av', 'Park Av', 'Madison Av', '5 Av', '6 Av', 'Broadway', '7 Av', '8 Av', '9 Av', '10 Av', '11 Av', '12 Av'];
 export function avenueName(i: number) {
