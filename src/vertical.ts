@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import type { Level, LevelDesc, Portal } from './level';
-import { FloorLevel, LIFT, liftDisplay, panelTexture, floorLabel, portalActions, toWorld, type FloorDesc } from './rooms/vertical';
+import { LIFT, liftDisplay, panelTexture, floorLabel, portalActions, toWorld, coreOf, type VCore } from './rooms/vertical';
 import { descKey, type Seamless, type Slot } from './seamless';
 import type { Player } from './player';
 import { Kit } from './rooms/kit';
 import { M } from './rooms/mats';
 import { mat } from './build';
-import { hashN } from './rng';
+import { hashStr } from './rng';
 
 /**
  * Vertical circulation in play (see docs/research/vertical.md):
@@ -50,7 +50,9 @@ const ease = (t: number) => t * t * (3 - 2 * t);
 export class Vertical {
   stats = { stairs: 0, rides: 0, forced: 0, shows: 0, maxSwitchMs: 0, log: [] as string[] };
   private o: VerticalOpts;
-  private level: FloorLevel | null = null;
+  /** the active level's stair/lift core, and the level */
+  private level: VCore | null = null;
+  private lvl: Level | null = null;
   private building = '';
   private shown = new Map<Slot, number>();
   // the car
@@ -103,17 +105,18 @@ export class Vertical {
 
   /** the walkable height under (x, z) near y in this level (stairs); 0 elsewhere */
   ground(level: Level | undefined, x: number, z: number, y: number) {
-    return level instanceof FloorLevel ? level.ground(x, z, y) : 0;
+    return coreOf(level)?.ground(x, z, y) ?? 0;
   }
 
   update(dt: number, level: Level, active: boolean): FloorSwitch | null {
     this.keysOn = active;
-    if (!(level instanceof FloorLevel)) {
+    const core = coreOf(level);
+    if (!core) {
       this.leave();
       return null;
     }
-    if (level !== this.level) this.adopt(level);
-    const lv = level, p = this.o.player.pos, H = lv.d.H;
+    if (core !== this.level) this.adopt(core, level);
+    const lv = core, p = this.o.player.pos, H = lv.H;
     this.typedT -= dt;
     // 1. the lift (may end a ride with a switch)
     const ride = lv.lifts.length ? this.liftStep(dt, lv) : null;
@@ -135,11 +138,12 @@ export class Vertical {
 
   /** after main.ts switched levels for us (or for anyone): take over the new floor */
   afterSwitch(level: Level, sw?: FloorSwitch) {
-    if (!(level instanceof FloorLevel)) return;
+    const core = coreOf(level);
+    if (!core) return;
     for (const s of [...this.shown.keys()]) if (s.level === level) this.shown.delete(s);
     const old = this.level;
-    this.adopt(level);
-    if (old && old !== level) {
+    this.adopt(core, level);
+    if (old && old !== core) {
       old.rideTarget = null;
       old.extra = [];
     }
@@ -150,27 +154,28 @@ export class Vertical {
       this.sel = null;
       this.stats.rides++;
     }
-    this.placeCar(level);
-    this.neighbours(level);
+    this.placeCar(core);
+    this.neighbours(core);
   }
 
   // ------------------------------------------------------------ levels
 
-  private adopt(lv: FloorLevel) {
-    const key = `${lv.type}|${lv.desc.seed}`;
+  private adopt(lv: VCore, level: Level) {
+    const key = lv.key;
     if (key !== this.building) {
       // a new building: the car waits on some floor, doors shut
       this.building = key;
       this.state = 'idle';
       this.lift = 0;
-      this.carFloor = hashN(lv.desc.seed, 8) % Math.max(1, lv.floors);
+      this.carFloor = hashStr(key) % Math.max(1, lv.floors);
       this.open = 0;
       this.sel = null;
     }
     if (this.level && this.level !== lv) this.level.extra = [];
     this.level = lv;
+    this.lvl = level;
     lv.well.visible = true;
-    const s = this.o.seam.slotOf(lv);
+    const s = this.o.seam.slotOf(level);
     if (s) s.compiled = 'yes'; // it has been drawn: its programs exist
     lv.lifts.forEach((l, i) => portalActions.set(l.call, () => this.call(i)));
     if (this.state !== 'riding' && this.state !== 'opening' && Math.abs(this.carFloor - lv.floor) > 0.01) this.open = 0;
@@ -184,9 +189,10 @@ export class Vertical {
     this.light.intensity = 0;
     if (this.level) this.level.extra = [];
     this.level = null;
+    this.lvl = null;
   }
 
-  private neighbours(lv: FloorLevel) {
+  private neighbours(lv: VCore) {
     const want = new Map<Slot, number>();
     const p = this.o.player.pos;
     if (this.state !== 'riding' && lv.nearStair(p)) {
@@ -194,7 +200,7 @@ export class Vertical {
         const n = lv.neighbour(dir);
         if (!n) continue;
         const s = this.o.seam.slots.get(descKey(n));
-        if (s?.ready && s.level !== lv && s.level instanceof FloorLevel) want.set(s, dir);
+        if (s?.ready && coreOf(s.level) && coreOf(s.level) !== lv) want.set(s, dir);
       }
     }
     for (const [s, dir] of [...this.shown]) if (want.get(s) !== dir) this.hide(s);
@@ -209,9 +215,11 @@ export class Vertical {
     lv.setStub(-1, down);
   }
 
-  private show(s: Slot, dir: number, lv: FloorLevel) {
+  private show(s: Slot, dir: number, lv: VCore) {
     const g = s.level.group;
-    const fl = s.level as FloorLevel;
+    const fl = coreOf(s.level)!;
+    // a house's rooms are culled by lazy.ts cells while active: show them all while seen from the stair
+    for (const c of (s.level as { cells?: { group: THREE.Object3D }[] }).cells ?? []) c.group.visible = true;
     if (!s.stripped.length) {
       g.traverse((o) => {
         if ((o as THREE.Light).isLight && o.parent) s.stripped.push([o as THREE.Light, o.parent]);
@@ -221,7 +229,7 @@ export class Vertical {
     fl.well.visible = false;
     for (const l of fl.lifts) l.open = 0;
     fl.extra = [];
-    g.position.set(0, dir * lv.d.H, 0);
+    g.position.set(0, dir * lv.H, 0);
     g.quaternion.identity();
     g.updateMatrixWorld(true);
     if (s.compiled === 'no') {
@@ -230,7 +238,7 @@ export class Vertical {
       this.o.renderer.compileAsync(g, this.o.camera, this.o.scene).then(
         () => {
           s.compiled = 'yes';
-          this.log(`compiled ${fl.name} in ${(performance.now() - t).toFixed(0)} ms`);
+          this.log(`compiled ${s.level.name} in ${(performance.now() - t).toFixed(0)} ms`);
         },
         () => (s.compiled = 'yes'),
       );
@@ -246,7 +254,7 @@ export class Vertical {
 
   private hide(s: Slot) {
     this.shown.delete(s);
-    if (this.level && s.level === this.level) return;
+    if (this.lvl && s.level === this.lvl) return;
     s.level.group.removeFromParent();
   }
 
@@ -258,7 +266,7 @@ export class Vertical {
 
   // ------------------------------------------------------------ the car
 
-  private inCar(lv: FloorLevel) {
+  private inCar(lv: VCore) {
     const l = lv.lifts[this.lift];
     if (!l) return false;
     const p = this.o.player.pos, f = l.frame;
@@ -266,7 +274,7 @@ export class Vertical {
     const lx = c * dx - s * dz, lz = s * dx + c * dz;
     return Math.abs(lx) < LIFT.w / 2 && lz < -LIFT.depth - 0.05 && lz > -LIFT.depth - LIFT.d;
   }
-  private inDoorway(lv: FloorLevel) {
+  private inDoorway(lv: VCore) {
     const l = lv.lifts[this.lift];
     if (!l) return false;
     const p = this.o.player.pos, f = l.frame;
@@ -287,7 +295,7 @@ export class Vertical {
     this.lift = i;
     this.from = this.carFloor;
     this.to = lv.floor;
-    this.dur = 0.5 + Math.min(6, Math.abs(this.to - this.from) / lv.spec.speed);
+    this.dur = 0.5 + Math.min(6, Math.abs(this.to - this.from) / lv.speed);
     this.t = 0;
     this.state = Math.abs(this.to - this.from) < 0.01 ? 'opening' : 'coming';
     this.sel = null;
@@ -308,12 +316,12 @@ export class Vertical {
     this.idle = 0;
     if (this.state === 'closing') this.state = 'opening';
     // start building the destination right away
-    const d: FloorDesc = { ...lv.desc, floor: f };
+    const d = lv.at(f);
     lv.rideTarget = d;
     if (!this.o.seam.slots.has(descKey(d))) this.o.seam.prebuild(d);
   }
 
-  private liftStep(dt: number, lv: FloorLevel): FloorSwitch | null {
+  private liftStep(dt: number, lv: VCore): FloorSwitch | null {
     const here = Math.abs(this.carFloor - lv.floor) < 0.01;
     switch (this.state) {
       case 'coming': {
@@ -350,7 +358,7 @@ export class Vertical {
             this.state = 'riding';
             this.from = lv.floor;
             this.to = this.sel;
-            this.dur = 1.6 + Math.abs(this.to - this.from) / lv.spec.speed;
+            this.dur = 1.6 + Math.abs(this.to - this.from) / lv.speed;
             this.t = 0;
             this.select(this.to);
           } else {
@@ -362,7 +370,7 @@ export class Vertical {
         break;
       case 'riding': {
         this.t += dt;
-        const d: FloorDesc = { ...lv.desc, floor: this.to };
+        const d = lv.at(this.to);
         const ready = this.o.seam.ready(d);
         let k = Math.min(1, this.t / this.dur);
         // the ride lasts as long as the build: hold short of the last floor until it is ready
@@ -393,7 +401,7 @@ export class Vertical {
     return null;
   }
 
-  private setDoors(lv: FloorLevel) {
+  private setDoors(lv: VCore) {
     const w = LIFT.door;
     const atThis = Math.abs(this.carFloor - lv.floor) < 0.01 && this.state !== 'riding' && this.state !== 'coming';
     lv.lifts.forEach((l, i) => {
@@ -409,7 +417,7 @@ export class Vertical {
     }
   }
 
-  private placeCar(lv: FloorLevel) {
+  private placeCar(lv: VCore) {
     const l = lv.lifts[this.lift];
     const visible = !!l && (this.state === 'riding' || (Math.abs(this.carFloor - lv.floor) < 0.01 && this.state !== 'coming'));
     if (!visible || !l) {
@@ -446,7 +454,7 @@ export class Vertical {
   }
 
   /** the car: wood-panelled (pre-war) or stainless (office, loft), built once per type */
-  private carFor(lv: FloorLevel) {
+  private carFor(lv: VCore) {
     if (this.car && this.carType === lv.type) return this.car;
     if (this.car) this.car.removeFromParent();
     const k = new Kit();

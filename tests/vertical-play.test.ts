@@ -5,7 +5,7 @@
  * and the fractal chain floor -> apartment -> room cells -> containers -> back.
  */
 import * as THREE from 'three';
-import { test, expect } from './qa';
+import { test, expect, Grid } from './qa';
 import './env';
 import { Seamless, descKey } from '../src/seamless';
 import { Vertical, type FloorSwitch } from '../src/vertical';
@@ -17,7 +17,7 @@ import type { Level, LevelDesc, Portal } from '../src/level';
 export const slowest: Record<string, number> = {};
 const note = (k: string, ms: number) => (slowest[k] = Math.max(slowest[k] ?? 0, +ms.toFixed(1)));
 
-function world(type: string, floors: number) {
+function world(type: string, floors: number, start?: LevelDesc) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera();
   const renderer = { compileAsync: () => Promise.resolve(), toneMappingExposure: 1 } as unknown as THREE.WebGLRenderer;
@@ -51,7 +51,7 @@ function world(type: string, floors: number) {
   const vert = new Vertical({ scene, camera, renderer, seam, player, aimed: () => aimed });
   player.ground = (x, z, y) => vert.ground(level, x, z, y);
   const stack: LevelDesc[] = [];
-  let cur: LevelDesc = { kind: 'floor', seed: 31337, name: 'QA House', type, floor: 0, floors };
+  let cur: LevelDesc = start ?? { kind: 'floor', seed: 31337, name: 'QA House', type, floor: 0, floors };
   const set = (desc: LevelDesc, pos?: THREE.Vector3, yaw?: number) => {
     const s = seam.take(desc);
     if (level) scene.remove(level.group);
@@ -191,4 +191,45 @@ test('fractal chain: floor -> apartment -> rooms -> containers -> back to the sa
   w.set(back, door.returnPos!, door.returnYaw!);
   expect(w.level === floor, 'back on the very same floor level object (restored from the cache)');
   expect(w.seam.stats.builds === before, 'nothing rebuilt going back');
+});
+
+test('house (brownstone) stair core: same core on every floor, reachable from the rooms, walk up to the top floor and back', () => {
+  const desc = (floor: number): LevelDesc => ({ kind: 'interior', seed: 2024, name: 'QA brownstone', style: 'house', floor, floors: 4, biome: 'town' });
+  const levels = [0, 1, 2, 3].map((f) => new InteriorLevel(desc(f) as Extract<LevelDesc, { kind: 'interior' }>));
+  const c0 = levels[0].vcore!;
+  expect(!!c0, 'a 4-floor house has a stair core');
+  for (const lv of levels) {
+    const c = lv.vcore!;
+    expect(Math.abs(c.ox - c0.ox) < 1e-6 && Math.abs(c.oz - c0.oz) < 1e-6, `floor ${c.floor}: core in the same place`);
+    expect(!lv.portals().some((p) => typeof p.target === 'object' && p.target.kind === 'interior' && p.target.floor !== lv.stairCore?.x), 'no fade portal to another floor');
+    const g = new Grid({ minX: -16, maxX: 16, minZ: -20, maxZ: 16 }, lv.colliders(), 0.1, 0.3);
+    const reach = g.flood(c.ox, c.oz + c.d.Ld * 0.5);
+    expect(reach(lv.spawn.pos.x, lv.spawn.pos.z, 0.5), `floor ${c.floor}: the stair landing connects to the rooms (spawn at the door reachable)`);
+  }
+  expect(!levels[0].portals().some((p) => /upstairs/i.test(p.label)), 'the in-room stair portal is gone');
+  // climb from the ground floor landing to the top and back
+  const w = world('house', 4, desc(0));
+  const c = (w.level as InteriorLevel).vcore!, d = c.d;
+  const P = (x: number, z: number): [number, number] => [x + c.ox, z + c.oz];
+  w.player.pos.set(...([P(0, d.Ld * 0.5)].map(([x, z]) => [x, 0, z])[0] as [number, number, number]));
+  w.wait(400, () => w.seam.ready(desc(1)));
+  expect(w.seam.ready(desc(1)), 'the floor above prebuilt at the stair');
+  const ax = (d.ax0 + d.ax1) / 2, bx = (d.bx0 + d.bx1) / 2, zm = -d.Lf - d.Md / 2;
+  const up = [[ax, 0.5], [ax, -0.2], [ax, zm], [bx, zm], [bx, -0.2], [bx, 0.5]].map(([x, z]) => P(x, z));
+  for (let f = 1; f <= 3; f++) {
+    expect(up.every(([x, z]) => w.walkTo(x, z)), `climbed to house floor ${f}`);
+    expect((w.level as InteriorLevel).vcore?.floor === f, `on floor ${f} (got ${(w.level as InteriorLevel).vcore?.floor})`);
+  }
+  // no further up at the top
+  const before = w.switches;
+  w.walkTo(...P(ax, 0.5));
+  w.walkTo(...P(ax, -0.3), 200);
+  w.walkTo(...P(ax, zm), 200);
+  expect(w.switches === before && Math.abs(w.player.pos.y) < 0.1, 'no flight up from the top floor');
+  const down = [[bx, 0.5], [bx, -0.2], [bx, zm], [ax, zm], [ax, -0.2], [ax, 0.5]].map(([x, z]) => P(x, z));
+  w.walkTo(...P(0, 0.6));
+  for (let f = 2; f >= 0; f--) expect(down.every(([x, z]) => w.walkTo(x, z)), `walked down to house floor ${f}`);
+  expect((w.level as InteriorLevel).vcore?.floor === 0, 'back on the ground floor');
+  // into the rooms through the core door
+  expect(w.walkTo(c.door.x, c.door.z + 1.0), 'walked out of the stair hall into the house');
 });

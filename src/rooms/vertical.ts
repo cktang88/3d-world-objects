@@ -22,7 +22,7 @@ import { mat } from '../build';
  *    bulkhead, water tower and a skyline.
  */
 
-export type BType = 'walkup' | 'prewar' | 'office' | 'loft';
+export type BType = 'walkup' | 'prewar' | 'office' | 'loft' | 'house';
 export type FloorDesc = Extract<LevelDesc, { kind: 'floor' }>;
 
 interface LiftSpec {
@@ -56,6 +56,8 @@ export const SPECS: Record<BType, Spec> = {
   walkup: { H: 3.05, risers: 16, fw: 0.95, gap: 0.12, run: 0.25, hw: 0, hallL: 4.6, lifts: [], units: 4, lobbyUnits: 2, unitStyles: ['apartment'], enclosed: false, lobbyW: 0, lobbyL: 4.6, roofW: 8.5, speed: 1 },
   prewar: { H: 3.2, risers: 18, fw: 1.1, gap: 0.3, run: 0.27, hw: 1.9, hallL: 9.5, lifts: [{ side: 1, at: 8.3 }], units: 6, lobbyUnits: 2, unitStyles: ['apartment'], enclosed: false, lobbyW: 7, lobbyL: 7.5, roofW: 18, speed: 1.3 },
   office: { H: 3.9, risers: 22, fw: 1.15, gap: 0.25, run: 0.28, hw: 2.7, hallL: 10.5, lifts: [{ side: 1, at: 6.7 }, { side: 1, at: 9.0 }, { side: -1, at: 6.7 }, { side: -1, at: 9.0 }], units: 3, lobbyUnits: 0, unitStyles: ['office'], enclosed: true, lobbyW: 12, lobbyL: 9, roofW: 24, speed: 3 },
+  /** a house's own stair (brownstone): a stair hall behind the back wall, wood treads, closed doors on other floors (InteriorLevel, houseCore()) */
+  house: { H: 3.35, risers: 18, fw: 0.95, gap: 0.1, run: 0.26, hw: 0, hallL: 0, lifts: [], units: 0, lobbyUnits: 0, unitStyles: [], enclosed: true, lobbyW: 0, lobbyL: 0, roofW: 0, speed: 1 },
   loft: { H: 3.8, risers: 22, fw: 1.1, gap: 0.2, run: 0.27, hw: 2.2, hallL: 5.5, lifts: [{ side: 1, at: 4.1 }], units: 2, lobbyUnits: 1, unitStyles: ['office', 'workshop', 'apartment'], enclosed: true, lobbyW: 0, lobbyL: 4.5, roofW: 12, speed: 0.8 },
 };
 
@@ -383,6 +385,15 @@ function mats(type: BType, seed: number): Mats {
         glyph: glyphMat('#1e1a16', false), steel: false,
       };
     }
+    case 'house': {
+      const wall = r.pick(['#e8dcc8', '#d9e0d4', '#e6d3c3', '#efe7d6']);
+      return {
+        tread: M.oak('#9a7050'), riser: M.trim(), stringer: M.trim(), baluster: M.walnut('#6a4a30'), rail: M.walnut('#6a4a30'),
+        soffit: paint('#f2eee4'), landing: M.parquet(), wall: paint(wall), hallWall: paint(wall), wainscot: null,
+        hallFloor: M.parquet(), lobbyFloor: M.parquet(), trim: M.trim(), door: M.painted(r.pick(['#3b2a20', '#2f3a40', '#f1eee6'])),
+        ceiling: paint('#f4f2ec'), liftDoor: M.steel(), surround: M.trim(), bulb: M.bulb(), glyph: glyphMat('#2a2420', false), steel: false,
+      };
+    }
     case 'office':
     case 'loft': {
       const block = r.pick(['#d6d6cf', '#dad4c4', '#cfd4d6', '#e2ddcc']);
@@ -539,9 +550,9 @@ function buildBase(k: Kit, d: Dims, m: Mats) {
 }
 
 /** the top: the roof landing inside the bulkhead, its walls, roof slab and skylight */
-function buildCap(k: Kit, d: Dims, m: Mats) {
+function buildCap(k: Kit, d: Dims, m: Mats, roofDoor: boolean) {
   const { SW, Ld, Lf, zBack } = d;
-  const h = 2.7;
+  const h = roofDoor ? 2.7 : d.H - S;
   k.box(m.soffit, SW, S - 0.025, Ld, 0, -S, Ld / 2);
   k.box(m.landing, SW, 0.025, Ld, 0, -0.025, Ld / 2);
   const zF = Ld + T;
@@ -549,16 +560,17 @@ function buildCap(k: Kit, d: Dims, m: Mats) {
   k.box(m.wall, T, h, wl, -SW / 2 - T / 2, 0, (zF + zBack - T) / 2);
   k.box(m.wall, T, h, wl, SW / 2 + T / 2, 0, (zF + zBack - T) / 2);
   k.box(m.wall, SW + 2 * T, h, T, 0, 0, zBack - T / 2);
-  // door to the roof on the +x side of the front wall
-  const d0 = SW / 2 - 1.0, d1 = SW / 2 - 0.1;
+  // door to the roof on the +x side of the front wall (a house's top landing: its doorway in the middle)
+  const d0 = roofDoor ? SW / 2 - 1.0 : -0.5, d1 = roofDoor ? SW / 2 - 0.1 : 0.5;
   const x0 = -SW / 2 - T, x1 = SW / 2 + T;
+  const dh = roofDoor ? 2.05 : DH;
   k.box(m.wall, d0 - x0, h, T, (x0 + d0) / 2, 0, Ld + T / 2);
   k.box(m.wall, x1 - d1, h, T, (x1 + d1) / 2, 0, Ld + T / 2);
-  k.box(m.wall, d1 - d0, h - 2.05, T, (d0 + d1) / 2, 2.05, Ld + T / 2);
+  k.box(m.wall, d1 - d0, h - dh, T, (d0 + d1) / 2, dh, Ld + T / 2);
   // the door, swung open against the outside wall
-  k.at(d1, 0, Ld + T + 0.02, -Math.PI / 2 - 0.15, () => F.doorLeaf(k, d1 - d0 - 0.02, 2.02, M.painted('#4a3a30')));
+  if (roofDoor) k.at(d1, 0, Ld + T + 0.02, -Math.PI / 2 - 0.15, () => F.doorLeaf(k, d1 - d0 - 0.02, 2.02, M.painted('#4a3a30')));
   // roof slab with a skylight over the well
-  k.box(mat('#3a3a3c', { rough: 0.9 }), SW + 2 * T + 0.2, 0.22, wl + 0.2, 0, h, (zF + zBack - T) / 2);
+  if (roofDoor) k.box(mat('#3a3a3c', { rough: 0.9 }), SW + 2 * T + 0.2, 0.22, wl + 0.2, 0, h, (zF + zBack - T) / 2);
   k.box(m.ceiling, SW, 0.01, wl - 2 * T, 0, h - 0.01, (zF + zBack - T) / 2);
   k.unshadowed(() => k.box(mat('#eef4f6', { emissive: '#dfeaf2', ei: 1.4, rough: 0.5 }), Math.min(1.4, SW - 0.4), 0.02, Lf * 0.8, 0, h - 0.03, -Lf / 2));
   // guard over the (missing) flight up
@@ -584,7 +596,7 @@ function buildStub(k: Kit, d: Dims, m: Mats, s: Spec) {
 }
 
 /** the building's stair column, built once (in slices) and shared by all its floors */
-function* columnFor(key: string, d: Dims, m: Mats, s: Spec): Generator<void, Column> {
+function* columnFor(key: string, d: Dims, m: Mats, s: Spec, roofDoor = true): Generator<void, Column> {
   let c = columns.get(key);
   if (!c) {
     const ks = new Kit(), kb = new Kit(), kc = new Kit(), kt = new Kit();
@@ -593,7 +605,7 @@ function* columnFor(key: string, d: Dims, m: Mats, s: Spec): Generator<void, Col
     const segment = meshes(ks);
     yield;
     buildBase(kb, d, m);
-    buildCap(kc, d, m);
+    buildCap(kc, d, m, roofDoor);
     buildStub(kt, d, m, s);
     yield;
     // another floor of the same building may have finished it meanwhile
@@ -626,6 +638,191 @@ function instanced(src: THREE.Mesh[], ys: number[], into: THREE.Object3D) {
     out.push(im);
   }
   return out;
+}
+
+/** the stair's colliders in its own frame: walls, the well, no flight down at the bottom, none up at the top */
+export function stairRects(d: Dims, s: Spec, bottom: boolean, top: boolean, roofDoor: boolean): Rect[] {
+  // (side walls stop where the back and front walls begin: no overlapping rects)
+  const zF = d.Ld;
+  const c: Rect[] = [];
+  c.push({ minX: -d.SW / 2 - T, maxX: -d.SW / 2, minZ: d.zBack, maxZ: zF });
+  c.push({ minX: d.SW / 2, maxX: d.SW / 2 + T, minZ: d.zBack, maxZ: zF });
+  c.push({ minX: -d.SW / 2 - T, maxX: d.SW / 2 + T, minZ: d.zBack - T, maxZ: d.zBack });
+  // the well between the flights
+  const g = Math.max(0.04, d.gap / 2);
+  c.push({ minX: -g, maxX: g, minZ: -d.Lf, maxZ: -0.02 });
+  // bottom: the flight down is the cellar door; top: there is no flight up
+  if (bottom) c.push({ minX: d.gap / 2, maxX: d.SW / 2, minZ: -0.6 * d.Lf, maxZ: -0.02 });
+  if (top) c.push({ minX: -d.SW / 2, maxX: -d.gap / 2, minZ: -0.6 * d.Lf, maxZ: -0.02 });
+  if (top && roofDoor) {
+    // bulkhead front wall with its door on the +x side
+    c.push({ minX: -d.SW / 2 - T, maxX: d.SW / 2 - 1.0, minZ: d.Ld, maxZ: d.Ld + T });
+    c.push({ minX: d.SW / 2 - 0.1, maxX: d.SW / 2 + T, minZ: d.Ld, maxZ: d.Ld + T });
+  } else if (s.enclosed || top) {
+    c.push({ minX: -d.SW / 2 - T, maxX: -0.5, minZ: d.Ld, maxZ: d.Ld + T });
+    c.push({ minX: 0.5, maxX: d.SW / 2 + T, minZ: d.Ld, maxZ: d.Ld + T });
+  } else if (d.hw < d.SW) {
+    c.push({ minX: -d.SW / 2 - T, maxX: -d.hw / 2, minZ: d.Ld, maxZ: d.Ld + T });
+    c.push({ minX: d.hw / 2, maxX: d.SW / 2 + T, minZ: d.Ld, maxZ: d.Ld + T });
+  }
+  return c;
+}
+
+/**
+ * What src/vertical.ts needs of a level with a stair (a FloorLevel, or an InteriorLevel with a
+ * HouseCore attached as `level.vcore`).
+ */
+export interface VCore {
+  /** floor to floor */
+  H: number;
+  floor: number;
+  /** the highest floor index (a building's roof, a house's top floor) */
+  top: number;
+  /** floors served by the lifts */
+  floors: number;
+  /** the same for every floor of one building */
+  key: string;
+  type: string;
+  speed: number;
+  well: THREE.Group;
+  lifts: LiftFront[];
+  extra: Portal[];
+  rideTarget: LevelDesc | null;
+  ground(x: number, z: number, y: number): number;
+  nearStair(p: THREE.Vector3): boolean;
+  neighbour(dir: number): LevelDesc | null;
+  setStub(dir: number, hidden: boolean): void;
+  /** the desc of floor f of this building */
+  at(f: number): LevelDesc;
+}
+export function coreOf(lv: Level | null | undefined): VCore | null {
+  return (lv as { vcore?: VCore } | null)?.vcore ?? null;
+}
+
+/** far floors' landing stubs and their per-floor hiding */
+class Stubs {
+  list: THREE.InstancedMesh[] = [];
+  ys: number[] = [];
+  hidden = new Set<number>();
+  constructor(public floor: number) {}
+  set(dir: number, hidden: boolean) {
+    const j = this.floor + dir;
+    if (hidden === this.hidden.has(j)) return;
+    if (hidden) this.hidden.add(j);
+    else this.hidden.delete(j);
+    this.apply();
+  }
+  apply() {
+    const m = new THREE.Matrix4();
+    for (const im of this.list) {
+      this.ys.forEach((y, j) => im.setMatrixAt(j, this.hidden.has(j) || j === this.floor ? m.makeScale(0, 0, 0) : m.makeTranslation(0, y, 0)));
+      im.instanceMatrix.needsUpdate = true;
+    }
+  }
+}
+
+/**
+ * A house's stair (brownstones): a stair hall attached behind the back wall (bounds.z0) of an
+ * InteriorLevel, the same on every floor, its doorway near the -x corner (no BSP wall ends within
+ * 2 m of a corner). interior.ts reserves the doorway and adds the colliders; src/vertical.ts does
+ * the climbing, the prefetch of the floors above/below and showing them through the doorways.
+ */
+export class HouseCore implements VCore {
+  readonly d: Dims;
+  readonly spec = SPECS.house;
+  readonly H: number;
+  readonly floor: number;
+  readonly top: number;
+  readonly floors: number;
+  readonly key: string;
+  readonly type = 'house';
+  readonly speed = 1;
+  well = new THREE.Group();
+  lifts: LiftFront[] = [];
+  extra: Portal[] = [];
+  rideTarget: LevelDesc | null = null;
+  /** the doorway in the back wall (level coordinates): centre x, wall line z, clear width */
+  door: { x: number; z: number; w: number };
+  /** where the stair's own frame sits in the level */
+  ox: number;
+  oz: number;
+  private stubs: Stubs;
+  private m: Mats;
+  private colKey: string;
+  private built = false;
+  constructor(public desc: Extract<LevelDesc, { kind: 'interior' }>, bounds: { x0: number; z0: number }, H: number, wallT: number) {
+    this.d = dims({ ...SPECS.house, H, risers: Math.round(H / 0.185) });
+    this.H = H;
+    this.floor = desc.floor;
+    this.floors = desc.floors;
+    this.top = desc.floors - 1;
+    this.key = `house|${desc.seed}`;
+    this.colKey = `${this.key}|${H.toFixed(2)}`;
+    this.ox = bounds.x0 + 1.05;
+    this.oz = bounds.z0 - wallT / 2 - this.d.Ld - T;
+    this.door = { x: this.ox, z: bounds.z0, w: 1.0 };
+    this.m = mats('house', desc.seed);
+    this.stubs = new Stubs(this.floor);
+    this.well.name = 'stairwell';
+    this.well.position.set(this.ox, 0, this.oz);
+  }
+  /** build the column (in slices) into the well group */
+  *build() {
+    const d = this.d, H = d.H, f = this.floor;
+    const col = yield* columnFor(this.colKey, d, this.m, this.spec, false);
+    this.built = true;
+    const segYs: number[] = [];
+    for (let j = 0; j < this.top; j++) segYs.push((j - f) * H);
+    instanced(col.segment, segYs, this.well);
+    instanced(col.base, [-f * H], this.well);
+    instanced(col.cap, [(this.top - f) * H], this.well);
+    this.stubs.ys = [...segYs, (this.top - f) * H];
+    this.stubs.list = instanced(col.stub, this.stubs.ys, this.well);
+    this.stubs.apply();
+  }
+  /** colliders in level coordinates */
+  colliders(): Rect[] {
+    return stairRects(this.d, this.spec, this.floor === 0, this.floor === this.top, false).map((r) => ({ minX: r.minX + this.ox, maxX: r.maxX + this.ox, minZ: r.minZ + this.oz, maxZ: r.maxZ + this.oz }));
+  }
+  ground(x: number, z: number, y: number) {
+    return groundAt(this.d, x - this.ox, z - this.oz, y);
+  }
+  nearStair(p: THREE.Vector3) {
+    const x = p.x - this.ox, z = p.z - this.oz, d = this.d;
+    return x > -d.SW / 2 - 1.5 && x < d.SW / 2 + 1.5 && z > d.zBack - 0.5 && z < d.Ld + 3.5;
+  }
+  neighbour(dir: number) {
+    const f = this.floor + dir;
+    return f < 0 || f > this.top ? null : this.at(f);
+  }
+  at(f: number): LevelDesc {
+    return { ...this.desc, floor: f };
+  }
+  setStub(dir: number, hidden: boolean) {
+    this.stubs.set(dir, hidden);
+  }
+  prefetch(p: THREE.Vector3): LevelDesc[] {
+    const out: LevelDesc[] = [];
+    if (this.nearStair(p)) for (const dir of [1, -1]) {
+      const n = this.neighbour(dir);
+      if (n) out.push(n);
+    }
+    return out;
+  }
+  dispose() {
+    if (!this.built) return;
+    this.built = false;
+    releaseColumn(this.colKey);
+  }
+}
+
+/** does this interior get a stair core (a house of more than one floor)? */
+export function wantsHouseCore(desc: Extract<LevelDesc, { kind: 'interior' }>) {
+  return desc.style === 'house' && desc.floors > 1 && !desc.shop;
+}
+/** a house with more than one floor gets a stair core behind its back wall (null otherwise) */
+export function houseCore(desc: Extract<LevelDesc, { kind: 'interior' }>, bounds: { x0: number; z0: number }, H: number, wallT: number) {
+  return wantsHouseCore(desc) ? new HouseCore(desc, bounds, H, wallT) : null;
 }
 
 // ---------------------------------------------------------------- frames on walls
@@ -674,7 +871,7 @@ const OUTDOOR: Env = {
 /** portals that run an action (call the lift, press a button) instead of going somewhere */
 export const portalActions = new WeakMap<Portal, () => void>();
 
-export class FloorLevel implements Level {
+export class FloorLevel implements Level, VCore {
   name: string;
   group = new THREE.Group();
   spawn = { pos: new THREE.Vector3(), yaw: 0 };
@@ -752,6 +949,25 @@ export class FloorLevel implements Level {
   /** the walkable height near y at (x, z) */
   ground(x: number, z: number, y: number) {
     return groundAt(this.d, x, z, y);
+  }
+  /** src/vertical.ts: this level's stair and lifts */
+  get vcore(): VCore {
+    return this;
+  }
+  get H() {
+    return this.d.H;
+  }
+  get top() {
+    return this.floors;
+  }
+  get key() {
+    return this.colKey;
+  }
+  get speed() {
+    return this.spec.speed;
+  }
+  at(f: number): LevelDesc {
+    return { ...this.desc, floor: f };
   }
   /** on the stair or close to its landing */
   nearStair(p: THREE.Vector3, margin = 3.5) {
@@ -870,29 +1086,7 @@ export class FloorLevel implements Level {
   }
 
   private stairColliders() {
-    const d = this.d, s = this.spec;
-    const zF = this.roof || s.enclosed ? d.Ld + T : d.Ld;
-    const c = this.cols;
-    c.push({ minX: -d.SW / 2 - T, maxX: -d.SW / 2, minZ: d.zBack - T, maxZ: zF });
-    c.push({ minX: d.SW / 2, maxX: d.SW / 2 + T, minZ: d.zBack - T, maxZ: zF });
-    c.push({ minX: -d.SW / 2 - T, maxX: d.SW / 2 + T, minZ: d.zBack - T, maxZ: d.zBack });
-    // the well between the flights
-    const g = Math.max(0.04, d.gap / 2);
-    c.push({ minX: -g, maxX: g, minZ: -d.Lf, maxZ: -0.02 });
-    // lobby: the flight down is the cellar door; roof: there is no flight up
-    if (this.floor === 0) c.push({ minX: d.gap / 2, maxX: d.SW / 2, minZ: -0.6 * d.Lf, maxZ: -0.02 });
-    if (this.roof) c.push({ minX: -d.SW / 2, maxX: -d.gap / 2, minZ: -0.6 * d.Lf, maxZ: -0.02 });
-    if (this.roof) {
-      // bulkhead front wall with its door on the +x side
-      c.push({ minX: -d.SW / 2 - T, maxX: d.SW / 2 - 1.0, minZ: d.Ld, maxZ: d.Ld + T });
-      c.push({ minX: d.SW / 2 - 0.1, maxX: d.SW / 2 + T, minZ: d.Ld, maxZ: d.Ld + T });
-    } else if (s.enclosed) {
-      c.push({ minX: -d.SW / 2 - T, maxX: -0.5, minZ: d.Ld, maxZ: d.Ld + T });
-      c.push({ minX: 0.5, maxX: d.SW / 2 + T, minZ: d.Ld, maxZ: d.Ld + T });
-    } else if (d.hw < d.SW) {
-      c.push({ minX: -d.SW / 2 - T, maxX: -d.hw / 2, minZ: d.Ld, maxZ: d.Ld + T });
-      c.push({ minX: d.hw / 2, maxX: d.SW / 2 + T, minZ: d.Ld, maxZ: d.Ld + T });
-    }
+    this.cols.push(...stairRects(this.d, this.spec, this.floor === 0, this.roof, true));
   }
 
   /** a wall along a line with holes (doors, lifts): geometry, trim and colliders */

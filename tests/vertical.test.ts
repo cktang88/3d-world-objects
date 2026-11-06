@@ -53,7 +53,7 @@ function walk(get: () => FloorLevel, switchTo: (dir: number) => FloorLevel | nul
 }
 
 
-for (const type of Object.keys(SPECS) as BType[]) {
+for (const type of (Object.keys(SPECS) as BType[]).filter((t) => t !== 'house')) {
   test(`vertical ${type}: real stair dims, walk up/down/roof, doors reachable, determinism, budget`, () => {
     notes = [];
 

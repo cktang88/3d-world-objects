@@ -13,6 +13,7 @@ import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
+import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
 /**
  * Generated building interiors: a BSP floorplan of real rooms (living rooms, bedrooms, galley
@@ -223,6 +224,12 @@ export class InteriorLevel implements Level {
   /** seamless.ts: the doorway you come in by, and the construction left to do when staged */
   doorway?: Level['doorway'];
   staging?: Iterator<unknown>;
+  /** ---- vertical.ts hook: a multi-floor house's stair core (src/rooms/vertical.ts HouseCore), the same on every floor */
+  vcore: HouseCore | null = null;
+  prefetch(p: THREE.Vector3): LevelDesc[] {
+    return this.vcore?.prefetch(p) ?? [];
+  }
+  // ---- end vertical hook
 
   constructor(private desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean } = {}) {
     this.rng = new Rng(hashN(desc.seed, desc.floor));
@@ -269,6 +276,7 @@ export class InteriorLevel implements Level {
   }
   dispose() {
     disposeTree(this.group);
+    this.vcore?.dispose(); // vertical.ts hook
   }
 
   // ------------------------------------------------------------------ layout
@@ -277,9 +285,14 @@ export class InteriorLevel implements Level {
     const r = this.rng;
     const style = this.style;
     const big = style === 'museum' || style === 'office' || style === 'shop';
-    const W = style === 'apartment' ? r.range(11, 16) : r.range(big ? 18 : 13, big ? 26 : 19);
-    const D = style === 'apartment' ? r.range(9, 13) : r.range(big ? 14 : 10, big ? 22 : 15);
+    // ---- vertical.ts hook: a house with a stair core has the same footprint on every floor
+    const rf = wantsHouseCore(this.desc) ? new Rng(hashN(this.desc.seed, 4711)) : r;
+    const W = style === 'apartment' ? rf.range(11, 16) : rf.range(big ? 18 : 13, big ? 26 : 19);
+    const D = style === 'apartment' ? rf.range(9, 13) : rf.range(big ? 14 : 10, big ? 22 : 15);
     const bounds = { x0: -W / 2, z0: -D / 2, x1: W / 2, z1: D / 2 };
+    // the stair hall behind the back wall (its doorway near the -x corner, where no BSP wall ends)
+    const core = (this.vcore = houseCore(this.desc, bounds, this.H, T));
+    // ---- end vertical hook
 
     // BSP into rooms
     const leaves: Room[] = [];
@@ -374,7 +387,10 @@ export class InteriorLevel implements Level {
     for (const rm of leaves) {
       for (const sd of this.sides.get(rm)!) {
         if (sd.axis === 'z' && Math.abs(sd.c - bounds.z1) < 0.01 && exitX > sd.e0 && exitX < sd.e1) sd.open.push({ t: exitX, w: DOOR, kind: 'exit', y0: 0, y1: DOOR_H });
-        if (sd.ext && !(sd.axis === 'z' && Math.abs(sd.c - bounds.z1) < 0.01)) this.windows(sd);
+        // vertical.ts hook: the doorway to the stair core (that wall gets no windows)
+        const coreSide = !!core && sd.axis === 'z' && Math.abs(sd.c - bounds.z0) < 0.01 && core.door.x > sd.e0 && core.door.x < sd.e1;
+        if (core && coreSide) sd.open.push({ t: core.door.x, w: core.door.w, kind: 'door', y0: 0, y1: DOOR_H });
+        if (sd.ext && !coreSide && !(sd.axis === 'z' && Math.abs(sd.c - bounds.z1) < 0.01)) this.windows(sd);
         for (const o of sd.open) sd.used.push({ a: o.t - o.w / 2 - (o.kind === 'window' ? 0.12 : 0.15), b: o.t + o.w / 2 + (o.kind === 'window' ? 0.12 : 0.15), h: 9 });
       }
     }
@@ -392,12 +408,13 @@ export class InteriorLevel implements Level {
     }
 
     // which room gets the stairs up
-    const canGoUp = this.desc.floor < this.desc.floors - 1;
+    const canGoUp = this.desc.floor < this.desc.floors - 1 && !core; // vertical.ts hook: the core has the stair
     const stairRoom = canGoUp ? sorted.find((rm) => rm.type !== 'bathroom' && !(exitX > rm.x0 && exitX < rm.x1 && rm.z1 === bounds.z1)) ?? sorted[0] : null;
 
     // door clearance zones (both sides of every doorway)
     const doorZones: Rect[] = splits.map((s) => (s.axis === 'x' ? rect(s.c, s.door, 2.0, DOOR + 0.3) : rect(s.door, s.c, DOOR + 0.3, 2.0)));
     doorZones.push(rect(exitX, bounds.z1 - 0.9, DOOR + 0.6, 2.0));
+    if (core) doorZones.push(rect(core.door.x, bounds.z0 + 0.9, core.door.w + 0.6, 2.0)); // vertical.ts hook
 
     // architecture
     for (const rm of leaves) {
@@ -441,6 +458,19 @@ export class InteriorLevel implements Level {
       this.group.add(pl);
       this.lights.push({ light: pl, room: rm });
     });
+    // ---- vertical.ts hook: houses with a core keep the same number of lights on every floor (no shader
+    // recompiles when walking up), one of the spare ones lighting the stair hall
+    if (core) {
+      for (let i = this.lights.length; i < 12; i++) {
+        const pl = new THREE.PointLight('#ffdcb0', i === this.lights.length ? 6 : 0, 8, 2);
+        pl.position.set(core.ox, this.H * 0.5 + 1.6, core.oz - core.d.Lf - core.d.Md / 2);
+        this.group.add(pl);
+      }
+      this.cols.push(...core.colliders());
+      yield* core.build();
+      this.group.add(core.well);
+    }
+    // ---- end vertical hook
     if (this.lights.length) {
       const sl = new THREE.PointLight('#ffdcb0', 0, 10, 2);
       sl.castShadow = true;
