@@ -943,8 +943,23 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       if (type === 'prewar' && rng.chance(0.75)) canopy(F, du, rng.pick(['#1d3b2e', '#5a1d1d', '#1d2a4a', '#2a2a2a']), 4.2, addr);
       portalDoor(ctx, F, du, 0.8, alongX, addr, floors, type, rng.pick(['apartment', 'apartment', 'office']));
     } else {
-      // exposed corner side above the shops: windows on the ground floor too
-      for (const c of centres) F.window(c - ww / 2, 1.0, ww, Math.min(1.9, ground - 1.4), { ...winOpts, ac: 0 });
+      // exposed corner side: corner shops wrap round onto the side street; windows beyond
+      let wrap: [number, number] | null = null;
+      if (store && L > 9) {
+        const cx0 = (r.minX + r.maxX) / 2, cz0 = (r.minZ + r.maxZ) / 2;
+        const fc = new THREE.Vector3(front === 'E' ? r.maxX : front === 'W' ? r.minX : cx0, 0, front === 'S' ? r.maxZ : front === 'N' ? r.minZ : cz0);
+        const near = F.at(-L / 2, 0, 0).distanceTo(fc) < F.at(L / 2, 0, 0).distanceTo(fc) ? -1 : 1;
+        const span = Math.min(L * 0.45, rng.range(5, 8));
+        wrap = near < 0 ? [-L / 2 + 0.45, -L / 2 + 0.45 + span] : [L / 2 - 0.45 - span, L / 2 - 0.45];
+        F.cut(wrap[0], wrap[1], 0, ground - 0.55);
+        storefront(ctx, F, wrap[0], wrap[1], ground - 0.55, addr, type);
+        const sc = mat(rng.pick(['#3a3a38', '#d8d2c4', '#5a4a3a']), { rough: 0.6, metal: 0.2 });
+        B(F.g, sc, wrap[1] - wrap[0] + 0.3, 0.22, 0.22, (wrap[0] + wrap[1]) / 2, ground - 0.58, 0.11);
+      }
+      for (const c of centres) {
+        if (wrap && c + ww / 2 > wrap[0] - 0.3 && c - ww / 2 < wrap[1] + 0.3) continue;
+        F.window(c - ww / 2, 1.0, ww, Math.min(1.9, ground - 1.4), { ...winOpts, ac: 0 });
+      }
     }
     // ---- walls: rusticated base for pre-war, cast-iron fronts, brick above
     const baseTop = type === 'prewar' ? (levels[1] ?? ground) : type === 'brownstone' ? levels[0] + 4.0 : ground;

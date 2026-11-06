@@ -28,6 +28,11 @@ const scene: LabScene = {
     const floorsOf: Record<BType, [number, number]> = { brownstone: [3, 5], tenement: [5, 6], prewar: [10, 14], midrise: [7, 10], castiron: [5, 7], tower: [20, 30] };
     const ws = Array.from({ length: n }, () => rng.range(...widths[type]));
     let x = -ws.reduce((a, b) => a + b, 0) / 2;
+    // corner=1: one avenue-corner building (front E, south side exposed) with its corner at the origin
+    if (params.get('corner') === '1') {
+      building(ctx, { minX: -16, maxX: 0, minZ: -14, maxZ: 0 }, 'E', type, rng.int(...floorsOf[type]), true, [false, true]);
+      ws.length = 0;
+    }
     for (const w of ws) {
       const store = params.has('store') ? params.get('store') === '1' : type !== 'brownstone' && rng.chance(0.7);
       building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, rng.int(...floorsOf[type]), store, [false, false]);
