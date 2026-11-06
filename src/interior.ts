@@ -336,6 +336,11 @@ export class InteriorLevel implements Level {
     });
     let ti = 0;
     for (const rm of sorted) if (!assigned.has(rm)) rm.type = types[ti++ % types.length];
+    // offices: the room you walk into is the reception
+    if (style === 'office') {
+      const front = leaves.find((q) => exitX > q.x0 && exitX < q.x1 && Math.abs(q.z1 - bounds.z1) < 0.01);
+      if (front && front !== sorted[0] && front.type !== 'bathroom') front.type = 'reception';
+    }
 
     // walls, openings and windows per room side
     for (const rm of leaves) this.sides.set(rm, this.makeSides(rm, bounds));
@@ -970,6 +975,9 @@ export class InteriorLevel implements Level {
       case 'openplan':
         this.openPlan(ctx);
         break;
+      case 'reception':
+        this.reception(ctx);
+        break;
       case 'meeting':
         this.meeting(ctx);
         break;
@@ -1563,6 +1571,15 @@ export class InteriorLevel implements Level {
       this.kit.at(cx, 0, cz, f.rot + Math.PI + r.range(-0.4, 0.4), () => F.officeChair(k, office ? M.fabric('#2d3138') : r.pick([this.pal.fabric, M.leather('#5a3a28')])));
       c.occ.push(rect(cx, cz, 0.6, 0.6));
       this.cols.push(rect(cx, cz, 0.4, 0.4));
+      // private offices: two guest chairs facing the desk
+      if (office) {
+        for (const sgn of [-1, 1]) {
+          const lx = sgn * 0.45, lz = 1.35;
+          const gx = f.x + lx * c0 + lz * s0, gz = f.z - lx * s0 + lz * c0;
+          const g = this.freeAt(c, 0.6, 0.6, gx, gz, 0, true, 0.0);
+          if (g) this.libPiece({ x: gx, z: gz, rot: f.rot + Math.PI - sgn * 0.25 }, r.chance(0.5) ? pickLib('armchair', r) : null, (kk) => F.diningChair(kk, M.black(), M.leather('#2a2a2c')));
+        }
+      }
       placed = true;
       break;
     }
@@ -1578,7 +1595,7 @@ export class InteriorLevel implements Level {
       nb--;
     }
     if (office) {
-      // guest chairs across the desk
+      this.consoleGroup(c);
       this.corners(c, 'plant', 1);
     } else {
       this.corners(c, 'armchair', 1);
@@ -1684,6 +1701,56 @@ export class InteriorLevel implements Level {
       break;
     }
     this.corners(c, 'plant', 1);
+  }
+
+  /** office reception: a desk facing the entry, the company name on the wall behind it, a waiting area */
+  private reception(c: RoomCtx) {
+    const r = c.r, k = this.kit;
+    const back = c.sides.find((s) => s.axis === 'z' && s.inward > 0)!; // the wall facing the entry (+z side)
+    const t = THREE.MathUtils.clamp(this.entry.x, back.e0 + 1.3, back.e1 - 1.3);
+    const [x, z] = this.at(back, t, 1.0);
+    const f = this.freeAt(c, 2.4, 0.8, x, z, 0, true, 0.02);
+    if (f) {
+      this.kit.at(x, 0, z, 0, () => {
+        // a reception counter: low desk behind a raised transaction ledge
+        k.box(M.oak('#d8c4a4'), 2.4, 1.05, 0.08, 0, 0, 0.36);
+        k.box(M.marble('#ffffff'), 2.5, 0.04, 0.32, 0, 1.05, 0.3);
+        for (const sx of [-1, 1]) k.box(M.oak('#d8c4a4'), 0.08, 1.05, 0.75, sx * 1.16, 0, 0);
+        k.box(M.matte('#f2f2f0'), 2.3, 0.03, 0.7, 0, 0.72, -0.02);
+        F.monitor(k, 0.5, 0.75, -0.1, true);
+        F.mug(k, r, -0.6, 0.75, 0.05);
+        this.kit.at(0, 0, -0.7, Math.PI, () => F.officeChair(k, M.fabric('#2d3138')));
+      });
+      this.libTop(r, { x, z, rot: 0 }, { x: -0.5, z: 0.3, y: 1.09, w: 0.6, d: 0.22 }, 'smallplant', 1, 0.4);
+      c.occ.push(rect(x, z - 0.7, 1.0, 0.8));
+      // the company name on the wall behind
+      const name = this.desc.name.replace(/^\d+\s*/, '').toUpperCase().slice(0, 18) || 'RECEPTION';
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.45), new THREE.MeshStandardMaterial({ map: signTex(name, '#2b2c2e', '#e8e2d4'), roughness: 0.4 }));
+      sign.userData.owned = true;
+      const [sx, sz] = this.at(back, t, 0.02);
+      sign.position.set(sx, 1.85, sz);
+      this.cur.group.add(sign);
+      back.used.push({ a: t - 1.0, b: t + 1.0, h: 9 });
+    }
+    // waiting area: sofa, coffee table, chairs, plants
+    for (const s of this.sidesByFreeLength(c, 2.4)) {
+      if (s.sd === back) continue;
+      const sid = pickLib('sofa', r);
+      const sw = sid ? LIB[sid][0] : 2.0, sdp = sid ? LIB[sid][2] : 0.9;
+      const sf = this.onWall(c, s.sd, sw, sdp, 0.85, midFree(s.sd), 0.04);
+      if (!sf) continue;
+      this.libPiece(sf, sid, (kk) => F.sofa(kk, r, sw, M.fabric('#3d4a5c'), M.black(), this.pal.accent));
+      const c0 = Math.cos(sf.rot), s0 = Math.sin(sf.rot);
+      const tx = sf.x + (sdp / 2 + 0.55) * s0, tz = sf.z + (sdp / 2 + 0.55) * c0;
+      const tf = this.freeAt(c, 1.2, 0.6, tx, tz, sf.rot, true, 0.0);
+      if (tf) {
+        this.libPiece(tf, 'modern_coffee_table_01', (kk) => F.coffeeTable(kk, r, this.pal.wood, M.black(), M.marble()));
+        this.kit.at(tf.x, 0, tf.z, tf.rot, () => F.bookStack(k, r, 0.2, 0.39, 0));
+      }
+      break;
+    }
+    this.corners(c, 'plant', 3);
+    this.paintings(c, 1);
   }
 
   private placeStairs(c: RoomCtx) {
