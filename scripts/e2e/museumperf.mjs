@@ -32,10 +32,12 @@ await journey('museumperf', import.meta.url, async (h) => {
       const t0 = performance.now();
       const shown = !!(await e.until(() => slot()?.shown, 45000));
       const s = slot();
-      await e.frames(5);
+      // the harness skips drawing (SwiftShader); draw a few frames so perf() counts a real one
+      e.draw(true);
+      await e.frames(3);
       const perf = W.perf({ top: 6 });
-      // the main pass of the last frame (perf.calls is the last full-screen pass under post-processing)
-      const direct = { calls: perf.perPass?.main?.calls ?? perf.calls, tris: perf.perPass?.main?.tris ?? perf.tris };
+      e.draw(false);
+      const direct = { calls: perf.calls, tris: perf.tris };
       return {
         where, doorways: ps.length, label: p.label, shown, previewMs: Math.round(performance.now() - t0),
         slot: s ? { ready: s.ready, waiting: s.waiting, compiled: s.compiled, ms: Math.round(s.ms), tris: s.tris } : null,

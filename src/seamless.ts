@@ -551,6 +551,10 @@ export class Seamless {
       }
     }
     this.dwell = seen;
+    // the construction queue in the same order: the door you walk up to is built (and compiled) first
+    const order = cands.slice(0, pol.max).map((c) => descKey(c.p.target as LevelDesc));
+    this.top = order[0] ?? null;
+    if (this.queue.length > 1) this.queue.sort((a, b) => (order.indexOf(a.key) + 1 || 99) - (order.indexOf(b.key) + 1 || 99));
     // ---- vertical.ts hook: levels may ask for others (the floors above/below near a stair, a lift's destination)
     for (const desc of level.prefetch?.(player) ?? []) {
       this.wanted.add(descKey(desc));
@@ -662,13 +666,33 @@ export class Seamless {
    */
   private precompile(s: Slot) {
     if (s.compiled !== 'no' || !this.renderer.compileAsync) return;
+    if (!this.compiling.includes(s)) this.compiling.push(s);
+    this.pumpCompile();
+  }
+  /** door prebuilds waiting to compile; one compile at a time (they compete with the frame otherwise) */
+  private compiling: Slot[] = [];
+  private compileBusy = false;
+  private top: string | null = null;
+  private pumpCompile() {
+    if (this.compileBusy) return;
+    this.compiling = this.compiling.filter((x) => x.compiled === 'no' && this.slots.get(x.key) === x);
+    if (!this.compiling.length) return;
+    // the doorway you are walking up to first
+    this.compiling.sort((a, b) => Number(b.key === this.top) - Number(a.key === this.top));
+    const s = this.compiling.shift()!;
     this.strip(s);
     s.compiled = 'pending';
+    this.compileBusy = true;
     const t = performance.now();
+    const next = () => {
+      this.compileBusy = false;
+      this.pumpCompile();
+    };
     this.renderer.compileAsync(s.level.group, this.camera, this.scene).then(() => {
       s.compiled = 'yes';
       this.log(`precompiled ${s.key.slice(0, 50)} in ${(performance.now() - t).toFixed(0)} ms (async)`);
-    }, () => (s.compiled = 'yes'));
+      next();
+    }, () => ((s.compiled = 'yes'), next()));
   }
 
   private showPreview(s: Slot, p: Portal) {

@@ -10,7 +10,7 @@ const ALL: [string, number, number][] = [
   ['auto row', 4, -4], ['construction', 4, -1], ['rail yard', 5, -1], ['greenmarket', -2, 2], ['armory', -2, -5], ['museum', -2, -6], ['bowery', 1, 2], ['canal', -1, 2], ['brownstone', -2, 0], ['times sq', 2, -3], ['flea market', 3, -1], ['salvage yard', 5, -1], ['community garden', -2, 0],
   ['pier shed', 6, 0], ['pier aircraft', 6, 1], ['pier marina', 6, -1], ['carrier', 7, -1], ['airport stands', -3, -2], ['airport hangar', -4, -3], ['airport ramp', -3, -1],
 ];
-const SPECIAL = process.env.QA_DISTRICTS === 'all' ? ALL : ALL.filter(([n]) => /^(park pond|auto row|pier marina|flea market|salvage yard|armory|bowery)$/.test(n));
+const SPECIAL = process.env.QA_DISTRICTS === 'all' ? ALL : ALL.filter(([n]) => /^(park pond|pier marina|flea market)$/.test(n));
 const kinds = (s: SlotSpec) => (Array.isArray(s.kind) ? s.kind : [s.kind]).join('/');
 const isBoat = (s: SlotSpec) => kinds(s).split('/').includes('boat');
 
