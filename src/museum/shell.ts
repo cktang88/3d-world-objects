@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { mat } from '../build';
+import { mat, box as boxMesh } from '../build';
 import { surface } from '../pbr';
-import type { LevelDesc } from '../level';
+import type { LevelDesc, Portal } from '../level';
 import { rect } from '../level';
 import { Frame, shade, WORLD, type MuseumBase } from './base';
 import type { Door, Plan, Wall } from './plan';
@@ -45,7 +45,15 @@ export interface ShellOpts {
   intro: string;
 }
 
-export function buildShell(lv: MuseumBase, p: Plan, st: Style) {
+export interface ShellParts {
+  /** the entrance passage (hidden while this room is seen through another room's doorway) */
+  entry: THREE.Group | null;
+  /** per door: the end wall of its passage (hidden while the next room shows through it) */
+  ends: (THREE.Group | null)[];
+}
+
+export function buildShell(lv: MuseumBase, p: Plan, st: Style, opts: { entry?: number; see?: boolean } = {}): ShellParts {
+  const parts: ShellParts = { entry: null, ends: p.doors.map(() => null) };
   const { W, D, Hw } = p;
   const g = lv.group;
   const dark = st.dark;
@@ -98,7 +106,11 @@ export function buildShell(lv: MuseumBase, p: Plan, st: Style) {
       wallCol(lv, wl.axis, cc, c0, d.at - d.w / 2);
       c0 = d.at + d.w / 2;
       doorFrame(lv, wl.axis, wl.c, wl.out, d, trim, st);
-      corridor(lv, wl.axis, wl.c, wl.out, d, st);
+      const di = p.doors.indexOf(d);
+      const role = di === opts.entry ? 'entry' : opts.see ? 'exit' : 'plain';
+      const grp = corridor(lv, wl.axis, wl.c, wl.out, d, st, role);
+      if (role === 'entry') parts.entry = grp;
+      else parts.ends[di] = grp;
     }
     seg(cur, wl.a1, 0, wallH);
     wallCol(lv, wl.axis, cc, c0, wl.a1);
@@ -127,6 +139,7 @@ export function buildShell(lv: MuseumBase, p: Plan, st: Style) {
   ceilingOf(lv, p, st);
   if (st.arch === 'openair') parkTrees(lv, p);
   structure(lv, p, st);
+  return parts;
 }
 
 /** pilasters along the walls and columns in the aisles of big halls */
@@ -216,7 +229,15 @@ function doorFrame(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: D
 }
 
 /** a short passage beyond a doorway (you walk into it to go on) */
-function corridor(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: Door, st: Style) {
+/**
+ * The passage beyond a doorway. role 'entry' (a gallery's own entrance): built as a separate group
+ * (hidden while the room is seen through another room's doorway) and with no end-wall collider
+ * (its 'back' portal triggers first). role 'exit': its end wall is a separate group, hidden while
+ * the next room is shown through the doorway. Returns that group.
+ */
+function corridor(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: Door, st: Style, role: 'entry' | 'exit' | 'plain' = 'plain'): THREE.Group | null {
+  const grp = role === 'plain' ? null : new THREE.Group();
+  if (grp) lv.group.add(grp);
   const v = d.vest;
   const m = v ? mat(v.color, { rough: 0.9 }) : st.arch === 'openair' ? mat('#3c4a2e', { rough: 1 }) : mat('#14110d', { rough: 1 });
   const L = v ? v.depth : CORR;
@@ -228,19 +249,22 @@ function corridor(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: Do
   const glow = v ? mat('#fff6e6', { emissive: '#fff2dc', ei: 1.6 }) : m;
   // sides, ceiling (a glowing panel in a vestibule), end wall, floor
   const at = (along: number, across: number): [number, number] => (axis === 'z' ? [along, across] : [across, along]);
-  const box = (mm: THREE.Material, wAlong: number, hh: number, dAcross: number, along: number, y: number, across: number) => {
+  const box = (mm: THREE.Material, wAlong: number, hh: number, dAcross: number, along: number, y: number, across: number, into: THREE.Group | null = role === 'entry' ? grp : null) => {
     const [x, z] = at(along, across);
-    if (axis === 'z') lv.bx(mm, wAlong, hh, dAcross, x, y, z);
-    else lv.bx(mm, dAcross, hh, wAlong, x, y, z);
+    const [bw, bd] = axis === 'z' ? [wAlong, dAcross] : [dAcross, wAlong];
+    if (into) into.add(boxMesh(mm, bw, hh, bd, x, y, z, false));
+    else lv.bx(mm, bw, hh, bd, x, y, z);
   };
   box(m, 0.1, h, L, d.at - half, 0, cc);
   box(m, 0.1, h, L, d.at + half, 0, cc);
   box(m, 2 * half + 0.1, 0.1, L, d.at, h, cc);
   if (v) box(glow, 2 * half - 0.6, 0.02, L - 0.6, d.at, h - 0.02, cc);
-  box(m, 2 * half + 0.1, h, 0.1, d.at, 0, end);
+  box(m, 2 * half + 0.1, h, 0.1, d.at, 0, end, grp);
   box(floorM, 2 * half + 0.1, 0.01, L + T, d.at, 0, c + (out * (T + L)) / 2);
-  if (axis === 'z') pushCols(lv, rect(d.at, end, 2 * half + 0.3, 0.3), rect(d.at - half - 0.05, cc, 0.2, L), rect(d.at + half + 0.05, cc, 0.2, L));
-  else pushCols(lv, rect(end, d.at, 0.3, 2 * half + 0.3), rect(cc, d.at - half - 0.05, L, 0.2), rect(cc, d.at + half + 0.05, L, 0.2));
+  const sides = axis === 'z' ? [rect(d.at - half - 0.05, cc, 0.2, L), rect(d.at + half + 0.05, cc, 0.2, L)] : [rect(cc, d.at - half - 0.05, L, 0.2), rect(cc, d.at + half + 0.05, L, 0.2)];
+  pushCols(lv, ...sides);
+  if (role !== 'entry') pushCols(lv, axis === 'z' ? rect(d.at, end, 2 * half + 0.3, 0.3) : rect(end, d.at, 0.3, 2 * half + 0.3));
+  return grp;
 }
 
 function pushCols(lv: MuseumBase, ...r: ReturnType<typeof rect>[]) {
@@ -248,27 +272,34 @@ function pushCols(lv: MuseumBase, ...r: ReturnType<typeof rect>[]) {
 }
 
 /** the walk-through trigger inside a door's corridor, and where to stand when you come back */
-export function doorPortal(lv: MuseumBase, d: Door, W: number, D: number, label: string, sub: string, target: LevelDesc | 'back') {
-  let bx: THREE.Box3, ret: THREE.Vector3, yaw: number;
-  const a = T + 0.5, b = T + CORR;
-  if (d.wall === 'N') {
-    bx = new THREE.Box3(new THREE.Vector3(d.at - d.w / 2, 0, -D - b), new THREE.Vector3(d.at + d.w / 2, d.h, -D - a));
-    ret = new THREE.Vector3(d.at, 0, -D + 1.6);
-    yaw = Math.PI;
-  } else if (d.wall === 'S') {
-    bx = new THREE.Box3(new THREE.Vector3(d.at - d.w / 2, 0, a), new THREE.Vector3(d.at + d.w / 2, d.h, b));
-    ret = new THREE.Vector3(d.at, 0, -1.6);
-    yaw = 0;
-  } else if (d.wall === 'W') {
-    bx = new THREE.Box3(new THREE.Vector3(-W / 2 - b, 0, d.at - d.w / 2), new THREE.Vector3(-W / 2 - a, d.h, d.at + d.w / 2));
-    ret = new THREE.Vector3(-W / 2 + 1.6, 0, d.at);
-    yaw = -Math.PI / 2;
-  } else {
-    bx = new THREE.Box3(new THREE.Vector3(W / 2 + a, 0, d.at - d.w / 2), new THREE.Vector3(W / 2 + b, d.h, d.at + d.w / 2));
-    ret = new THREE.Vector3(W / 2 - 1.6, 0, d.at);
-    yaw = Math.PI / 2;
+/** where a gallery's own entry doorway is, in its frame: the centre of its 'back' portal */
+export const ENTRY_Z = T + 0.5 + (CORR - 0.5) / 2;
+
+/**
+ * The walk-through trigger at the far end of a door's passage, and where to stand when you come
+ * back. With `see`, the portal also carries the doorway the next room is shown through (seamless.ts
+ * places that room so its own entrance wall lands at the end of this passage) and `see` is told
+ * when that preview appears or goes.
+ */
+export function doorPortal(lv: MuseumBase, d: Door, W: number, D: number, label: string, sub: string, target: LevelDesc | 'back', see?: (shown: boolean) => void) {
+  const L = d.vest?.depth ?? CORR;
+  const a = T + L - (CORR - 0.5), b = T + L;
+  // the wall line, outward direction, and the yaw of someone walking out through the door
+  const w = d.wall === 'N' ? { c: new THREE.Vector3(d.at, 0, -D), o: new THREE.Vector3(0, 0, -1), back: Math.PI }
+    : d.wall === 'S' ? { c: new THREE.Vector3(d.at, 0, 0), o: new THREE.Vector3(0, 0, 1), back: 0 }
+    : d.wall === 'W' ? { c: new THREE.Vector3(-W / 2, 0, d.at), o: new THREE.Vector3(-1, 0, 0), back: -Math.PI / 2 }
+    : { c: new THREE.Vector3(W / 2, 0, d.at), o: new THREE.Vector3(1, 0, 0), back: Math.PI / 2 };
+  const side = new THREE.Vector3(-w.o.z, 0, w.o.x).multiplyScalar(d.w / 2);
+  const p0 = w.c.clone().addScaledVector(w.o, a).sub(side), p1 = w.c.clone().addScaledVector(w.o, b).add(side);
+  const bx = new THREE.Box3(new THREE.Vector3(Math.min(p0.x, p1.x), 0, Math.min(p0.z, p1.z)), new THREE.Vector3(Math.max(p0.x, p1.x), d.h, Math.max(p0.z, p1.z)));
+  const ret = w.c.clone().addScaledVector(w.o, -1.6);
+  const portal: Portal = { box: bx, label, sub, target, auto: true, returnPos: ret, returnYaw: w.back };
+  if (see && typeof target === 'object') {
+    // the next room's entrance wall (thickness T, then its passage) lands at the end of this one
+    portal.door = { pos: w.c.clone().addScaledVector(w.o, T + L + T - ENTRY_Z), yaw: w.back + Math.PI, see: true, range: 25 };
+    portal.onPreview = see;
   }
-  lv.portals().push({ box: bx, label, sub, target, auto: true, returnPos: ret, returnYaw: yaw });
+  lv.portals().push(portal);
 }
 
 /** a sign above a doorway, readable from inside the room */

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mat } from '../build';
+import { mat, box as boxMesh } from '../build';
 import { loadCatalog, type LibraryEntry } from '../libraries';
 import { museum, themeMembers } from '../museumData';
 import { Rng } from '../rng';
@@ -30,6 +30,10 @@ const CENTRE = new THREE.Vector3(0, 0, -16);
  */
 export class AtriumLevel extends MuseumBase {
   name = 'Atrium';
+  /** per door: what stands in its vestibule (hidden while the room behind shows through) */
+  private framedAt: THREE.Object3D[][] = [];
+  private doorsList: Door[] = [];
+  private seeing = new Set<number>();
   constructor() {
     super();
     const m = museum();
@@ -49,7 +53,16 @@ export class AtriumLevel extends MuseumBase {
       { wall: 'S', at: 8, w: 3, h: 4.4, vest: { depth: 5.2, color: '#d9d2c4' } },
     ];
     const plan: Plan = { W, D, H, Hw: H, floor: [], wall: [], hang: [], doors, ceiling: 'coffer', floorKind: 'marble', wallColor: '#e8dcc6', rows: [], columns: [], pilasters: [] };
-    buildShell(this, plan, st);
+    const parts = buildShell(this, plan, st, { see: true });
+    // a doorway's vestibule (end wall, framed object) gives way to the real room once it shows through
+    this.doorsList = doors;
+    const seeThrough = (di: number) => (shown: boolean) => {
+      if (shown) this.seeing.add(di);
+      else this.seeing.delete(di);
+      const end = parts.ends[di];
+      if (end) end.visible = !shown;
+      for (const o of this.framedAt[di] ?? []) o.visible = !shown;
+    };
     // warm, daylit hall
     this.env.hemi = { sky: '#fff0d8', ground: '#5a4a38', intensity: 1.0 };
     this.env.exposure = 1.05;
@@ -87,7 +100,7 @@ export class AtriumLevel extends MuseumBase {
       const d = doors[i];
       const theme = m.themes[w.theme];
       doorSign(this, d, W, D, `Wing ${i + 1} · ${theme.collection}`, w.name, colors[i]);
-      doorPortal(this, d, W, D, `Enter the ${w.name} wing`, w.blurb, { kind: 'gallery', theme: w.theme, page: 0, wing: w.name });
+      doorPortal(this, d, W, D, `Enter the ${w.name} wing`, w.blurb, { kind: 'gallery', theme: w.theme, page: 0, wing: w.name }, seeThrough(i));
       this.banner(d, w.name, `Wing ${i + 1}`, colors[i]);
       this.wallText(d, i, w.name, w.blurb, theme.size, colors[i]);
       loads.push(
@@ -108,7 +121,7 @@ export class AtriumLevel extends MuseumBase {
     const siDoors: [number, number][] = [[6, 0], [7, 3]];
     for (const [di, k] of siDoors) {
       doorSign(this, doors[di], W, D, 'Smithsonian · real museum scans', SI_ROOMS[k].name, '#2b2a28');
-      doorPortal(this, doors[di], W, D, SI_ROOMS[k].name, SI_ROOMS[k].blurb, { kind: 'gallery', theme: SI_BASE + k, page: 0, wing: 'Smithsonian' });
+      doorPortal(this, doors[di], W, D, SI_ROOMS[k].name, SI_ROOMS[k].blurb, { kind: 'gallery', theme: SI_BASE + k, page: 0, wing: 'Smithsonian' }, seeThrough(di));
       loads.push(
         siEntries(SI_BASE + k).then((es) => {
           if (!this.alive) return;
@@ -304,13 +317,19 @@ export class AtriumLevel extends MuseumBase {
     const f = new Frame(p.x, p.z, rot);
     const ph = mm.real.y < 1 ? 0.75 : 0.25;
     const pw = Math.max(0.6, Math.max(mm.real.x, mm.real.z) + 0.3);
-    this.bx(mat('#f3efe7', { rough: 0.6 }), pw, ph, Math.max(0.6, Math.min(mm.real.x, mm.real.z) + 0.3), 0, 0, 0, f);
+    const ped = boxMesh(mat('#f3efe7', { rough: 0.6 }), pw, ph, Math.max(0.6, Math.min(mm.real.x, mm.real.z) + 0.3), p.x, 0, p.z, false);
+    ped.rotation.y = rot;
+    this.group.add(ped);
     const a = mm.real.x >= mm.real.z ? 0 : Math.PI / 2;
-    this.exhibit(mm, f, 0, ph + 0.002, 0, a, { prio: 2 });
+    const slot = this.exhibit(mm, f, 0, ph + 0.002, 0, a, { prio: 2 });
     const lab = labelPanel(ctx, [mm], 0.4);
     lab.position.copy(f.point(Math.min(pw / 2 + 0.4, d.w / 2 + 0.6), 1.1, 0.1));
     lab.rotation.y = f.rot;
     this.group.add(lab);
+    const di = this.doorsList.indexOf(d);
+    (this.framedAt[di] ??= []).push(ped, slot.holder, lab);
+    // already looking through? stay hidden
+    if (this.seeing.has(di)) for (const o of this.framedAt[di]) o.visible = false;
     void WORLD;
   }
 }

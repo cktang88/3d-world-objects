@@ -472,6 +472,8 @@ export class Seamless {
   policy = {
     street: { range: 14, dot: 0.5, near: 3, dwell: 0, max: 2 },
     inside: { range: 4.5, dot: 0.85, near: 0, dwell: 0.4, max: 1 },
+    // museum halls are big and their doorways show the next room: look further, two at a time
+    museum: { range: 25, dot: 0.6, near: 4, dwell: 0, max: 2 },
   };
   private dwell = new Map<string, number>();
   private clock = 0;
@@ -481,7 +483,7 @@ export class Seamless {
     fwd.y = 0;
     fwd.normalize();
     const kind = this.active?.level === level ? this.active.desc.kind : '';
-    const pol = kind === 'floor' || kind === 'interior' ? this.policy.inside : this.policy.street;
+    const pol = kind === 'floor' || kind === 'interior' ? this.policy.inside : kind === 'gallery' || kind === 'atrium' ? this.policy.museum : this.policy.street;
     const c = V();
     const cands: { p: Portal; d: number }[] = [];
     for (const p of level.portals()) {
@@ -532,7 +534,7 @@ export class Seamless {
       const s = this.slots.get(descKey(p.target));
       if (!s || !s.ready || s.waiting || s === this.active) continue;
       const d = p.door.pos.distanceTo(player);
-      if (d < 11) show.push({ s, p, d });
+      if (d < (p.door.range ?? 11)) show.push({ s, p, d });
     }
     show.sort((a, b) => a.d - b.d);
     const keep = new Set(show.slice(0, 2).map((x) => x.s));
@@ -622,10 +624,12 @@ export class Seamless {
     if (s.compiled !== 'yes') return;
     this.scene.add(g);
     s.shown = true;
+    p.onPreview?.(true);
   }
 
   private hidePreview(s: Slot) {
     s.level.group.removeFromParent();
+    if (s.shown) s.portal?.onPreview?.(false);
     s.shown = false;
     setHoles([]);
   }

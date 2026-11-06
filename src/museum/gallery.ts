@@ -6,7 +6,7 @@ import { Rng, hashN } from '../rng';
 import { MuseumBase, shade } from './base';
 import { makeMats, type Ctx, type Unit } from './displays';
 import { assemble, partitionRooms, planRoom, type Plan } from './plan';
-import { buildShell, doorPortal, doorSign } from './shell';
+import { buildShell, doorPortal, doorSign, ENTRY_Z } from './shell';
 import { loadThemeSizes, measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
 import { pageSize, styleFor, STYLES, type Style } from './style';
 import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smithsonian';
@@ -277,7 +277,10 @@ export class GalleryLevel extends MuseumBase {
       labelInk: st.dark ? '#efe6d2' : '#1f1b16',
       labelSub: st.dark ? '#b9ad96' : '#5d5446',
     };
-    buildShell(this, plan, st);
+    // see-through doorways: the next room shows through each exit (seamless.ts); this room's own
+    // entrance passage is hidden while it is the one being looked into
+    const parts = buildShell(this, plan, st, { entry: 0, see: true });
+    this.doorway = { pos: new THREE.Vector3(0, 0, ENTRY_Z), yaw: 0, hide: parts.entry ? [parts.entry] : [] };
     const { W, D } = plan;
     const ink = st.ink;
 
@@ -288,7 +291,8 @@ export class GalleryLevel extends MuseumBase {
       const d = plan.doors[i + 1];
       if (!d) return;
       doorSign(this, d, W, D, ex.top, ex.label, signBg);
-      doorPortal(this, d, W, D, ex.label, ex.top, ex.target);
+      const end = parts.ends[i + 1];
+      doorPortal(this, d, W, D, ex.label, ex.top, ex.target, (shown) => end && (end.visible = !shown));
     });
 
     this.flush(!!st.outdoor);

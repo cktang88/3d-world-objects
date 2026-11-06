@@ -149,6 +149,8 @@ export abstract class MuseumBase implements Level {
   protected maxSpots = 10;
   /** resolves when the room is built and every exhibit has arrived (for the lab) */
   ready: Promise<void> = Promise.resolve();
+  /** the doorway you come in by, for seamless.ts (galleries: their south entrance) */
+  doorway?: Level['doorway'];
   /** resolves when the room itself is built (exhibit models may still be streaming in); `ready` waits for those too */
   built: Promise<void>;
   protected markBuilt: () => void = () => {};

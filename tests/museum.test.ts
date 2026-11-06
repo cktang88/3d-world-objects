@@ -11,6 +11,9 @@ import type { RemoteEntry } from '../src/remote';
 import { loadMuseum, museum } from '../src/museumData';
 import { GalleryLevel, AtriumLevel } from '../src/museum';
 import { SI_BASE, SI_ROOMS } from '../src/museum/smithsonian';
+import { Seamless, descKey, facing } from '../src/seamless';
+import { ENTRY_Z } from '../src/museum/shell';
+import type { LevelDesc } from '../src/level';
 
 const known = (msg: string) => soft(false, `KNOWN ${msg}`);
 
@@ -256,4 +259,48 @@ test('sand3d galleries are planned at once from the offline sizes (no measuring 
     g.dispose();
   }
   none(bad, 'gallery build problems');
+});
+
+test('see-through doorways: the next gallery is prebuilt, shown behind its doorway, and crossing builds nothing', async () => {
+  await loadMuseum();
+  let builds = 0;
+  const camera = new THREE.PerspectiveCamera();
+  const scene = new THREE.Scene();
+  const seam = new Seamless({
+    scene, camera, capacity: 3,
+    renderer: { toneMappingExposure: 1, compileAsync: () => Promise.resolve() } as unknown as THREE.WebGLRenderer,
+    build: (d) => { builds++; return new GalleryLevel(d as Extract<LevelDesc, { kind: 'gallery' }>); },
+  });
+  const here = seam.take({ kind: 'gallery', theme: 811, page: 0 });
+  seam.setActive(here);
+  const g = here.level as GalleryLevel;
+  await Promise.race([g.built, settle(8000)]);
+  expect(g.plan, 'the first gallery was not built');
+  // stand 3 m inside the first exit doorway, facing it
+  const exit = g.portals().find((p) => p.auto && typeof p.target === 'object' && p.door?.see)!;
+  expect(exit, 'no see-through exit doorway');
+  const door = exit.door!;
+  const player = door.pos.clone().addScaledVector(facing(door.yaw), -4.5);
+  camera.position.set(player.x, 1.6, player.z);
+  camera.lookAt(door.pos.x, 1.6, door.pos.z);
+  camera.updateMatrixWorld(true);
+  let shown = false;
+  exit.onPreview = ((prev) => (v: boolean) => { prev?.(v); shown = v; })(exit.onPreview);
+  for (let i = 0; i < 400 && !shown; i++) {
+    seam.update(1 / 60, g, player);
+    await settle(10);
+  }
+  expect(seam.ready(exit.target as LevelDesc), 'the room behind the doorway was not prebuilt');
+  expect(shown, 'the room behind the doorway is not shown through it');
+  // its own entrance passage lands on the end of this one: their entrance wall at the passage end
+  const s = seam.slots.get(descKey(exit.target as LevelDesc))!;
+  const theirs = new THREE.Vector3(0, 0, 0).applyMatrix4(s.level.group.matrixWorld); // their entrance wall line, centre
+  const want = door.pos.clone().addScaledVector(facing(door.yaw), ENTRY_Z);
+  expect(theirs.distanceTo(want) < 0.01, `their entrance wall lands ${fmt(theirs.distanceTo(want))} m off the end of the passage`);
+  // walk through: the switch reuses the prebuilt room
+  const before = builds;
+  const next = seam.take(exit.target as LevelDesc);
+  seam.setActive(next);
+  expect(builds === before, `crossing the doorway built ${builds - before} levels`);
+  seam.clear();
 });

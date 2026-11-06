@@ -39,7 +39,9 @@ export interface Portal {
    * door/windows are glass, so the prebuilt level is shown behind it; `hole` is the world box of
    * glass (fake-interior shader) to cut away while the real interior shows.
    */
-  door?: { pos: THREE.Vector3; yaw: number; see?: boolean; hole?: THREE.Box3 };
+  door?: { pos: THREE.Vector3; yaw: number; see?: boolean; hole?: THREE.Box3; range?: number };
+  /** told when the level behind this door starts / stops being shown through it (museum doorways hide their end wall) */
+  onPreview?: (shown: boolean) => void;
 }
 
 export interface Env {
