@@ -45,6 +45,8 @@ export interface Seg {
   maxRows?: number;
   /** one of each, at least this far apart (antiques, guitars on hooks) */
   pitch?: number;
+  /** scale models welcome: shrinking a big thing to fit is fine here (model shop) */
+  mini?: boolean;
   /** inside container n (kit.containers): stocked only when that container is generated */
   box?: number;
 }

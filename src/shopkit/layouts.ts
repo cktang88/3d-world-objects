@@ -800,12 +800,12 @@ const models: Layout = {
     yield;
     for (let i = 0; i < 2; i++) {
       k.at(-1.4 + i * 2.8, zb + 8.5);
-      F.plinth(k, 1.4, 1.4, 0.6, { color: '#f2f2f0' });
+      F.plinth(k, 1.4, 1.4, 0.6, { color: '#f2f2f0', mini: true });
       yield;
     }
     // aircraft hang from the ceiling
     k.at(0, 0);
-    for (let i = 0; i < 3; i++) k.seg('ceil', -2 + i * 2, H, zb + 2.5 + i * 3, 1.6, 1.6, 1.0, { big: true, want: /plane|aircraft|jet|helicopter|airship|blimp|biplane|glider|rocket|spaceship/i });
+    for (let i = 0; i < 3; i++) k.seg('ceil', -2 + i * 2, H, zb + 2.5 + i * 3, 1.6, 1.6, 1.0, { big: true, mini: true, want: /plane|aircraft|jet|helicopter|airship|blimp|biplane|glider|rocket|spaceship/i });
     k.at(0, zb + 0.02);
     F.gondola(k, W - 2, { double: false, height: 2.0, shelves: 5, color: '#2a2a2a', strip: '#1d3b5c', messy: 0.2 });
     yield;

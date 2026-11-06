@@ -689,7 +689,7 @@ export class ShopLevel implements Level {
         const f = this.fit(p, s);
         let score = f >= 0.95 ? 2 : f >= 0.6 ? 1 + f : f * 1.5 - (s.big ? 0 : 1);
         if (s.mode === 'single' || s.mode === 'ceil') score += Math.min(1, Math.max(p.dim.x, p.dim.y, p.dim.z) / Math.max(s.len, 0.5)) * 1.5;
-        if ((s.mode === 'single' || s.mode === 'ceil') && f < 0.35) score -= 2; // a shrunken ship on a plinth is a toy
+        if ((s.mode === 'single' || s.mode === 'ceil') && f < 0.35 && !s.mini) score -= 2; // a shrunken ship on a plinth is a toy
         else {
           // tiny things on a big shelf read as empty: prefer things that fill it
           const fill = (p.dim.y * Math.min(1, f)) / s.h;

@@ -444,9 +444,9 @@ export function tvWall(k: Kit, n: number, y: number, seed: number) {
 }
 
 /** Platform for showroom pieces (one product standing on it). */
-export function plinth(k: Kit, w: number, d: number, h: number, o: { color?: string; want?: RegExp } = {}) {
+export function plinth(k: Kit, w: number, d: number, h: number, o: { color?: string; want?: RegExp; mini?: boolean } = {}) {
   k.box(mat(o.color ?? '#f2efe8', { rough: 0.45 }), w, h, d, 0, 0, 0);
-  k.seg('single', 0, h, d / 2, w - 0.1, d - 0.1, 2.0, { big: true, want: o.want });
+  k.seg('single', 0, h, d / 2, w - 0.1, d - 0.1, o.mini ? 0.9 : 2.0, { big: true, want: o.want, mini: o.mini });
   k.col(0, 0, w + 0.05, d + 0.05);
 }
 

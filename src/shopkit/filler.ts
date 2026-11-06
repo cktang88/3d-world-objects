@@ -18,6 +18,8 @@ export interface Kind {
   colors: string[];
   metal?: number;
   rough?: number;
+  /** bare material (no printed label): cookware */
+  plain?: boolean;
 }
 
 export const KINDS: Record<string, Kind> = {
@@ -41,6 +43,8 @@ export const KINDS: Record<string, Kind> = {
   /** pegboard / slatwall hook: a thin rod out of the board (scaled per use) */
   peg: { name: 'peg', w: 0.007, h: 0.007, d: 1, geo: 'peg', colors: ['#c8ccd0'], metal: 0.9, rough: 0.3 },
   guitar: { name: 'guitar', w: 0.38, h: 1.0, d: 0.1, geo: 'guitar', colors: ['#e8c48a', '#c8823a', '#8a3a1a', '#1a1a1a', '#f2f0ea', '#a01e1e', '#2a4a8a', '#d89a4a'], rough: 0.25 },
+  stockpot: { name: 'stockpot', w: 0.3, h: 0.26, d: 0.3, geo: 'can', colors: ['#d0d4d8', '#c4c8cc', '#b8bcc0'], metal: 0.95, rough: 0.22, plain: true },
+  saucepot: { name: 'saucepot', w: 0.2, h: 0.12, d: 0.2, geo: 'can', colors: ['#d0d4d8', '#2a2a2a', '#b87333'], metal: 0.85, rough: 0.3, plain: true },
   carton6: { name: 'carton6', w: 0.2, h: 0.13, d: 0.13, geo: 'box', colors: ['#1565c0', '#c62828', '#2e7d32', '#212121', '#f9a825'] },
 };
 
@@ -52,11 +56,11 @@ export const SHOP_KINDS: Record<string, string[]> = {
   electronics: ['electro', 'smallbox', 'blister'],
   toys: ['toybox', 'smallbox', 'blister'],
   music: ['smallbox', 'blister', 'electro', 'guitar'],
-  kitchen: ['smallbox', 'jar', 'carton6', 'toolbox', 'electro'],
+  kitchen: ['stockpot', 'saucepot', 'smallbox', 'carton6', 'jar'],
   lighting: ['smallbox', 'electro'],
   sports: ['smallbox', 'toybox', 'blister', 'bottle'],
   furniture: ['book', 'jar'],
-  antiques: ['book', 'jar', 'bottle', 'smallbox', 'pot'],
+  antiques: ['book', 'jar', 'bottle'],
   stationery: ['book', 'smallbox', 'blister', 'pillbox'],
   garden: ['pot', 'pot', 'smallbox'],
   models: ['toybox', 'smallbox'],
@@ -275,7 +279,7 @@ export class Filler {
       const k = KINDS[name];
       let mat = kindMats.get(name);
       if (!mat) {
-        mat = k.geo === 'pot' || k.geo === 'guitar' ? new THREE.MeshStandardMaterial({ roughness: k.rough ?? 0.9, vertexColors: true }) : labelMat(k.rough ?? 0.55, k.metal ?? 0);
+        mat = k.geo === 'pot' || k.geo === 'guitar' ? new THREE.MeshStandardMaterial({ roughness: k.rough ?? 0.9, vertexColors: true }) : k.plain ? new THREE.MeshStandardMaterial({ roughness: k.rough ?? 0.5, metalness: k.metal ?? 0 }) : labelMat(k.rough ?? 0.55, k.metal ?? 0);
         kindMats.set(name, mat);
       }
       const im = new THREE.InstancedMesh(geometry(k.geo), mat, list.length);
