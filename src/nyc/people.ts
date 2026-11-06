@@ -633,7 +633,33 @@ export class Person {
       this.pose = (p) => p.upright(grip);
     }
     this.setActivity('walk', r.range(0, 10));
+    // frozen frames (animation skipped for distance, or off screen): no matrix-world walk over the
+    // 65 bones and props, no bone-matrix recompute / bone-texture upload
+    const self = this;
+    const baseUpdate = THREE.Object3D.prototype.updateMatrixWorld;
+    this.root.updateMatrixWorld = function (force?: boolean) {
+      if (self.frozen) return;
+      baseUpdate.call(this, force);
+    };
+    const skels = new Set<THREE.Skeleton>();
+    this.root.traverse((o) => {
+      if ((o as THREE.SkinnedMesh).isSkinnedMesh) skels.add((o as THREE.SkinnedMesh).skeleton);
+    });
+    for (const sk of skels) {
+      const orig = sk.update.bind(sk);
+      let ready = false;
+      sk.update = () => {
+        if (self.frozen && ready) return;
+        orig();
+        ready = true;
+        Person.skeletonUpdates++;
+      };
+    }
   }
+  /** this frame: keep last frame's pose and matrices */
+  frozen = false;
+  /** skeleton updates performed (all people), for perf readouts */
+  static skeletonUpdates = 0;
   /** pushes a stroller or walks a dog: never stops to look at a phone */
   noPhone = false;
   dog: Dog | null = null;
@@ -766,6 +792,9 @@ interface Ped {
   buddy?: Ped;
   /** distance to the player this frame */
   dist: number;
+  /** simulated position / facing; copied to the rendered person on its animation frames */
+  pos: THREE.Vector3;
+  rot: number;
   /** set on the companion: the person it follows */
   lead?: Ped;
 }
@@ -779,6 +808,14 @@ const COUNT = (() => {
   }
 })();
 const SHADOWS = 20;
+/** ?pfreeze=0 disables culling / frozen frames (for before/after perf comparisons) */
+const FREEZE = (() => {
+  try {
+    return new URLSearchParams(location.search).get('pfreeze') !== '0';
+  } catch {
+    return true;
+  }
+})();
 const yawOf = (axis: 'x' | 'z', dir: number) => (axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI);
 /** walking along x crosses avenues, along z crosses streets */
 const crossPeriod = (axis: 'x' | 'z') => (axis === 'x' ? AX : SZ);
@@ -824,6 +861,8 @@ class ColliderGrid {
   }
 }
 const _rects: Rect[] = [];
+const _sphere = new THREE.Sphere();
+const _m4 = new THREE.Matrix4();
 
 export class Pedestrians {
   peds: Ped[] = [];
@@ -890,7 +929,7 @@ export class Pedestrians {
       pd.p.setSpeed(pd.v);
     }
     for (let i = 0; i < 6 && pd.state === 'stand' && this.blocked(pd, pd.t, pd.line, 0.45); i++) pd.t += r.range(-2, 2);
-    pd.p.root.rotation.y = pd.yaw;
+    pd.rot = pd.yaw;
   }
   update(dt: number, p: THREE.Vector3, time?: number, colliders?: Rect[]) {
     if (!this.assets) return;
@@ -901,7 +940,7 @@ export class Pedestrians {
     for (let n = 0; n < 8 && this.peds.length < COUNT; n++) {
       const person = new Person(this.assets, this.rng);
       this.group.add(person.root);
-      const pd: Ped = { p: person, axis: 'x', dir: 1, c: 0, s: 1, line: 0, t: 0, v: 1.3, v0: 0, off: 0, state: 'walk', wait: 0, wd: 1, tick: this.peds.length, acc: 0, yaw: 0, dist: 0 };
+      const pd: Ped = { p: person, axis: 'x', dir: 1, c: 0, s: 1, line: 0, t: 0, v: 1.3, v0: 0, off: 0, state: 'walk', wait: 0, wd: 1, tick: this.peds.length, acc: 0, yaw: 0, dist: 0, pos: new THREE.Vector3(), rot: 0 };
       // about one in five people is out with a companion
       const prev = this.peds[this.peds.length - 1];
       if (prev && !prev.lead && !prev.buddy && !prev.p.slow && this.rng.chance(0.25)) {
@@ -924,20 +963,43 @@ export class Pedestrians {
         }
       } else this.walk(pd, dt, along, across);
       const lineNow = pd.line + pd.off;
-      pd.p.root.position.set(pd.axis === 'x' ? pd.t : lineNow, this.groundAt(pd), pd.axis === 'x' ? lineNow : pd.t);
-      pd.p.root.rotation.y = pd.yaw;
+      pd.pos.set(pd.axis === 'x' ? pd.t : lineNow, this.groundAt(pd), pd.axis === 'x' ? lineNow : pd.t);
+      pd.rot = pd.yaw;
       if (pd.buddy) this.follow(pd.buddy, pd);
     }
+    const cam = this.updateFrustum();
     for (const pd of this.peds) {
-      // LOD: animate near people every frame, far ones every 2nd / 4th frame; shadows only nearby
-      const d = Math.hypot(pd.p.root.position.x - p.x, pd.p.root.position.z - p.z);
+      // LOD: animate near people every frame, far ones every 2nd / 4th frame, off-screen ones not
+      // at all (they keep their last pose and matrices and are hidden)
+      const d = Math.hypot(pd.pos.x - p.x, pd.pos.z - p.z);
+      pd.dist = d;
+      const r = pd.p.root;
+      pd.acc = Math.min(pd.acc + dt, 4);
+      _sphere.center.set(pd.pos.x, pd.pos.y + 0.9, pd.pos.z).applyMatrix4(this.group.matrixWorld);
+      _sphere.radius = pd.p.noPhone ? 2.2 : 1.4;
+      const seen = !FREEZE || d < 6 || !cam || this.frustum.intersectsSphere(_sphere);
+      if (!seen) {
+        r.visible = false;
+        pd.p.frozen = true;
+        continue;
+      }
       const every = d < 25 ? 1 : d < 50 ? 2 : 4;
-      pd.acc += dt;
-      if ((this.frame + pd.tick) % every === 0) {
+      if (!FREEZE) {
+        // the previous behaviour: matrices every frame, the mixer every Nth frame
+        r.position.copy(pd.pos);
+        r.rotation.y = pd.rot;
+        if ((this.frame + pd.tick) % every === 0) {
+          pd.p.update(pd.acc);
+          pd.acc = 0;
+        }
+      } else if (!r.visible || (this.frame + pd.tick) % every === 0) {
+        r.visible = true;
+        pd.p.frozen = false;
+        r.position.copy(pd.pos);
+        r.rotation.y = pd.rot;
         pd.p.update(pd.acc);
         pd.acc = 0;
-      }
-      pd.dist = d;
+      } else pd.p.frozen = true;
       pd.p.setLod(d < 22 ? 0 : 1);
     }
     // shadows only for the nearest SHADOWS people (skinned shadow casters cost a full skinning pass)
@@ -948,6 +1010,25 @@ export class Pedestrians {
     order.forEach((pd, i) => pd.p.setShadows(i < SHADOWS && pd.dist < 30));
   }
   private order: Ped[] = [];
+  private frustum = new THREE.Frustum();
+  private probeCam: THREE.Camera | null = null;
+  private probe: THREE.Mesh | null = null;
+  /** frustum of the camera that drew us last frame, caught by an empty always-drawn probe mesh */
+  private updateFrustum() {
+    if (!this.probe) {
+      const g = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+      g.setDrawRange(0, 0);
+      this.probe = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
+      this.probe.frustumCulled = false;
+      this.probe.onBeforeRender = (_r, _s, c) => (this.probeCam = c);
+      this.group.add(this.probe);
+    }
+    const c = this.probeCam;
+    if (!c) return null;
+    _m4.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(_m4);
+    return c;
+  }
   /** distance to the next kerb ahead */
   private nearKerb(pd: Ped) {
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
@@ -1054,7 +1135,7 @@ export class Pedestrians {
   }
   /** companions walk shoulder to shoulder, or stand facing the leader while talking */
   private follow(f: Ped, l: Ped) {
-    const lp = l.p.root.position;
+    const lp = l.pos;
     f.axis = l.axis;
     f.dir = l.dir;
     f.c = l.c;
@@ -1070,14 +1151,14 @@ export class Pedestrians {
       if (Math.abs(this.clampLine(l, fc) - fc) > 0.01) fc = lc - leftSign * 0.62;
       fc = this.clampLine(l, fc);
     }
-    f.p.root.position.set(l.axis === 'x' ? fa : fc, lp.y, l.axis === 'x' ? fc : fa);
+    f.pos.set(l.axis === 'x' ? fa : fc, lp.y, l.axis === 'x' ? fc : fa);
     if (talk || l.v0 < 0.05) {
       if (f.p.activity === 'walk') f.p.setActivity(talk ? 'talk' : 'idle', 1.3);
-      f.p.root.rotation.y = talk ? yawOf(l.axis, -l.dir) : l.yaw;
+      f.rot = talk ? yawOf(l.axis, -l.dir) : l.yaw;
     } else {
       if (f.p.activity !== 'walk') f.p.setActivity('walk', 0.3);
       f.p.setSpeed(l.v0);
-      f.p.root.rotation.y = l.yaw;
+      f.rot = l.yaw;
     }
   }
 }

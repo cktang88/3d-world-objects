@@ -16,6 +16,7 @@ let crowd: Pedestrians | null = null;
 const origin = new THREE.Vector3();
 let labCols: Rect[] = [];
 let labTime = 0;
+let skelPerFrame = 0, skelLast = 0;
 const scene: LabScene = {
   name: 'people',
   description: 'Skinned, animated NYC pedestrians',
@@ -74,7 +75,8 @@ const scene: LabScene = {
           tris += t;
           if (m.castShadow) shadow += t;
         });
-        return `people=${crowd!.peds.length} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)}`;
+        const vis = crowd!.peds.filter((d) => d.p.root.visible).length;
+        return `people=${crowd!.peds.length} visible=${vis} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)} skeletonUpdates/frame=${skelPerFrame.toFixed(1)}`;
       };
       return;
     }
@@ -102,6 +104,10 @@ const scene: LabScene = {
   update(dt) {
     for (const p of people) p.update(dt);
     crowd?.update(dt, origin, (labTime += dt), labCols);
+    if (crowd) {
+      skelPerFrame = skelPerFrame * 0.9 + (Person.skeletonUpdates - skelLast) * 0.1;
+      skelLast = Person.skeletonUpdates;
+    }
   },
 };
 export default scene;
