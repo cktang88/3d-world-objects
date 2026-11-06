@@ -10,6 +10,8 @@
  *     build, first frame, shader programs, ...)
  *   - first frame: window.__world.perf.last.frame > 0, or window.__labReady for labs
  * --programs: list the shader programs (name, users, cache key) at the first frame.
+ * --frames N: after the first frame, log N frames (interval, draw CPU, programs).
+ * --steady S: CPU profile of S seconds after the first frame (steady-state frames).
  * --profile: V8 CPU profile from navigation to first frame; prints self time by function and by file.
  * Hard cap: --max seconds (default 240, at most 600), then the browser is killed and it exits 124.
  * Full-game URLs take the world lock (flock -w 300) like perf.mjs; labs (?lab=) do not.
@@ -113,12 +115,30 @@ log(`FIRST FRAME (${first})`);
 const info = await page.evaluate(() => ({ boot: window.__boot ?? null, programs: window.__world?.renderer?.info?.programs?.length ?? null, perf: window.__world?.perf?.last ?? null }));
 log(`programs ${info.programs}  calls ${info.perf?.calls}  tris ${info.perf?.tris}`);
 if (info.boot) console.log('stage marks (s):', JSON.stringify(info.boot));
+if (args.frames) {
+  // steady state after the first frame: per-frame draw CPU vs whole-frame interval, and program growth
+  const n = Number(args.frames);
+  for (let i = 0, lastF = -1; i < n; ) {
+    const f = await page.evaluate(() => ({ ...window.__world.perf.last, perPass: undefined })).catch(() => null);
+    if (f && f.frame !== lastF) { lastF = f.frame; i++; log(`frame ${f.frame}: interval ${f.frameMs} ms, draw ${f.cpuMs} ms, calls ${f.calls}, programs ${f.programs}`); }
+    await page.waitForTimeout(200);
+  }
+}
 if (args.programs) {
   const progs = await page.evaluate(() => (window.__world?.renderer?.info?.programs ?? []).map((p) => ({ name: p.name, used: p.usedTimes, key: p.cacheKey })));
   console.log(`programs (${progs.length}):`);
   for (const p of progs) console.log(`  ${p.name.padEnd(26)} x${p.used}  ${p.key.replace(/\n/g, ' ').slice(0, 260)}`);
 }
 summary();
+if (args.steady) {
+  // CPU profile of the steady state: N seconds after the first frame
+  prof ??= await page.context().newCDPSession(page);
+  await prof.send('Profiler.enable');
+  await prof.send('Profiler.setSamplingInterval', { interval: 1000 });
+  await prof.send('Profiler.start').catch(() => {});
+  if (args.profile) log('(profile covers boot + steady state)');
+  await new Promise((r) => setTimeout(r, Number(args.steady) * 1000));
+}
 if (prof) {
   const { profile } = await prof.send('Profiler.stop');
   const byId = new Map(profile.nodes.map((n) => [n.id, n]));

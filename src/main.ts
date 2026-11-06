@@ -1,5 +1,5 @@
 // ?fast=1 / ?notex=1 / ?post=0 / ?shadows=0 (src/flags.ts): first, so modules that read location.search see them
-import './flags';
+import { FLAGS, stripTextures } from './flags';
 import { mark, timed } from './boot'; // boot stage marks (scripts/boot.mjs)
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -817,6 +817,15 @@ async function startMode(m: Mode) {
   mark('level build start');
   setLevel(seam.take(currentDesc));
   mark('level built');
+  if (FLAGS.fast) {
+    // ?fast=1: compile every program up front, in parallel where KHR_parallel_shader_compile allows,
+    // instead of one blocking compile after another inside the first frame
+    transitioning = true;
+    stripTextures(scene);
+    await renderer.compileAsync(scene, camera).catch(() => {});
+    transitioning = false;
+    mark(`programs compiled (${renderer.info.programs?.length ?? 0})`);
+  }
   started = true;
   hud.start.classList.add('hidden');
   hud.start.classList.remove('paused');

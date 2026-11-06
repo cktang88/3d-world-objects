@@ -3,7 +3,8 @@
  * .claude/skills/fast-3d-testing). Imported first by main.ts, so that modules which read
  * location.search when they load see the flags that ?fast=1 implies.
  *
- *   ?fast=1     preset: r=0 (just your block), people=0, notex=1, post=0, shadows=0, quality=low
+ *   ?fast=1     preset: r=0 (just your block), people=0, notex=1, post=0, shadows=0, quality=low,
+ *               seamless=0 (no prebuilt interiors behind doors)
  *               (pixel ratio 1). Flags that are given explicitly win, e.g. ?fast=1&people=20.
  *   ?notex=1    no textures: no image or texture downloads, and every material is drawn in
  *               flat colours (its maps are removed). lighting.ts also skips HDRIs for it.
@@ -16,7 +17,9 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 
-const FAST: Record<string, string> = { r: '0', people: '0', notex: '1', post: '0', shadows: '0', quality: 'low' };
+// seamless=0: no background prebuilding of shops/interiors behind nearby doors (each one compiles new
+// shader programs: after the first frame that kept fast boots busy for minutes)
+const FAST: Record<string, string> = { r: '0', people: '0', notex: '1', post: '0', shadows: '0', quality: 'low', seamless: '0' };
 
 function readFlags() {
   if (typeof location === 'undefined') return new URLSearchParams();
@@ -55,6 +58,11 @@ function stripScene(o: THREE.Object3D) {
     if (Array.isArray(m)) m.forEach(strip);
     else strip(m);
   });
+}
+
+/** strip maps now (?notex=1), e.g. before renderer.compileAsync(), which does not call scene.onBeforeRender */
+export function stripTextures(o: THREE.Object3D) {
+  if (FLAGS.notex) stripScene(o);
 }
 
 if (FLAGS.notex) {
