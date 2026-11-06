@@ -22,6 +22,8 @@ import { canvasTex } from './common';
 
 const WATER = -1.25;
 const DECK = CURB;
+/** hulls sit this far below the water surface */
+const DRAFT = 0.3;
 
 export function buildWater(c: OpenCtx) {
   const { d, inner, group, stat, colliders, cx, cz } = c;
@@ -117,8 +119,8 @@ export function buildWater(c: OpenCtx) {
     const sx0 = Math.min(X(su0), X(su1)), sx1 = Math.max(X(su0), X(su1));
     shed(stat, sx0, sx1, pz0 + 2, pz1 - 2);
     colliders.push({ minX: sx0, maxX: sx1, minZ: pz0 + 2, maxZ: pz1 - 2 });
-    for (let u = PIER_SHORE + 8; u < tipU - 8; u += 13) slot({ kind: 'boat', x: X(u), y: WATER + 0.05, z: pz1 + 5.5, rot: 0, w: 14, d: 5, h: 9, min: 4, radius: 140, maxTris: 300_000 }, false);
-    for (let u = PIER_SHORE + 14; u < tipU - 8; u += 22) slot({ kind: 'boat', x: X(u), y: WATER + 0.05, z: pz0 - 8, rot: 0, w: 22, d: 7, h: 12, min: 8, radius: 160, maxTris: 350_000 }, false);
+    for (let u = PIER_SHORE + 8; u < tipU - 8; u += 13) slot({ kind: 'boat', x: X(u), y: WATER - DRAFT, z: pz1 + 5.5, rot: 0, w: 14, d: 5, h: 9, min: 4, radius: 140, maxTris: 300_000 }, false);
+    for (let u = PIER_SHORE + 14; u < tipU - 8; u += 22) slot({ kind: 'boat', x: X(u), y: WATER - DRAFT, z: pz0 - 8, rot: 0, w: 22, d: 7, h: 12, min: 8, radius: 160, maxTris: 350_000 }, false);
     for (let u = PIER_SHORE + 4; u < tipU; u += 18) slot({ kind: 'pierprop', x: X(u), y: DECK, z: pz1 - 1.2, rot: 0, w: 1.6, d: 1.2, h: 2, min: 0.4, radius: 60, maxTris: 60_000 });
   } else if (kind === 1) {
     // an open park pier with aircraft and a spacecraft on show, as on the Intrepid's pier
@@ -130,7 +132,7 @@ export function buildWater(c: OpenCtx) {
       colliders.push(rect(X(u), pz1 - 1.6, 2, 0.8));
     }
     // a tug and a ferry tied up alongside
-    slot({ kind: 'boat', x: X(PIER_SHORE + 30), y: WATER + 0.05, z: pz0 - 7, rot: 0, w: 32, d: 9, h: 14, min: 10, radius: 180, maxTris: 400_000 }, false);
+    slot({ kind: 'boat', x: X(PIER_SHORE + 30), y: WATER - DRAFT, z: pz0 - 7, rot: 0, w: 32, d: 9, h: 14, min: 10, radius: 180, maxTris: 400_000 }, false);
   } else {
     // a marina: floating docks with fingers, a boat in each slip
     const fy = WATER + 0.45;
@@ -140,7 +142,7 @@ export function buildWater(c: OpenCtx) {
       stat.add(slab(flat('#9b8f7a', 0.9), fx0, fx1, dz - 1.2, dz + 1.2, fy, 2));
       for (let u = PIER_SHORE + 8; u < tipU - 8; u += 9) {
         stat.add(slab(flat('#9b8f7a', 0.9), X(u) - 0.6, X(u) + 0.6, Math.min(dz, dz - side * 7), Math.max(dz, dz - side * 7), fy, 2));
-        slot({ kind: 'boat', x: X(u + 4.5), y: WATER + 0.05, z: dz - side * 4.5, rot: Math.PI / 2, w: 11, d: 4.2, h: 12, min: 4, radius: 140, maxTris: 250_000 }, false);
+        slot({ kind: 'boat', x: X(u + 4.5), y: WATER - DRAFT, z: dz - side * 4.5, rot: Math.PI / 2, w: 11, d: 4.2, h: 12, min: 4, radius: 140, maxTris: 250_000 }, false);
       }
     }
     for (let u = PIER_SHORE + 6; u < tipU - 4; u += 16) slot({ kind: 'pierprop', x: X(u), y: DECK, z: pz0 + 1.3, rot: 0, w: 1.6, d: 1.2, h: 2, min: 0.4, radius: 60, maxTris: 60_000 });

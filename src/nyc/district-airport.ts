@@ -59,7 +59,7 @@ export function buildAirport(c: OpenCtx) {
       slot({ kind: ['planeStand', 'plane'], x, y: Y, z: az, rot: Math.PI / 2, w: 58, d: 56, h: 18, min: 12, radius: 260, maxTris: 600_000 });
       jetBridge(stat, x + 4, SZ / 2 - 4, sx);
       // a tug and a baggage-cart train beside each stand
-      slot({ kind: 'truck', x: x + sx * 22, y: Y, z: az + 12, rot: 0, w: 8, d: 3, h: 3.5, min: 2.5, radius: 120, maxTris: 150_000 });
+      slot({ kind: 'truck', x: x + sx * 14, y: Y, z: az + 12, rot: 0, w: 8, d: 3, h: 3.5, min: 2.5, radius: 120, maxTris: 150_000 });
       baggageTrain(stat, colliders, x - sx * 18, az - 4, Math.PI / 2, r.int(3, 4));
     }
     terminal(stat, colliders, inner.minX, inner.maxX, SZ / 2 - 4);

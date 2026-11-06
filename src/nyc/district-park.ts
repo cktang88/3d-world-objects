@@ -189,13 +189,13 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
   pond(c, x, z, slot, _b, r) {
     const RX = 26, RZ = 15;
     c.stat.add(ellipse(flat('#9a9284', 0.9), x, z, RX + 1.6, RZ + 1.6, G + 0.02, 2)); // granite coping
-    const w = ellipse(waterMat('#2d4a45'), x, z, RX, RZ, G - 0.25, 6);
+    const w = ellipse(waterMat('#2d4a45'), x, z, RX, RZ, G - 0.3, 6);
     c.group.add(w);
     c.colliders.push(rect(x, z, RX * 1.6, RZ * 1.6));
     // rowboats and canoes on the water, a boathouse kiosk on the shore
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + r.range(-0.3, 0.3);
-      slot({ kind: 'boat', x: x + Math.cos(a) * RX * 0.55, y: G - 0.35, z: z + Math.sin(a) * RZ * 0.5, rot: a + Math.PI / 2 + r.range(-0.5, 0.5), w: 6.5, d: 2.6, h: 4, min: 2.2, radius: 110, maxTris: 250_000 }, false);
+      slot({ kind: 'boat', x: x + Math.cos(a) * RX * 0.55, y: G - 0.3 - 0.2, z: z + Math.sin(a) * RZ * 0.5, rot: a + Math.PI / 2 + r.range(-0.5, 0.5), w: 6.5, d: 2.6, h: 4, min: 2.2, radius: 110, maxTris: 250_000 }, false);
     }
     slot({ kind: 'smallbuilding', x: x + RX + 6, y: G, z: z - RZ + 2, rot: -Math.PI / 2, w: 9, d: 7, h: 7, min: 2.5, radius: 120, maxTris: 300_000 });
     benchRing(c, x, z, RX + 3, RZ + 3, 12, slot, 4);
