@@ -97,6 +97,11 @@ def bake_vertex(meshes, unit, samples=48):
         col = np.empty(n * 4, np.float32)
         ca.data.foreach_get("color", col)
         col = col.reshape(-1, 4)
+        # sand3d parts interpenetrate: a vertex buried inside another part bakes black and
+        # would darken its whole face. Such vertices sit at a joint crease: call them 0.6.
+        ao = col[:, 0]
+        t = np.clip((ao - 0.1) / 0.15, 0, 1)
+        col[:, 0] = np.maximum(ao, 0.6 * (1 - t * t * (3 - 2 * t)))
         col[:, 1] = conv
         col[:, 2] = 1
         col[:, 3] = 1
@@ -119,7 +124,10 @@ def build_one(program, entry, out_path, bake=False, samples=48):
         obj = roots[0] if len(roots) == 1 else s3d.group("object", *roots)
 
     # metres per Blender unit: sand3d works in mm unless the program set units
-    unit = bpy.context.scene.unit_settings.scale_length or 1.0
+    # (sand3d keeps Blender units at its own unit, MM per millimetre, and scales the root by
+    # MM/1000 only when exporting; scene.unit_settings.scale_length stays 1, so it cannot be used:
+    # GLBs built before this fix have UVs in millimetres — the viewer detects and rescales them)
+    unit = getattr(s3d, "_core").MM / 1000
 
     meshes = [o for o in bpy.context.scene.objects if o.type == "MESH" and len(o.data.polygons)]
     for o in meshes:

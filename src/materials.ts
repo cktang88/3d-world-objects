@@ -208,17 +208,20 @@ varying vec3 vTriBake;
 #endif
 `;
 const VERT_BODY = `
-vTriPos = position;
 vTriNrm = normal;
 {
   mat3 triMv = mat3(modelViewMatrix);
+  mat3 triM = mat3(modelMatrix);
 #ifdef USE_INSTANCING
   triMv = triMv * mat3(instanceMatrix);
+  triM = triM * mat3(instanceMatrix);
 #endif
   vTriAx = triMv[0]; vTriAy = triMv[1]; vTriAz = triMv[2];
+  // object space at world scale (metres): quantized GLBs and mm-unit parts carry node scales
+  vTriPos = position * vec3(length(triM[0]), length(triM[1]), length(triM[2]));
 }
 #ifdef TRI_UV
-vTriUv = uv;
+vTriUv = uv * TRI_UVK;
 #endif
 #ifdef TRI_BAKE
 vTriBake = color;
@@ -597,6 +600,8 @@ const WEAR_MODE: Record<string, string> = {
 export interface EnhanceOpts {
   /** the geometry carries the per-vertex bake (COLOR_0 = AO, convexity) from rebuild.py --bake */
   bake?: boolean;
+  /** UV units to metres (UVs from older rebuilds are in millimetres: 0.001) */
+  uvScale?: number;
 }
 
 /**
@@ -618,7 +623,10 @@ export function enhance(m: THREE.MeshStandardMaterial, kind: string, hasUv = fal
   p.userData.kind = kind;
   const u = uniformsFor(kind, spec);
   const defs: Record<string, string> = { ...(p.defines ?? {}) };
-  if (hasUv) defs.TRI_UV = '';
+  if (hasUv) {
+    defs.TRI_UV = '';
+    defs.TRI_UVK = (opts.uvScale ?? 1).toExponential();
+  }
   if (spec.antiTile) defs.TRI_ANTITILE = '';
   if (opts.bake) {
     defs.TRI_BAKE = '';
@@ -662,8 +670,36 @@ export function glassFrom(m: THREE.MeshStandardMaterial) {
   });
 }
 
+/**
+ * Metres per UV unit, to a power of ten: rebuilt GLBs mean 1 UV unit = 1 m, but those built before
+ * the unit fix in rebuild.py have UVs in millimetres. Compares the UV span with the mesh's size.
+ */
+const tmpBox = new THREE.Box3();
+const tmpV = new THREE.Vector3();
+function uvScaleOf(mesh: THREE.Mesh): number {
+  const g = mesh.geometry;
+  const uv = g.getAttribute('uv');
+  if (!uv) return 1;
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (let i = 0; i < uv.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i);
+    if (u < u0) u0 = u;
+    if (u > u1) u1 = u;
+    if (v < v0) v0 = v;
+    if (v > v1) v1 = v;
+  }
+  if (!g.boundingBox) g.computeBoundingBox();
+  tmpBox.copy(g.boundingBox!).applyMatrix4(mesh.matrixWorld);
+  const ext = Math.max(...tmpBox.getSize(tmpV).toArray());
+  const span = Math.max(u1 - u0, v1 - v0);
+  if (!(ext > 0) || !(span > 0)) return 1;
+  const p = Math.round(Math.log10(span / ext));
+  return p >= 2 ? 10 ** -p : 1;
+}
+
 /** Walk a loaded object and upgrade every sand3d material by its kind name. */
 export function enhanceTree(root: THREE.Object3D) {
+  root.updateMatrixWorld(true);
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -681,8 +717,9 @@ export function enhanceTree(root: THREE.Object3D) {
       if (k === 'glass') return (sm.userData.glass ??= glassFrom(sm));
       // one upgraded material per (source material, uv, bake): meshes share it
       const variants: Record<string, THREE.Material> = (sm.userData.variants ??= {});
-      const key = `${hasUv}|${bake}`;
-      return (variants[key] ??= enhance(sm, k, hasUv, { bake }));
+      const uvScale = hasUv ? uvScaleOf(mesh) : 1;
+      const key = `${hasUv}|${bake}|${uvScale}`;
+      return (variants[key] ??= enhance(sm, k, hasUv, { bake, uvScale }));
     });
     mesh.material = Array.isArray(mesh.material) ? out : out[0];
   });
