@@ -557,3 +557,73 @@ credit lines come from `attribution(entry)` / `obj.userData.attribution`.
 - **Google Scanned Objects**: Google Research, https://research.google/blog/scanned-objects-by-google-research-a-dataset-of-3d-scanned-common-household-items/ , CC BY 4.0 (Copyright 2020 Google LLC); GLB conversion https://huggingface.co/datasets/codepawl/scanned-objects-glb (CC BY 4.0). Product brands belong to their owners.
 - **Smithsonian 3D**: Smithsonian Institution Open Access, https://3d.si.edu/ , CC0 1.0.
 - **Khronos glTF Sample Assets**: https://github.com/KhronosGroup/glTF-Sample-Assets , CC0 1.0 or CC BY 4.0 per model (artists in public/libraries/khronos.json `by`).
+
+## Interior furniture and decor (Poly Haven models, CC0)
+
+Streamed from Poly Haven by `src/rooms/lib.ts` (via `src/libraries.ts`) into generated building interiors. CC0 1.0; credit to Poly Haven and the authors listed on each page.
+
+- Sofa_01 — https://polyhaven.com/a/Sofa_01
+- sofa_02 — https://polyhaven.com/a/sofa_02
+- ArmChair_01 — https://polyhaven.com/a/ArmChair_01
+- GreenChair_01 — https://polyhaven.com/a/GreenChair_01
+- modern_arm_chair_01 — https://polyhaven.com/a/modern_arm_chair_01
+- mid_century_lounge_chair — https://polyhaven.com/a/mid_century_lounge_chair
+- Ottoman_01 — https://polyhaven.com/a/Ottoman_01
+- modern_coffee_table_01 — https://polyhaven.com/a/modern_coffee_table_01
+- modern_coffee_table_02 — https://polyhaven.com/a/modern_coffee_table_02
+- coffee_table_round_01 — https://polyhaven.com/a/coffee_table_round_01
+- industrial_coffee_table — https://polyhaven.com/a/industrial_coffee_table
+- side_table_01 — https://polyhaven.com/a/side_table_01
+- side_table_tall_01 — https://polyhaven.com/a/side_table_tall_01
+- round_wooden_table_02 — https://polyhaven.com/a/round_wooden_table_02
+- ClassicNightstand_01 — https://polyhaven.com/a/ClassicNightstand_01
+- painted_wooden_nightstand — https://polyhaven.com/a/painted_wooden_nightstand
+- ClassicConsole_01 — https://polyhaven.com/a/ClassicConsole_01
+- GothicCommode_01 — https://polyhaven.com/a/GothicCommode_01
+- painted_wooden_cabinet — https://polyhaven.com/a/painted_wooden_cabinet
+- steel_frame_shelves_01 — https://polyhaven.com/a/steel_frame_shelves_01
+- Chandelier_01 — https://polyhaven.com/a/Chandelier_01
+- Chandelier_02 — https://polyhaven.com/a/Chandelier_02
+- modern_ceiling_lamp_01 — https://polyhaven.com/a/modern_ceiling_lamp_01
+- hanging_industrial_lamp — https://polyhaven.com/a/hanging_industrial_lamp
+- desk_lamp_arm_01 — https://polyhaven.com/a/desk_lamp_arm_01
+- potted_plant_01 — https://polyhaven.com/a/potted_plant_01
+- potted_plant_02 — https://polyhaven.com/a/potted_plant_02
+- potted_plant_04 — https://polyhaven.com/a/potted_plant_04
+- ceramic_vase_01 — https://polyhaven.com/a/ceramic_vase_01
+- ceramic_vase_02 — https://polyhaven.com/a/ceramic_vase_02
+- ceramic_vase_03 — https://polyhaven.com/a/ceramic_vase_03
+- ceramic_vase_04 — https://polyhaven.com/a/ceramic_vase_04
+- brass_vase_03 — https://polyhaven.com/a/brass_vase_03
+- antique_ceramic_vase_01 — https://polyhaven.com/a/antique_ceramic_vase_01
+- mantel_clock_01 — https://polyhaven.com/a/mantel_clock_01
+- standing_picture_frame_01 — https://polyhaven.com/a/standing_picture_frame_01
+- book_encyclopedia_set_01 — https://polyhaven.com/a/book_encyclopedia_set_01
+- alarm_clock_01 — https://polyhaven.com/a/alarm_clock_01
+- marble_bust_01 — https://polyhaven.com/a/marble_bust_01
+- concrete_cat_statue — https://polyhaven.com/a/concrete_cat_statue
+- wooden_candlestick — https://polyhaven.com/a/wooden_candlestick
+- brass_goblets — https://polyhaven.com/a/brass_goblets
+- jug_01 — https://polyhaven.com/a/jug_01
+- pot_enamel_01 — https://polyhaven.com/a/pot_enamel_01
+- food_apple_01 — https://polyhaven.com/a/food_apple_01
+- food_pears_asian_01 — https://polyhaven.com/a/food_pears_asian_01
+- bananas — https://polyhaven.com/a/bananas
+- carved_wooden_plate — https://polyhaven.com/a/carved_wooden_plate
+- classic_laptop — https://polyhaven.com/a/classic_laptop
+- Television_01 — https://polyhaven.com/a/Television_01
+- sofa — https://polyhaven.com/a/sofa
+- armchair — https://polyhaven.com/a/armchair
+- coffee — https://polyhaven.com/a/coffee
+- side — https://polyhaven.com/a/side
+- nightstand — https://polyhaven.com/a/nightstand
+- dresser — https://polyhaven.com/a/dresser
+- chandelier — https://polyhaven.com/a/chandelier
+- pendant — https://polyhaven.com/a/pendant
+- bigplant — https://polyhaven.com/a/bigplant
+- smallplant — https://polyhaven.com/a/smallplant
+- vase — https://polyhaven.com/a/vase
+- mantel — https://polyhaven.com/a/mantel
+- table — https://polyhaven.com/a/table
+- kitchen — https://polyhaven.com/a/kitchen
+- shelf — https://polyhaven.com/a/shelf

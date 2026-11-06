@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mat } from '../build';
-import { surface } from '../pbr';
+import { surface, pbr } from '../pbr';
 import { subwayTex, hexTex, checkerTex, dropCeilingTex, carpetTileTex, spinesTex, leafTex } from './tex';
 
 /** Interior materials. Tiled ones expect world-metre UVs (see Kit). */
@@ -21,13 +21,40 @@ function tiled(key: string, t: THREE.Texture, metres: number, opts: { rough?: nu
   });
 }
 
+/**
+ * A PBR floor with its colour and normal maps but a fixed satin roughness: the scanned roughness
+ * maps read as wet mirrors under point lights; real oiled or satin-varnished floors do not.
+ */
+function satin(key: string, color: string, rough: number) {
+  return memo(`satin:${key}:${color}:${rough}`, () => {
+    const m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, envMapIntensity: 0.35 });
+    const p = pbr(key);
+    p?.ready.then(() => {
+      const rep = (t: THREE.Texture | null) => {
+        if (!t) return null;
+        const c = t.clone();
+        c.repeat.set(1 / p.tile[0], 1 / p.tile[1]);
+        c.needsUpdate = true;
+        return c;
+      };
+      m.map = rep(p.diff);
+      m.normalMap = rep(p.nor);
+      m.normalScale.setScalar(0.6);
+      m.aoMap = rep(p.arm);
+      m.aoMapIntensity = 0.6;
+      m.needsUpdate = true;
+    });
+    return m;
+  });
+}
+
 export const M = {
   paint: (color: string) => mat(color, { rough: 0.88 }),
   trim: () => mat('#f5f2ea', { rough: 0.38 }),
   trimDark: () => mat('#3a2a20', { rough: 0.45 }),
   ceiling: () => mat('#f4f2ec', { rough: 0.95 }),
-  parquet: () => surface('floor_parquet', [1, 1], { roughness: 1, color: '#c4b4a4', envMapIntensity: 0.25 }),
-  plank: () => surface('floor_laminate', [1, 1], { roughness: 1 }),
+  parquet: () => satin('floor_parquet', '#c8b6a2', 0.52),
+  plank: () => satin('floor_laminate', '#ffffff', 0.55),
   oak: (color = '#ffffff') => surface('oak', [1, 1], { color, roughness: 0.55 }),
   walnut: (color = '#ffffff') => surface('walnut', [1, 1], { color, roughness: 0.5 }),
   pine: (color = '#ffffff') => surface('pine', [1, 1], { color, roughness: 0.6 }),

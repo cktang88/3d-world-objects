@@ -597,7 +597,7 @@ export class InteriorLevel implements Level {
     k.at(fx, 0, fz, rot, () => {
       // in this frame: local x along the wall, local z = across (sign: +z toward the room if inward>0 on z sides)
       const dir = sd.axis === 'z' ? sd.inward : -sd.inward; // local z toward the room
-      const glassM = M.glass();
+      const glassM = sd.room.type === 'bathroom' ? M.frosted() : M.glass();
       if (office) {
         // steel loft window: fixed panes with a transom
         k.box(frame, o.w, 0.05, 0.06, 0, o.y0, 0);
@@ -621,9 +621,9 @@ export class InteriorLevel implements Level {
         k.box(M.brass(), 0.08, 0.015, 0.04, 0, o.y0 + h / 2 + 0.02, dir * 0.05);
       }
     });
-    // the view across the street: an emissive backdrop outside the wall
+    // the view across the street: an emissive backdrop outside the wall (bathrooms: frosted glass, daylight only)
     const vseed = hashN(this.desc.seed, Math.round(o.t * 10), Math.round(sd.c * 10)) % 5;
-    const view = M.emissiveMap(`view${vseed}${this.night}`, windowViewTex(vseed, this.night), this.night ? 0.6 : 1.0);
+    const view = sd.room.type === 'bathroom' ? M.matte(this.night ? '#1a2238' : '#dfe8ee') : M.emissiveMap(`view${vseed}${this.night}`, windowViewTex(vseed, this.night), this.night ? 0.6 : 1.0);
     const out = sd.face - sd.inward * (thick + 1.4);
     const vw = o.w + 2.4, vh = h + 2.0;
     const [vx, vz] = sd.axis === 'z' ? [o.t, out] : [out, o.t];
