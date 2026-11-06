@@ -1426,6 +1426,8 @@ interface Ped {
   seen?: boolean;
   rank?: number;
   capped?: boolean;
+  /** 1 near, 0 far: eases between when the near cap takes or gives back this person */
+  capFade?: number;
   /** simulated position / facing; copied to the rendered person on its animation frames */
   pos: THREE.Vector3;
   rot: number;
@@ -1748,7 +1750,10 @@ export class Pedestrians {
     for (const pd of order) {
       // hysteresis: someone already near keeps their place over a newcomer until 3 ranks later
       pd.rank = pd.seen ? rank++ : 1e9;
-      pd.capped = !!far && pd.rank >= (pd.far ? NEAR_MAX : NEAR_MAX + 3);
+      pd.capped = !!far && pd.rank >= ((pd.capFade ?? 0) > 0.5 ? NEAR_MAX + 3 : NEAR_MAX);
+      // dropping out of (or into) the near cap crossfades over ~0.4 s instead of popping
+      const goal = pd.capped ? 0 : 1;
+      pd.capFade = pd.capFade === undefined ? goal : pd.capFade + THREE.MathUtils.clamp(goal - pd.capFade, -dt * 2.5, dt * 2.5);
     }
     for (const pd of this.peds) {
       // LOD: animate near people every frame, far ones every 2nd / 4th frame, off-screen ones not
@@ -1760,7 +1765,7 @@ export class Pedestrians {
       // beyond ~20 m (or past the nearest NEAR_MAX): one instance of the VAT far crowd instead of
       // a skinned person. Between FAR_OUT and FAR_IN both are drawn with complementary
       // screen-door dither patterns.
-      const fadeNear = far ? (pd.capped ? 0 : 1 - THREE.MathUtils.smoothstep(d, FAR_OUT, FAR_IN)) : 1;
+      const fadeNear = far ? Math.min(pd.capFade ?? 1, 1 - THREE.MathUtils.smoothstep(d, FAR_OUT, FAR_IN)) : 1;
       if (fadeNear < 1) {
         const farOnly = fadeNear <= 0;
         if (farOnly) {
