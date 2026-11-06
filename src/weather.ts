@@ -537,11 +537,48 @@ attribute vec4 aSeed;
 attribute vec2 aCorner;
 uniform vec3 uCam;
 uniform vec4 uSplash; // time, radius, count fraction, rate
+uniform float uDrip;  // share of slots that are drips off awnings / ledges / fire escapes (0..1)
 varying vec2 vC;
 varying float vPh;
+varying float vDrip;
 ${OCC_SAMPLE}
 vec2 h22(vec2 p) { return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
 void main() {
+  vDrip = 0.0;
+  if (aSeed.z < 0.25) {
+    // drips: fall from the edge of something overhead (a step down in the exposure map)
+    float cyc = uSplash.x * (0.7 + 0.6 * aSeed.y) + aSeed.w * 10.0;
+    float k = floor(cyc), ph = fract(cyc);
+    vec2 h = h22(aSeed.xy * 53.1 + floor(k / 5.0) * 0.731); // the same spot drips a few times
+    float an = h.y * 6.2831853;
+    vec2 xz = uCam.xz + vec2(cos(an), sin(an)) * 11.0 * sqrt(h.x);
+    float hc = occTop(xz);
+    vec2 best = xz;
+    float lo = hc;
+    for (int i = 0; i < 4; i++) {
+      float a = float(i) * 1.5707963;
+      vec2 q = xz + vec2(cos(a), sin(a)) * 0.5;
+      float t = occTop(q);
+      if (t < lo) { lo = t; best = q; }
+    }
+    float drop = hc - lo;
+    float ok = step(1.5, drop) * step(drop, 14.0) * step(aSeed.w, uDrip) * step(-1e3, lo);
+    float T = sqrt(2.0 * drop / 9.8);
+    float y = hc - 0.05 - 4.9 * (ph * T) * (ph * T);
+    vec3 wp = vec3(best.x, y, best.y);
+    // a short vertical streak facing the camera
+    vec3 a0 = (viewMatrix * vec4(wp, 1.0)).xyz;
+    vec3 a1 = (viewMatrix * vec4(wp + vec3(0.0, 0.05 + 0.25 * ph, 0.0), 1.0)).xyz;
+    vec3 side = normalize(cross(a1 - a0, a0) + vec3(1e-5, 0.0, 0.0));
+    float w = max(0.004, 0.003 * length(a0));
+    vec3 pos = mix(a0, a1, aCorner.y * 0.5 + 0.5) + side * aCorner.x * w;
+    vC = aCorner;
+    vPh = ok > 0.0 ? 0.0 : 2.0;
+    vDrip = 1.0;
+    gl_Position = projectionMatrix * vec4(pos, 1.0);
+    if (ok <= 0.0) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
+    return;
+  }
   float cyc = uSplash.x * uSplash.w * (0.8 + 0.4 * aSeed.z) + aSeed.w * 10.0;
   float k = floor(cyc), ph = fract(cyc);
   vec2 h = h22(aSeed.xy * 91.7 + k * 0.137);
@@ -564,8 +601,16 @@ uniform vec3 uColor;
 uniform float uOpacity;
 varying vec2 vC;
 varying float vPh;
+varying float vDrip;
 void main() {
   if (vPh > 1.0) discard;
+  if (vDrip > 0.5) {
+    float da = (1.0 - abs(vC.x)) * uOpacity * 1.4;
+    gl_FragColor = vec4(uColor, da);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    return;
+  }
   float r = length(vC);
   float ring = 1.0 - smoothstep(0.0, 0.2, abs(r - 0.75));
   float core = (1.0 - smoothstep(0.0, 0.35, r)) * (1.0 - smoothstep(0.0, 0.35, vPh));
@@ -719,7 +764,7 @@ export class Weather {
     this.precip = new THREE.Mesh(quadGeometry(COUNTS.ultra.drops, false), pm);
     this.precip.frustumCulled = false;
     const sm = new THREE.ShaderMaterial({
-      uniforms: { ...occU, uSplash: { value: new THREE.Vector4() }, uColor: { value: new THREE.Color() }, uOpacity: { value: 0.5 } },
+      uniforms: { ...occU, uSplash: { value: new THREE.Vector4() }, uDrip: { value: 0 }, uColor: { value: new THREE.Color() }, uOpacity: { value: 0.5 } },
       vertexShader: SPLASH_V, fragmentShader: SPLASH_F, side: THREE.DoubleSide, transparent: true, depthWrite: false, opacity: 0.5,
     });
     this.splash = new THREE.Mesh(quadGeometry(COUNTS.ultra.splashes, true), sm);
@@ -1132,10 +1177,13 @@ export class Weather {
     pm.uOpacity.value = snow ? 0.95 : 0.45 + 0.3 * c.rain;
 
     const su = this.splash.material.uniforms;
-    this.splash.visible = c.rain > 0.02 && this.occInfo.x > 0;
-    this.splash.geometry.setDrawRange(0, Math.round(this.counts.splashes * Math.min(1, c.rain)) * 6);
+    // drips keep going for a while after the rain stops
+    const drip = Math.min(1, Math.max(c.rain * 1.5, (info.wetness - 0.3) * 1.2));
+    this.splash.visible = (c.rain > 0.02 || drip > 0.02) && this.occInfo.x > 0;
+    this.splash.geometry.setDrawRange(0, Math.round(this.counts.splashes * Math.min(1, Math.max(c.rain, drip))) * 6);
+    su.uDrip.value = drip;
     su.uCam.value.copy(this.camera.position);
-    su.uSplash.value.set(this.time, 12, 1, 2.4);
+    su.uSplash.value.set(this.time, 12, c.rain > 0.02 ? 1 : 0, 2.4);
     (su.uColor.value as THREE.Color).copy(base).multiplyScalar(1.5);
     su.uOpacity.value = 0.45;
   }

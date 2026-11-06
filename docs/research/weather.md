@@ -93,6 +93,10 @@ standard, sprites, …). In thick fog the camera far plane comes in to where the
 - Splashes: horizontal quads; each slot respawns at a hashed position (√r for density near the
   viewer) every ~0.4 s **at the top-most surface height read from the exposure map**, so they
   land on the road, the pavement, awnings and car roofs, never under cover.
+- Drips: a quarter of the splash slots look for a step down in the exposure map (an awning,
+  fire-escape or ledge edge 1.5-14 m above what is next to it) and drop a short streak from the
+  edge with gravity, repeating at the same spot a few times; they keep dripping while the ground
+  is still wet after the rain stops.
 
 ### States and transitions
 clear, partly, overcast, lightrain, rain (heavy), fog, snow — each a set of parameters (cloud,
