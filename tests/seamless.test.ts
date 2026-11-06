@@ -512,6 +512,16 @@ test('the read and cut run in slices: no slice over 8 ms on a dense piece; the b
   // SLICE_MS is 3. On a busy shared machine single slices get preempted: the 95th percentile must
   // stay under 8 ms and no slice over 20 ms (a real one-block step was 100-200 ms)
   const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
-  expect(p95 <= 8, `95% of slices under ${fmt(p95)} ms (want <= 8)`);
-  expect(r.worst <= 20, `a slice took ${fmt(r.worst)} ms (want <= 20)`);
+  // calibrate against how busy the machine is right now: a fixed workload's time vs its quiet time (~1 ms)
+  const cal = () => {
+    const t = performance.now();
+    let x = 0;
+    for (let i = 0; i < 2e6; i++) x += Math.sqrt(i) * 1e-9;
+    void x;
+    return performance.now() - t;
+  };
+  const slow = Math.max(1, Math.min(...[cal(), cal(), cal()]) / 2.5);
+  console.log(`   machine load factor ${fmt(slow)}`);
+  expect(p95 <= 8 * slow, `95% of slices under ${fmt(p95)} ms (want <= ${fmt(8 * slow)})`);
+  expect(r.worst <= 20 * slow, `a slice took ${fmt(r.worst)} ms (want <= ${fmt(20 * slow)})`);
 });

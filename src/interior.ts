@@ -1171,7 +1171,8 @@ export class InteriorLevel implements Level {
         return g;
       };
       if (b.doors === 'pair') {
-        const l = leaf(-b.w / 2, b.w / 2 - 0.005, 1), r = leaf(b.w / 2, b.w / 2 - 0.005, -1);
+        // the pair meets in the middle (a 1 cm gap between the leaves showed through the shut closet)
+        const l = leaf(-b.w / 2, b.w / 2 + 0.002, 1), r = leaf(b.w / 2, b.w / 2 - 0.002, -1);
         entry.open = (t: number) => {
           const e = t * t * (3 - 2 * t);
           l.rotation.y = -1.85 * e;

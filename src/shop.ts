@@ -385,17 +385,19 @@ export class ShopLevel implements Level {
     const c = k.openBox(0, 0, 1.0, 2.15, 2.6, 'stockroom', false);
     k.closeBox();
     const hinge = new THREE.Group();
-    hinge.position.set(-0.46, 0, 0.02);
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.92, 2.1, 0.04), mat('#8a8f94', { rough: 0.5, metal: 0.4 }));
-    leaf.position.set(0.46, 1.05, 0);
+    hinge.position.set(-0.49, 0, 0.02);
+    // the leaf fills the 1.0 x 2.15 m opening to under the frame (a gap round a closed door, with the
+    // stockroom behind it not drawn, showed the void through the wall)
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.98, 2.16, 0.04), mat('#8a8f94', { rough: 0.5, metal: 0.4 }));
+    leaf.position.set(0.49, 1.08, 0);
     leaf.userData.owned = true;
     hinge.add(leaf);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), M.chrome());
-    knob.position.set(0.82, 1.0, 0.04);
+    knob.position.set(0.86, 1.0, 0.04);
     knob.userData.owned = true;
     hinge.add(knob);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.2), lit(textTex('EMPLOYEES\nONLY', '#c62828', '#ffffff', { w: 256, h: 128, font: 'bold 44px sans-serif' })));
-    sign.position.set(0.46, 1.6, 0.021);
+    sign.position.set(0.49, 1.6, 0.021);
     sign.userData.owned = true;
     hinge.add(sign);
     c.obj.add(hinge);

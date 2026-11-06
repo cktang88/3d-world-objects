@@ -63,6 +63,8 @@ export const DRAWER_TRAVEL = 0.8;
 
 export class LazyContainer {
   open = false;
+  /** the camera is inside the contents (a walk-in room): they stay drawn and are not dropped */
+  occupied = false;
   /** its prepare() has run */
   prepared = false;
   t = 0;
@@ -119,6 +121,17 @@ export class LazyContainer {
     o.userData.restZ = o.position.z;
     this.pose();
   }
+  private cBox: THREE.Box3 | null = null;
+  /** world box of the contents (computed once they exist; furniture does not move) */
+  contentsBox() {
+    if (!this.cBox && this.contents) {
+      const v = this.contents.visible;
+      this.contents.visible = true;
+      this.cBox = new THREE.Box3().setFromObject(this.contents);
+      this.contents.visible = v;
+    }
+    return this.cBox ?? new THREE.Box3();
+  }
   pose() {
     const t = this.t;
     const e = t * t * (3 - 2 * t);
@@ -130,10 +143,13 @@ export class LazyContainer {
     if (this.contents) {
       // no moving part we know of: present the contents by sliding them out of the front
       if (!this.spec.open && !this.spec.door) this.contents.position.z = (this.contents.userData.restZ as number) + e * DRAWER_TRAVEL * (this.spec.size?.z ?? 0.4);
-      this.contents.visible = !this.opaque || t > 0.02;
+      // hidden only once fully shut (a nearly closed door still shows a sliver), and never while you
+      // are inside them (a stockroom or walk-in closet: its contents are the room around you)
+      this.contents.visible = !this.opaque || t > 0 || this.occupied;
     }
   }
   drop() {
+    this.cBox = null;
     if (!this.contents) return;
     this.contents.removeFromParent();
     disposeTree(this.contents);
@@ -370,6 +386,16 @@ export class Lazy {
         continue;
       }
       if (!under(c.obj, level.group)) continue;
+      // standing inside what it holds (a stockroom is the contents of its door): keep it drawn
+      if (c.contents) {
+        // (walk-in: contents at least room-sized, 1.2 m across and 1.8 m tall)
+        const cb = c.contentsBox(), sz = cb.getSize(V());
+        const inside = Math.min(sz.x, sz.z) > 1.2 && sz.y > 1.8 && cb.containsPoint(eye);
+        if (inside !== c.occupied) {
+          c.occupied = inside;
+          c.pose();
+        }
+      }
       const target = c.open ? 1 : 0;
       if (c.t !== target) {
         c.t = target > c.t ? Math.min(1, c.t + dt * 2.6) : Math.max(0, c.t - dt * 2.6);
@@ -391,7 +417,7 @@ export class Lazy {
     }
     this.stats.open = open;
     // forget the oldest closed contents
-    const kept = [...registry].filter((c) => c.contents && !c.open && c.opaque && c.t === 0).sort((a, b) => a.used - b.used);
+    const kept = [...registry].filter((c) => c.contents && !c.open && !c.occupied && c.opaque && c.t === 0).sort((a, b) => a.used - b.used);
     while (kept.length > this.capacity) kept.shift()!.drop();
   }
 
