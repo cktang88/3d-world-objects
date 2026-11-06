@@ -1,3 +1,4 @@
+import { onRamp } from './ground';
 import * as THREE from 'three';
 import { mat } from '../build';
 import type { Rect } from '../level';
@@ -45,7 +46,10 @@ export function busStop(parent: THREE.Object3D, colliders: Rect[]) {
   word.position.set(s.x, 0.015, s.z0 + L * 0.3);
   g.add(word);
   // sign pole at the head of the stop, on the sidewalk by the kerb
-  const pz = s.z0 + 1.5, px = BX - 0.45;
+  // keep the pole off the corner kerb ramp (the stop's head reaches the corner)
+  const px = BX - 0.45;
+  let pz = s.z0 + 1.5;
+  while (onRamp(px, pz, 0.2, 0.2) && pz < s.z1) pz += 0.5;
   C(g, mat('#3c4a42', { metal: 0.5, rough: 0.5 }), 0.035, 3.0, px, 0.15, pz);
   const face = new THREE.MeshStandardMaterial({
     map: canvasTex(128, 256, (c) => {
