@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "qa": "node scripts/qa.mjs",
     "assets": "python3 scripts/fetch_catalog.py 80 && python3 scripts/build_assets.py"
   },
   "dependencies": {
