@@ -820,7 +820,7 @@ export class FloorLevel implements Level {
       [0, H / 2 + 1.7, -d.Lf - d.Md / 2, 7 + H, this.roof ? 4 : 7],
       [0, -H / 2 + 1.7, -d.Lf - d.Md / 2, 6 + H, f > 0 ? 3 : 0],
       [0, d.Hc - 0.4, d.Ld + s.hallL * 0.3, 9, this.roof ? 0 : 9],
-      [0, d.Hc - 0.4, this.floor === 0 ? d.zH1 + s.lobbyL / 2 : d.Ld + s.hallL * 0.8, this.floor === 0 ? 14 : 9, this.roof ? 0 : this.floor === 0 ? 16 : 7],
+      [0, d.Hc - 0.4, this.floor === 0 ? d.zH1 + s.lobbyL / 2 : d.Ld + s.hallL * 0.8, this.floor === 0 ? 14 : 9, this.roof ? 0 : this.floor === 0 ? (this.type === 'office' ? 9 : 12) : 7],
     ];
     for (const [x, y, z, dist, i] of rig) {
       const l = new THREE.PointLight(this.type === 'office' ? '#f4f6ff' : '#ffdcb0', i, dist, 2);
