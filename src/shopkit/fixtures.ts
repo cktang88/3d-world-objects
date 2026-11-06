@@ -116,7 +116,7 @@ export function cooler(k: Kit, doors: number, o: { frame?: string; header?: stri
 }
 
 /** Bodega checkout counter (local +z: customer side) with register, card reader, lotto, candy. */
-export function bodegaCounter(k: Kit, len: number, r: Rng, o: { color?: string; top?: string } = {}) {
+export function bodegaCounter(k: Kit, len: number, r: Rng, o: { color?: string; top?: string; lotto?: boolean; candy?: boolean } = {}) {
   const body = mat(o.color ?? '#7a1d1d', { rough: 0.55 });
   const top = mat(o.top ?? '#e6e1d6', { rough: 0.35 });
   const D = 0.65, Hc = 1.02;
@@ -124,12 +124,12 @@ export function bodegaCounter(k: Kit, len: number, r: Rng, o: { color?: string; 
   k.box(body, len, Hc - 0.14, D, 0, 0.1, 0);
   k.box(top, len + 0.06, 0.04, D + 0.1, 0, Hc - 0.04, 0.02);
   // scratched-up front: a band of sticker ads
-  k.face(printed(textTex('LOTTO  •  EBT ACCEPTED  •  ATM INSIDE', '#1e3f8a', '#ffffff', { w: 1024, h: 64 })), len * 0.9, 0.12, 0, 0.75, D / 2 + 0.003);
+  if (o.lotto) k.face(printed(textTex('LOTTO  •  EBT ACCEPTED  •  ATM INSIDE', '#1e3f8a', '#ffffff', { w: 1024, h: 64 })), len * 0.9, 0.12, 0, 0.75, D / 2 + 0.003);
   register(k, -len / 2 + 0.45, Hc, -0.05, Math.PI);
   cardReader(k, -len / 2 + 0.9, Hc, 0.18);
-  lotto(k, len / 2 - 0.45, Hc, -0.1);
+  if (o.lotto) lotto(k, len / 2 - 0.45, Hc, -0.1);
   // impulse buys on the counter front edge: candy and gum bins
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < (o.candy ? 3 : 0); i++) {
     const x = -len / 2 + 1.3 + i * 0.36;
     if (x > len / 2 - 0.8) break;
     k.box(mat(r.pick(['#d32f2f', '#1565c0', '#2e7d32', '#f9a825']), { rough: 0.5 }), 0.32, 0.06, 0.2, x, Hc, 0.18);

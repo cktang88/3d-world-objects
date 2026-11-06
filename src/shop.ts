@@ -13,7 +13,7 @@ import { dropTile, tinTile, textTex } from './shopkit/tex';
 import { LAYOUTS, type Style } from './shopkit/layouts';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
 import { DRINK } from './shopkit/fixtures';
-import { searchLibrary, loadLibraryModel, type LibraryEntry } from './libraries';
+import { searchLibrary, loadLibraryModel, type LibraryEntry, type LibraryQuery } from './libraries';
 
 /**
  * A shop interior, laid out per kind of shop after real NYC stores (docs/research/shops.md):
@@ -31,7 +31,7 @@ interface Slot {
 interface Loaded {
   /** a sand3d object (inspectable, may have an Objaverse original) */
   e?: RemoteEntry;
-  /** or a photo-scanned retail product from Google Scanned Objects */
+  /** or a real scanned product / prop from a model library (GSO, Poly Haven) */
   lib?: LibraryEntry;
   title: string;
   obj: THREE.Object3D;
@@ -45,18 +45,27 @@ interface Loaded {
 }
 
 /** product triangle budget per shop (the lab lowers it for software rendering) */
-/** Google Scanned Objects categories each kind of shop stocks */
-const GSO_CATS: Record<string, string[]> = {
-  deli: ['food and drink', 'bottles and cups'],
-  pharmacy: ['health and beauty', 'household', 'baby gear'],
-  electronics: ['electronics', 'media'],
-  toys: ['toy', 'board game'],
-  kitchen: ['kitchen', 'bottles and cups'],
-  sports: ['shoe', 'bag'],
-  stationery: ['media', 'board game'],
-  music: ['media'],
-  hardware: ['household'],
+/**
+ * Real scanned / photogrammetry products each kind of shop also stocks: Google Scanned Objects
+ * (CC BY) for packaged retail goods, Poly Haven (CC0) for tools, decor, plants, lamps, furniture.
+ */
+const LIB_QUERIES: Record<string, LibraryQuery[]> = {
+  deli: [{ source: 'gso', category: ['food and drink', 'bottles and cups'], maxSize: 0.6, limit: 9 }],
+  pharmacy: [{ source: 'gso', category: ['health and beauty', 'household', 'baby gear'], maxSize: 0.6, limit: 9 }],
+  electronics: [{ source: 'gso', category: ['electronics', 'media'], maxSize: 0.6, limit: 8 }, { source: 'polyhaven', category: 'electronics & appliances', maxSize: 0.8, limit: 3 }],
+  toys: [{ source: 'gso', category: ['toy', 'board game'], maxSize: 0.6, limit: 9 }],
+  kitchen: [{ source: 'gso', category: ['kitchen', 'bottles and cups'], maxSize: 0.6, limit: 7 }, { source: 'polyhaven', category: 'food & kitchen', maxSize: 0.6, limit: 3 }],
+  sports: [{ source: 'gso', category: ['shoe', 'bag'], maxSize: 0.6, limit: 7 }],
+  stationery: [{ source: 'gso', category: ['media', 'board game'], maxSize: 0.6, limit: 6 }, { source: 'polyhaven', category: 'office & stationery', maxSize: 0.6, limit: 3 }],
+  music: [{ source: 'gso', category: 'media', maxSize: 0.6, limit: 4 }],
+  hardware: [{ source: 'gso', category: 'household', maxSize: 0.6, limit: 4 }, { source: 'polyhaven', category: 'tools & equipment', maxSize: 1.0, limit: 5 }],
+  antiques: [{ source: 'polyhaven', category: ['decor & art', 'containers & storage', 'lighting', 'electronics & appliances'], maxSize: 1.0, limit: 10 }, { source: 'polyhaven', category: 'furniture', maxSize: 2.0, limit: 3 }],
+  garden: [{ source: 'polyhaven', category: 'nature', maxSize: 1.6, limit: 8 }],
+  furniture: [{ source: 'polyhaven', category: 'furniture', maxSize: 2.4, limit: 6 }],
+  lighting: [{ source: 'polyhaven', category: 'lighting', maxSize: 2.0, limit: 6 }],
+  machines: [{ source: 'polyhaven', category: ['tools & equipment', 'industrial & infrastructure'], maxSize: 1.5, limit: 5 }],
 };
+const LIB_NAME: Record<string, string> = { gso: 'Google Scanned Objects', polyhaven: 'Poly Haven', smithsonian: 'Smithsonian', khronos: 'Khronos' };
 
 export const SHOP_BUDGET = { tris: 2_500_000 };
 
@@ -237,8 +246,9 @@ export class ShopLevel implements Level {
   private fill(f: Filler, s: Seg, shopKinds: Kind[], r: Rng) {
     if (s.mode === 'single' || s.mode === 'ceil') return;
     const cooler = s.want === DRINK;
-    let pool = cooler ? COOLER_KINDS.map((n) => KINDS[n]) : shopKinds;
-    if (s.mode === 'hang') pool = pool.filter((k) => k.d <= 0.08).concat(KINDS.blister);
+    const guitars = !!s.want?.source.startsWith('guitar');
+    let pool = cooler ? COOLER_KINDS.map((n) => KINDS[n]) : guitars ? [KINDS.guitar] : shopKinds.filter((k) => k.geo !== 'guitar');
+    if (s.mode === 'hang' && !guitars) pool = pool.filter((k) => k.d <= 0.08).concat(KINDS.blister);
     if (!pool.length) return;
     const fits = pool.filter((k) => k.h <= s.h && k.w <= s.len && k.d <= s.depth + (s.mode === 'hang' ? 0.3 : 0));
     if (!fits.length) return;
@@ -283,14 +293,14 @@ export class ShopLevel implements Level {
           }
       }
     } else if (s.mode === 'hang') {
-      const cols = Math.max(1, Math.floor((s.len + 0.04) / (w + 0.05)));
+      const cols = Math.max(1, Math.floor((s.len + 0.04) / Math.max(w + 0.05, s.pitch ?? 0)));
       const rowsY = Math.max(1, Math.min(5, Math.floor((s.h + 0.06) / (h + 0.07))));
       const stepX = s.len / cols, stepY = s.h / rowsY;
       for (let i = 0; i < cols; i++) {
         const c = next();
         for (let j = 0; j < rowsY; j++) {
           if (r.chance(0.08)) continue;
-          for (let q = 0; q < 3; q++) {
+          for (let q = 0; q < (s.pitch ? 1 : 3); q++) {
             const pos = s.p.clone()
               .addScaledVector(right, -s.len / 2 + stepX * (i + 0.5))
               .addScaledVector(n, d / 2 + 0.03 + q * (d + 0.006));
@@ -316,10 +326,10 @@ export class ShopLevel implements Level {
 
   /** a handful of photo-scanned retail products for this kind of shop (cheap LOD, real size) */
   private async scanned(type: string, seed: number): Promise<Loaded[]> {
-    const cats = GSO_CATS[type];
-    if (!cats) return [];
+    const qs = LIB_QUERIES[type];
+    if (!qs) return [];
     try {
-      const hits = await searchLibrary({ source: 'gso', category: cats, maxSize: 0.6, limit: 10, seed: hashN(seed, 77) });
+      const hits = (await Promise.all(qs.map((q, i) => searchLibrary({ ...q, seed: hashN(seed, 77 + i) })))).flat();
       const objs = await Promise.all(hits.map((h) => loadLibraryModel(h, { quality: 'low', shadows: false }).catch(() => null)));
       return objs.flatMap((o, i): Loaded[] => {
         if (!o) return [];
@@ -375,7 +385,7 @@ export class ShopLevel implements Level {
       // generic packaging competes for shelf space (and wins coolers)
       if (filler && s.mode !== 'single' && s.mode !== 'ceil') {
         best = 'filler';
-        bestScore = (s.want === DRINK ? 3.4 : s.mode === 'hang' ? 1.5 : 2.0) + r.next() * 0.8;
+        bestScore = (s.want === DRINK ? 3.4 : s.want?.source.startsWith('guitar') ? 3.6 : s.mode === 'hang' ? 1.5 : 2.0) + r.next() * 0.8;
       }
       for (const p of ps) {
         const f = this.fit(p, s);
@@ -387,6 +397,8 @@ export class ShopLevel implements Level {
           score += Math.min(0.8, fill);
         }
         if (s.want && s.want.test(p.title)) score += 2.5;
+        // a stick on a guitar hook / a pin on an antique shelf reads as empty
+        if (s.pitch && p.dim.x * Math.min(1, f) < s.pitch * 0.45) score -= 2.5;
         if (p === prev && r.chance(0.35)) score += 1.2;
         score -= p.chunks * 0.12;
         score += r.next() * 0.6;
@@ -510,7 +522,7 @@ export class ShopLevel implements Level {
     const e = p.e;
     if (!e) {
       // scanned product: no program to inspect, but its credit shows when you look at it
-      for (const b of boxes) this.ports.push({ box: b, label: p.lib!.title, sub: `Google Scanned Objects · ${p.lib!.licence}`, target: 'inspect' });
+      for (const b of boxes) this.ports.push({ box: b, label: p.lib!.title, sub: `${LIB_NAME[p.lib!.source] ?? p.lib!.source} · ${p.lib!.licence}${p.lib!.author ? ` · by ${p.lib!.author}` : ''}`, target: 'inspect' });
       return rejected;
     }
     for (const b of boxes) this.portalFor(e, b);

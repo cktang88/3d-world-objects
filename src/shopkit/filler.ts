@@ -14,7 +14,7 @@ export interface Kind {
   w: number;
   h: number;
   d: number;
-  geo: 'box' | 'can' | 'bottle' | 'jar' | 'pot' | 'bag';
+  geo: 'box' | 'can' | 'bottle' | 'jar' | 'pot' | 'bag' | 'guitar';
   colors: string[];
   metal?: number;
   rough?: number;
@@ -37,7 +37,8 @@ export const KINDS: Record<string, Kind> = {
   electro: { name: 'electro', w: 0.16, h: 0.2, d: 0.08, geo: 'box', colors: ['#212121', '#fafafa', '#1565c0', '#37474f', '#c62828'] },
   toybox: { name: 'toybox', w: 0.3, h: 0.24, d: 0.1, geo: 'box', colors: ['#e53935', '#fdd835', '#1e88e5', '#43a047', '#ec407a', '#ff7043', '#7e57c2'] },
   book: { name: 'book', w: 0.16, h: 0.23, d: 0.03, geo: 'box', colors: ['#7a1d1d', '#1d3b5c', '#2e5c2e', '#c9b07a', '#3b2a1d', '#f5f0e6', '#212121'] },
-  pot: { name: 'pot', w: 0.18, h: 0.16, d: 0.18, geo: 'pot', colors: ['#b5651d', '#a0522d', '#c97d4a', '#e0d8c8', '#4a4a4a'] },
+  pot: { name: 'pot', w: 0.18, h: 0.3, d: 0.18, geo: 'pot', colors: ['#ffffff', '#f2fff0', '#fff2ea', '#e8f4e0'] },
+  guitar: { name: 'guitar', w: 0.38, h: 1.0, d: 0.1, geo: 'guitar', colors: ['#e8c48a', '#c8823a', '#8a3a1a', '#1a1a1a', '#f2f0ea', '#a01e1e', '#2a4a8a', '#d89a4a'], rough: 0.25 },
   carton6: { name: 'carton6', w: 0.2, h: 0.13, d: 0.13, geo: 'box', colors: ['#1565c0', '#c62828', '#2e7d32', '#212121', '#f9a825'] },
 };
 
@@ -48,7 +49,7 @@ export const SHOP_KINDS: Record<string, string[]> = {
   hardware: ['paint', 'toolbox', 'smallbox', 'blister', 'can', 'carton6'],
   electronics: ['electro', 'smallbox', 'blister'],
   toys: ['toybox', 'smallbox', 'blister'],
-  music: ['smallbox', 'blister', 'electro'],
+  music: ['smallbox', 'blister', 'electro', 'guitar'],
   kitchen: ['smallbox', 'jar', 'carton6', 'toolbox', 'electro'],
   lighting: ['smallbox', 'electro'],
   sports: ['smallbox', 'toybox', 'blister', 'bottle'],
@@ -122,6 +123,45 @@ function labelMat(rough: number, metal: number) {
 }
 
 const geos = new Map<string, THREE.BufferGeometry>();
+/** colour every vertex of a geometry (non-indexed, with uvs) for merging */
+function painted(g: THREE.BufferGeometry, rgb: [number, number, number]) {
+  const n = g.index ? g.toNonIndexed() : g;
+  const c = new Float32Array(n.getAttribute('position').count * 3);
+  for (let i = 0; i < c.length; i += 3) c.set(rgb, i);
+  n.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  if (!n.getAttribute('uv')) n.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n.getAttribute('position').count * 2), 2));
+  return n;
+}
+/** acoustic/electric guitar in a unit box (front +z): bouts, sound hole, neck, headstock */
+function guitarGeo() {
+  const parts: THREE.BufferGeometry[] = [];
+  const bout = (r: number, y: number, ry: number) => {
+    const b = new THREE.CylinderGeometry(r, r, 0.6, 20);
+    b.rotateX(Math.PI / 2);
+    b.scale(1, ry / r, 1);
+    b.translate(0, y, 0);
+    parts.push(painted(b, [1, 1, 1]));
+  };
+  bout(0.5, 0.2, 0.2);
+  bout(0.4, 0.42, 0.14);
+  const hole = new THREE.CircleGeometry(0.13, 16);
+  hole.translate(0, 0.36, 0.305);
+  parts.push(painted(hole, [0.06, 0.05, 0.04]));
+  const guard = new THREE.BoxGeometry(0.5, 0.025, 0.02);
+  guard.translate(0, 0.14, 0.31);
+  parts.push(painted(guard, [0.2, 0.18, 0.16]));
+  const neck = new THREE.BoxGeometry(0.13, 0.42, 0.25);
+  neck.translate(0, 0.74, 0.1);
+  parts.push(painted(neck, [0.42, 0.3, 0.2]));
+  const head = new THREE.BoxGeometry(0.2, 0.1, 0.22);
+  head.translate(0, 0.98, 0.08);
+  parts.push(painted(head, [0.25, 0.2, 0.16]));
+  const g = mergeGeometries(parts, false)!;
+  g.computeVertexNormals();
+  g.translate(0, -0.03, 0.2);
+  return g;
+}
+
 /** unit geometry for a kind (1 x 1 x 1 bounding box, base at y = 0) */
 function geometry(k: Kind['geo']) {
   let g = geos.get(k);
@@ -142,20 +182,41 @@ function geometry(k: Kind['geo']) {
   } else if (k === 'bottle') {
     const pts = [[0, 0], [0.5, 0], [0.5, 0.03], [0.5, 0.55], [0.42, 0.68], [0.2, 0.82], [0.16, 0.92], [0.18, 0.93], [0.18, 1], [0, 1]].map(([x, y]) => new THREE.Vector2(x, y - 0.5));
     g = new THREE.LatheGeometry(pts, 8);
+  } else if (k === 'guitar') {
+    g = guitarGeo();
+    geos.set(k, g);
+    return g;
   } else {
     // flower pot with a leafy plant on top
     const pts = [[0, 0], [0.36, 0], [0.5, 0.6], [0.5, 0.62], [0, 0.62]].map(([x, y]) => new THREE.Vector2(x, y - 0.5));
     const pot = new THREE.LatheGeometry(pts, 12);
-    const leaf = new THREE.IcosahedronGeometry(0.62, 1);
-    leaf.scale(1.1, 1.0, 1.1);
-    leaf.translate(0, 0.35, 0);
+    // a bushy plant: overlapping leaf clumps of different sizes
+    const clumps: THREE.BufferGeometry[] = [];
+    for (const [x, y, z, r] of [[0, 0.3, 0, 0.42], [0.22, 0.5, 0.08, 0.32], [-0.2, 0.55, -0.1, 0.34], [0.05, 0.78, 0.12, 0.26], [-0.08, 0.42, 0.25, 0.28]]) {
+      const c = new THREE.IcosahedronGeometry(r, 1);
+      const pos = c.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const k = 0.8 + 0.35 * Math.abs(Math.sin(i * 12.9898 + x * 7) * 43758.5453 % 1);
+        pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k, pos.getZ(i) * k);
+      }
+      c.translate(x, y, z);
+      clumps.push(c.toNonIndexed());
+    }
+    const leaf = mergeGeometries(clumps, false)!;
+    leaf.computeVertexNormals();
     // vertex colours: terracotta tint applies only to the pot; the plant is green
-    const pc = new Float32Array(pot.getAttribute('position').count * 3).fill(1);
+    const pc = new Float32Array(pot.getAttribute('position').count * 3);
+    for (let i = 0; i < pc.length; i += 3) {
+      pc[i] = 0.72;
+      pc[i + 1] = 0.38;
+      pc[i + 2] = 0.22;
+    }
     const lc = new Float32Array(leaf.getAttribute('position').count * 3);
     for (let i = 0; i < lc.length; i += 3) {
-      lc[i] = 0.18;
-      lc[i + 1] = 0.42;
-      lc[i + 2] = 0.16;
+      const v = Math.floor(i / 9) % 5; // per face
+      lc[i] = 0.12 + v * 0.03;
+      lc[i + 1] = 0.3 + v * 0.05;
+      lc[i + 2] = 0.1 + v * 0.015;
     }
     pot.setAttribute('color', new THREE.BufferAttribute(pc, 3));
     leaf.setAttribute('color', new THREE.BufferAttribute(lc, 3));
@@ -194,7 +255,7 @@ export class Filler {
     const out: THREE.InstancedMesh[] = [];
     for (const [name, list] of this.slots) {
       const k = KINDS[name];
-      const mat = k.geo === 'pot' ? new THREE.MeshStandardMaterial({ roughness: 0.9, vertexColors: true }) : labelMat(k.rough ?? 0.55, k.metal ?? 0);
+      const mat = k.geo === 'pot' || k.geo === 'guitar' ? new THREE.MeshStandardMaterial({ roughness: k.rough ?? 0.9, vertexColors: true }) : labelMat(k.rough ?? 0.55, k.metal ?? 0);
       const im = new THREE.InstancedMesh(geometry(k.geo), mat, list.length);
       list.forEach((s, i) => {
         im.setMatrixAt(i, s.m);

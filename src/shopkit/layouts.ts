@@ -147,7 +147,7 @@ const deli: Layout = {
     // counter: customer side faces the aisle
     const cx = xi - 1.45;
     k.at(cx, zf - 2.45, -Math.PI / 2);
-    F.bodegaCounter(k, 2.6, r);
+    F.bodegaCounter(k, 2.6, r, { lotto: true, candy: true });
     // water cases and the cat
     k.at(cx - 1.2, zf - 0.7, 0);
     F.boxStack(k, r, 0.8, 0.5, 1.0, { water: true });
@@ -228,7 +228,7 @@ const pharmacy: Layout = {
     }
     // checkout by the door
     k.at(xi - 2.0, zf - 2.2, Math.PI);
-    F.bodegaCounter(k, 2.4, r, { color: '#f0f0ee', top: '#d0d0cc' });
+    F.bodegaCounter(k, 2.4, r, { color: '#f0f0ee', top: '#d0d0cc', candy: true });
     k.at(xi - 2.0, zf - 1.3, 0);
     F.gondola(k, 1.6, { height: 1.2, shelves: 4, double: false, strip: red, messy: 0.2 });
     troffers(k, st);
@@ -518,7 +518,7 @@ const furniture: Layout = {
   style(r) {
     return {
       W: r.range(12, 15), D: r.range(16, 20), H: 3.2, ceil: 'drop',
-      floor: pbrS(r.pick(['floor_laminate', 'floor_parquet']), { color: '#b07a50', rough: 0.55 }),
+      floor: pbrS(r.pick(['floor_laminate', 'floor_parquet']), { color: '#b07a50', rough: 0.85 }),
       wall: paint(r.pick(['#d98a3a', '#5a6470', '#e8e2d6', '#3d5a6a'])),
       env: { ...WARM, hemi: { sky: '#fff2e0', ground: '#5a4a3a', intensity: 0.5 }, exposure: 0.95 },
     };
@@ -566,8 +566,10 @@ const antiques: Layout = {
       F.tallWall(k, D - 5.5, 2.5, { shelves: 6, color: '#3a2414', pitch: 0.32 });
     }
     // crowded middle: curio cabinets, old tables heaped with things, rugs
-    k.at(0, 0);
-    F.rug(k, W - 2.4, D - 4, r.int(0, 50));
+    for (let z = zb + 3; z < zf - 3; z += 3.6) {
+      k.at(r.range(-0.3, 0.3), z, r.range(-0.08, 0.08));
+      F.rug(k, Math.min(W - 2.6, 3.4), 2.6, r.int(0, 50));
+    }
     const spots = [[-1.2, zb + 2.6], [1.1, zb + 3.6], [-1.0, zb + 5.6], [1.3, zb + 6.8], [-1.2, zb + 8.8], [1.0, zb + 10.0]];
     spots.forEach(([x, z], i) => {
       if (z > zf - 3.2) return;
