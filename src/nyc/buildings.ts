@@ -38,6 +38,18 @@ export interface Hull {
   side: Side;
   type: BType;
   tiers?: { rect: Rect; y0: number; y1: number }[];
+  /** what the far-city proxy (hlod.ts) paints: the facade's own colour, trim, surface class and window rhythm */
+  look?: HullLook;
+}
+export interface HullLook {
+  wall: string;
+  trim: string;
+  /** masonry = punched windows, glass = curtain wall, panel = office panels with punched windows */
+  kind: 'masonry' | 'glass' | 'panel';
+  /** storey height, ground-floor (storefront/lobby) height, window bay width (m) */
+  storey: number;
+  ground: number;
+  bay: number;
 }
 
 export interface BCtx {
@@ -1084,7 +1096,9 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   }
   rooftopClutter(stat, fine, r, roofY, rng, type === 'brownstone' ? rng.int(0, 1) : rng.int(1, 3));
   colliders.push({ ...r });
-  ctx.hulls.push({ rect: { ...r }, h, top: roofY, side: front, type });
+  // [hlod look] the proxy's facade colour, class and window rhythm
+  const look: HullLook = { wall, trim: '#' + trimC.getHexString(), kind: style === 'glass' ? 'glass' : style === 'panel' ? 'panel' : 'masonry', storey: fh, ground, bay: type === 'castiron' ? 3.1 : type === 'tenement' ? 1.95 : type === 'brownstone' ? 2.2 : style === 'panel' ? 3.1 : 2.3 };
+  ctx.hulls.push({ rect: { ...r }, h, top: roofY, side: front, type, look });
 }
 
 /** two entrance portals in each other's way (more than 0.3 m both ways) */
@@ -1197,7 +1211,8 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
   const spandrel = mat(spandrelHex, { rough: 0.25, metal: 0.7 });
   const spandrelC = new THREE.Color(spandrelHex);
   const panelM = facadeMat('panel', rng.int(0, 2));
-  const panelTint = softTint(rng.pick(['#b8b0a2', '#9a8c7c', '#c9c4b8', '#8a8680']), 0.4);
+  const panelBase = rng.pick(['#b8b0a2', '#9a8c7c', '#c9c4b8', '#8a8680']);
+  const panelTint = softTint(panelBase, 0.4);
   void fm;
   let rr = { ...r };
   let y = 0;
@@ -1236,5 +1251,7 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
   }
   if (rng.chance(0.5)) C(stat, M.iron(), 0.12, rng.range(8, 20), (rr.minX + rr.maxX) / 2, y, (rr.minZ + rr.maxZ) / 2);
   colliders.push({ ...r });
-  ctx.hulls.push({ rect: { ...r }, h: y, top: hullTiers[0].y1, side: front, type: 'tower', tiers: hullTiers });
+  // [hlod look] curtain wall (spandrel glass) or punched office panels, 3.6 m floors over a 7.2 m lobby
+  const look: HullLook = { wall: curtain ? spandrelHex : panelBase, trim: '#' + (finM as THREE.MeshStandardMaterial).color.getHexString(), kind: curtain ? 'glass' : 'panel', storey: 3.6, ground: lobby, bay: 1.5 };
+  ctx.hulls.push({ rect: { ...r }, h: y, top: hullTiers[0].y1, side: front, type: 'tower', tiers: hullTiers, look });
 }

@@ -3,7 +3,7 @@ import { AX, SZ, LX, LZ } from './common';
 import { getNight, litWindows, setCascadeLayers } from '../lighting';
 import { hashN } from '../rng';
 import type { HeightGrid } from './occlusion';
-import type { Hull } from './buildings';
+import type { Hull, HullLook } from './buildings';
 
 /**
  * Far-city proxies (HLOD), what you see down every avenue and from the roofs.
@@ -22,7 +22,7 @@ import type { Hull } from './buildings';
  */
 
 /** surface kinds, in the `aKind` attribute */
-const K = { masonry: 0, glass: 1, roof: 2, trim: 3, bits: 4, store: 5 } as const;
+const K = { masonry: 0, glass: 1, roof: 2, trim: 3, bits: 4, store: 5, panel: 6 } as const;
 
 const PALETTE: Record<string, string[]> = {
   brownstone: ['#6e4632', '#7a5038', '#5e3c2c', '#83604a'],
@@ -41,8 +41,16 @@ class GeoBuilder {
   uv: number[] = [];
   col: number[] = [];
   kind: number[] = [];
+  /** per vertex: window bay width, storey height, ground-floor height (m), building seed */
+  win: number[] = [];
   idx: number[] = [];
   private c = new THREE.Color();
+  private w = [2.4, 3.2, 4.2, 0];
+  /** window rhythm + per-building seed for the next quads */
+  rhythm(bay: number, storey: number, ground: number, seed: number) {
+    this.w = [bay, storey, ground, (seed % 9973) / 9973];
+    return this;
+  }
   color(hex: string, mul = 1) {
     this.c.set(hex).convertSRGBToLinear().multiplyScalar(mul);
     return this;
@@ -57,6 +65,7 @@ class GeoBuilder {
       this.uv.push(us[i], p[1]);
       this.col.push(this.c.r, this.c.g, this.c.b);
       this.kind.push(kind);
+      this.win.push(this.w[0], this.w[1], this.w[2], this.w[3]);
     });
     this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
@@ -102,6 +111,7 @@ class GeoBuilder {
     g.setAttribute('uv', new THREE.Float32BufferAttribute(ok ? this.uv : [0, 0, 0, 0, 0, 0], 2));
     g.setAttribute('color', new THREE.Float32BufferAttribute(ok ? this.col : [0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
     g.setAttribute('aKind', new THREE.Float32BufferAttribute(ok ? this.kind : [0, 0, 0], 1));
+    g.setAttribute('aWin', new THREE.Float32BufferAttribute(ok ? this.win : new Array(12).fill(1), 4));
     g.setIndex(ok ? this.idx : [0, 1, 2]);
     return g;
   }
@@ -115,17 +125,24 @@ export function hullGeometry(hulls: Hull[], seed: number) {
     const hsh = hashN(seed, Math.round(r.minX * 3), Math.round(r.minZ * 3));
     const type = hl.type;
     const pal = PALETTE[type] ?? PALETTE.grid;
-    const wallHex = pal[hsh % pal.length];
-    const glass = type === 'tower';
+    // the building's own facade colour, class and window rhythm when the architecture recorded them (Hull.look)
+    const look: HullLook | undefined = hl.look;
+    const wallHex = look?.wall ?? pal[hsh % pal.length];
+    const glass = look ? look.kind === 'glass' : type === 'tower';
+    const wallKind = glass ? K.glass : look?.kind === 'panel' ? K.panel : K.masonry;
+    const trimHex = look?.trim ?? TRIM[type] ?? TRIM.grid;
+    b.rhythm(look?.bay ?? (glass ? 1.5 : 2.4), look?.storey ?? (type === 'tower' ? 3.6 : 3.2), look?.ground ?? (type === 'tower' ? 7.2 : 4.2), hsh);
     const masses = hl.tiers?.length ? hl.tiers : [{ rect: r, y0: 0, y1: hl.h }];
     masses.forEach((m, i) => {
       const { minX: x0, maxX: x1, minZ: z0, maxZ: z1 } = m.rect;
-      b.color(wallHex);
-      b.box(x0, x1, z0, z1, m.y0, m.y1, glass ? K.glass : K.masonry, true, glass ? '#3c4246' : '#4a4642');
+      // glass: the palette fallback is a sky-blue tint, darkened like a pane; a recorded spandrel colour is used as is
+      if (look?.kind === 'glass') b.color(mixHex(wallHex, '#7d8c99', 0.65)); // spandrels + glazing (sky-tinted at range)
+      else b.color(wallHex, glass ? 0.55 : 1);
+      b.box(x0, x1, z0, z1, m.y0, m.y1, wallKind, true, glass ? '#3c4246' : '#4a4642');
       // cornice / parapet band at the top of each mass
-      b.color(TRIM[type] ?? TRIM.grid, glass ? 0.8 : 1);
+      b.color(trimHex, glass ? 0.8 : 1);
       const o = glass ? 0.05 : 0.35, t = glass ? 0.5 : 0.9;
-      b.box(x0 - o, x1 + o, z0 - o, z1 + o, m.y1 - t, m.y1 + (glass ? 0.6 : 0.25), K.trim, true, TRIM[type] ?? TRIM.grid);
+      b.box(x0 - o, x1 + o, z0 - o, z1 + o, m.y1 - t, m.y1 + (glass ? 0.6 : 0.25), K.trim, true, trimHex);
       // a base course under the lowest mass of masonry buildings
       if (i === 0 && !glass) {
         b.color(wallHex, 0.7);
@@ -176,7 +193,7 @@ export function hlodGeometry(grid: HeightGrid, seed: number) {
       const hsh = hashN(seed, Math.round(x0 * 0.2), Math.round(z0 * 0.2), Math.round(y));
       const tall = y > 45;
       const pal = tall ? PALETTE.tower : PALETTE.grid;
-      b.color(pal[hsh % pal.length]);
+      b.color(pal[hsh % pal.length], tall ? 0.55 : 1).rhythm(tall ? 1.5 : 2.4, tall ? 3.6 : 3.2, tall ? 7.2 : 4.2, hsh);
       b.box(x0, x1, z0, z1, 0, y, tall ? K.glass : K.masonry, true, '#4a4642');
     }
   return b.build();
@@ -205,51 +222,56 @@ function hlodMaterial() {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uNight = uNight;
     sh.uniforms.uLit = uLit;
-    sh.vertexShader = 'attribute float aKind;\nvarying float vKind;\nvarying vec2 vFac;\nvarying vec3 vWPos;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    sh.vertexShader = 'attribute float aKind;\nattribute vec4 aWin;\nvarying float vKind;\nvarying vec2 vFac;\nvarying vec3 vWPos;\nvarying vec4 vWin;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       vKind = aKind;
+      vWin = aWin;
       vFac = uv;
       #ifdef USE_BATCHING
         vWPos = (modelMatrix * batchingMatrix * vec4(transformed, 1.0)).xyz;
       #else
         vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
       #endif`);
-    sh.fragmentShader = 'uniform float uNight;\nuniform float uLit;\nvarying float vKind;\nvarying vec2 vFac;\nvarying vec3 vWPos;\n' + sh.fragmentShader
+    sh.fragmentShader = 'uniform float uNight;\nuniform float uLit;\nvarying float vKind;\nvarying vec2 vFac;\nvarying vec3 vWPos;\nvarying vec4 vWin;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         float hRough = -1.0, hMetal = -1.0;
         vec3 hEmit = vec3(0.0);
         {
           int kind = int(vKind + 0.5);
-          // per-building seed: the facade's world position at metre scale
-          vec3 bseed = floor(vWPos / 40.0);
-          if (kind == 0 || kind == 5) {
-            // masonry: punched windows (bay 2.4 m, storey 3.2 m), storefront band below 4.2 m
+          // per-building seed and window rhythm from the vertex (Hull.look: bay, storey, ground floor)
+          float bseedF = vWin.w * 977.0;
+          float bay = max(vWin.x, 0.8), storey = max(vWin.y, 2.5), gnd = max(vWin.z, 1.0);
+          if (kind == 0 || kind == 5 || kind == 6) {
+            // masonry: punched windows; panel (office): wide ribbon-ish windows; ground floor: storefront / lobby band
+            bool office = kind == 6;
             float u = vFac.x, v = vFac.y;
-            bool store = kind == 5 || v < 4.2;
-            vec2 cellId = store ? vec2(floor(u / 4.0), 0.0) : floor(vec2(u / 2.4, (v - 4.2) / 3.2));
-            vec2 f = store ? vec2(fract(u / 4.0), v / 4.2) : fract(vec2(u / 2.4, (v - 4.2) / 3.2));
-            bool win = store ? (f.x > 0.08 && f.x < 0.92 && f.y > 0.12 && f.y < 0.78) : (f.x > 0.25 && f.x < 0.75 && f.y > 0.22 && f.y < 0.8);
+            bool store = kind == 5 || v < gnd;
+            vec2 cellId = store ? vec2(floor(u / 4.0), 0.0) : floor(vec2(u / bay, (v - gnd) / storey));
+            vec2 f = store ? vec2(fract(u / 4.0), v / gnd) : fract(vec2(u / bay, (v - gnd) / storey));
+            bool win = store ? (f.x > 0.08 && f.x < 0.92 && f.y > 0.12 && f.y < 0.78)
+              : office ? (f.x > 0.1 && f.x < 0.9 && f.y > 0.25 && f.y < 0.78)
+              : (f.x > 0.25 && f.x < 0.75 && f.y > 0.22 && f.y < 0.8);
             if (win) {
-              float wh = fract(sin(dot(vec3(cellId, dot(bseed, vec3(1.0, 7.0, 13.0))), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+              float wh = fract(sin(dot(vec3(cellId, bseedF), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
               float wh2 = fract(wh * 91.17 + 0.31);
               diffuseColor.rgb = mix(vec3(0.05, 0.06, 0.07), vec3(0.12, 0.14, 0.17), wh2 * 0.5);
               hRough = 0.15; hMetal = 0.6;
-              float on = step(wh, store ? max(uLit, 0.5) : uLit) * uNight;
+              float on = step(wh, store ? max(uLit, 0.5) : office ? uLit * 0.8 : uLit) * uNight;
               vec3 warm = mix(vec3(1.0, 0.45, 0.14), vec3(1.0, 0.7, 0.4), wh2);
-              vec3 tint = fract(wh2 * 13.7) > 0.88 ? vec3(0.45, 0.6, 1.0) : warm;
+              vec3 tint = office ? vec3(0.85, 0.88, 0.8) : fract(wh2 * 13.7) > 0.88 ? vec3(0.45, 0.6, 1.0) : warm;
               hEmit = tint * on * (0.25 + 0.45 * wh2);
             } else if (!store && f.y < 0.06) {
               diffuseColor.rgb *= 0.86; // storey / sill line
             }
           } else if (kind == 1) {
             // glass curtain wall: mullions 1.5 m, floors 3.8 m, reflective panes
-            vec2 f = fract(vec2(vFac.x / 1.5, vFac.y / 3.8));
-            vec2 cellId = floor(vec2(vFac.x / 1.5, vFac.y / 3.8));
+            vec2 f = fract(vec2(vFac.x / bay, vFac.y / storey));
+            vec2 cellId = floor(vec2(vFac.x / bay, vFac.y / storey));
             bool frame = f.x < 0.06 || f.y < 0.1;
-            if (frame) { diffuseColor.rgb *= 0.55; hRough = 0.5; hMetal = 0.7; }
+            if (frame) { diffuseColor.rgb *= 0.7; hRough = 0.5; hMetal = 0.7; }
             else {
-              diffuseColor.rgb *= 0.55;
-              hRough = 0.06; hMetal = 0.92;
-              float wh = fract(sin(dot(vec3(cellId, dot(bseed, vec3(1.0, 7.0, 13.0))), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+              // panes: reflective but not a mirror, so the facade's own tone still reads at range
+              hRough = 0.12; hMetal = 0.6;
+              float wh = fract(sin(dot(vec3(cellId, bseedF), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
               hEmit = vec3(0.9, 0.85, 0.75) * step(wh, uLit * 0.7) * uNight * 0.35;
             }
           } else if (kind == 2) {
@@ -260,7 +282,7 @@ function hlodMaterial() {
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n if (hMetal >= 0.0) metalnessFactor = hMetal;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += hEmit;');
   };
-  m.customProgramCacheKey = () => 'nyc-hlod-2';
+  m.customProgramCacheKey = () => 'nyc-hlod-3';
   return (drawMat = m);
 }
 
@@ -374,6 +396,10 @@ export class CityHlod {
     this.ids.delete(id);
     this.cnt--;
   }
+}
+
+function mixHex(a: string, b: string, t: number) {
+  return '#' + new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString();
 }
 
 function shift(r: { minX: number; maxX: number; minZ: number; maxZ: number }, dx: number, dz: number) {

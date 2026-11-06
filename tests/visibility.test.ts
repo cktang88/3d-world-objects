@@ -139,7 +139,39 @@ test('real block: height grid finds the buildings and the HLOD proxy is cheap', 
   expect(hulls.length > 0, 'block has no building hulls');
   const hg = hullGeometry(hulls, 1);
   between(hg.index!.count / 3, 50, 8000, 'hull HLOD triangles per chunk');
-  for (const a of ['position', 'normal', 'uv', 'color', 'aKind']) expect(!!hg.getAttribute(a) && !!geo.getAttribute(a), `HLOD geometries must share attribute ${a} (one BatchedMesh)`);
+  for (const a of ['position', 'normal', 'uv', 'color', 'aKind', 'aWin']) expect(!!hg.getAttribute(a) && !!geo.getAttribute(a), `HLOD geometries must share attribute ${a} (one BatchedMesh)`);
+});
+
+test('HLOD proxies wear their building: facade colour, surface class and window rhythm from Hull.look', () => {
+  const hulls: Hull[] = [];
+  for (const [cx, cz] of [[0, 0], [1, 0], [0, 1], [2, 1]]) hulls.push(...((nycChunk(1, cx, cz) as unknown as { hulls?: Hull[] }).hulls ?? []));
+  const withLook = hulls.filter((h) => h.look);
+  expect(withLook.length >= hulls.length * 0.9, `${withLook.length}/${hulls.length} hulls record their look`);
+  const kinds = new Set(withLook.map((h) => h.look!.kind));
+  expect(kinds.has('masonry'), `facade classes seen: ${[...kinds]}`);
+  for (const h of withLook) {
+    between(h.look!.storey, 2.8, 4.2, `${h.type} storey height`);
+    between(h.look!.bay, 1.2, 3.5, `${h.type} window bay`);
+    between(h.look!.ground, 1.0, 8, `${h.type} ground floor`);
+  }
+  // each building's proxy walls take that building's colour (not a palette pick), and its rhythm
+  const col = new THREE.Color();
+  let checked = 0, distinctSeeds = new Set<number>();
+  for (const h of withLook.slice(0, 40)) {
+    const g = hullGeometry([h], 7);
+    const c = g.getAttribute('color'), k = g.getAttribute('aKind'), w = g.getAttribute('aWin');
+    col.set(h.look!.wall).convertSRGBToLinear();
+    if (h.look!.kind === 'glass') continue; // glass mixes the spandrel with glazing tone
+    const wallKind = h.look!.kind === 'panel' ? 6 : 0;
+    const i = [...Array(k.count).keys()].find((j) => k.getX(j) === wallKind)!;
+    expect(i !== undefined, `${h.type}: no wall vertices of kind ${wallKind}`);
+    expect(Math.abs(c.getX(i) - col.r) + Math.abs(c.getY(i) - col.g) + Math.abs(c.getZ(i) - col.b) < 0.01, `${h.type}: proxy wall colour != facade ${h.look!.wall}`);
+    expect(Math.abs(w.getX(i) - h.look!.bay) < 1e-4 && Math.abs(w.getY(i) - h.look!.storey) < 1e-4, `${h.type}: proxy window rhythm != facade`);
+    distinctSeeds.add(w.getW(i));
+    checked++;
+  }
+  expect(checked >= 10, `checked ${checked} proxies`);
+  expect(distinctSeeds.size >= checked * 0.5, `per-building window seeds: ${distinctSeeds.size} distinct of ${checked}`);
 });
 
 test('chunk builds are time-sliced: many short steps, same result as the one-go build', () => {
