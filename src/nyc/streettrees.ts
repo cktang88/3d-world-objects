@@ -716,11 +716,167 @@ export function treeMesh(species: Species, variant: number, lod: 'hi' | 'lo' = '
 }
 void mergeGeometries;
 
+// ---------------------------------------------------------------- impostors
+
+/**
+ * Far trees are camera-facing cards cut from an atlas baked at runtime: every species × variant
+ * rendered from 8 azimuths (ortho, ambient-lit so the result is ~albedo) into one render target.
+ * The card shader picks the two views nearest the camera's angle around the tree and blends them,
+ * relights the card with a soft normal, and dithers in over the switch distance.
+ */
+const IMP_VIEWS = 8, IMP_FRAME = 128, IMP_COLS = 16;
+const IMP_MODELS = SPECIES.length * TREE_VARIANTS;
+let impRT: THREE.WebGLRenderTarget | null = null;
+let impReady = false, impScheduled = false;
+const impSize = new Float32Array(IMP_MODELS); // card size (m) per model
+const modelIndex = (sp: Species, v: number) => TILE[sp] * TREE_VARIANTS + v;
+
+function bakeImpostors(renderer: THREE.WebGLRenderer) {
+  const rows = Math.ceil((IMP_MODELS * IMP_VIEWS) / IMP_COLS);
+  const rt = new THREE.WebGLRenderTarget(IMP_COLS * IMP_FRAME, rows * IMP_FRAME, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight('#ffffff', Math.PI)); // radiance = albedo: the card relights it
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
+  const prevRT = renderer.getRenderTarget();
+  const prevClear = renderer.getClearColor(new THREE.Color());
+  const prevAlpha = renderer.getClearAlpha();
+  const prevAuto = renderer.autoClear;
+  const prevShadow = renderer.shadowMap.autoUpdate;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.autoClear = false;
+  renderer.setClearColor(0x000000, 0);
+  renderer.setRenderTarget(rt);
+  renderer.clear();
+  for (const sp of SPECIES)
+    for (let v = 0; v < TREE_VARIANTS; v++) {
+      const mi = modelIndex(sp, v);
+      const tree = treeMesh(sp, v, 'hi');
+      tree.traverse((o) => { (o as THREE.Mesh).castShadow = false; });
+      scene.add(tree);
+      const box = new THREE.Box3().setFromObject(tree);
+      const half = Math.max(box.max.x, -box.min.x, box.max.z, -box.min.z);
+      const S = Math.max(half * 2, box.max.y) * 1.04;
+      impSize[mi] = S;
+      cam.left = -S / 2; cam.right = S / 2; cam.top = S; cam.bottom = 0;
+      cam.updateProjectionMatrix();
+      for (let k = 0; k < IMP_VIEWS; k++) {
+        const a = (k / IMP_VIEWS) * Math.PI * 2;
+        cam.position.set(Math.sin(a) * 60, 0, Math.cos(a) * 60);
+        cam.lookAt(0, 0, 0);
+        const f = mi * IMP_VIEWS + k;
+        const x = (f % IMP_COLS) * IMP_FRAME, y = Math.floor(f / IMP_COLS) * IMP_FRAME;
+        rt.viewport.set(x, y, IMP_FRAME, IMP_FRAME);
+        rt.scissor.set(x, y, IMP_FRAME, IMP_FRAME);
+        rt.scissorTest = true;
+        renderer.setRenderTarget(rt);
+        renderer.render(scene, cam);
+      }
+      scene.remove(tree);
+    }
+  rt.scissorTest = false;
+  rt.viewport.set(0, 0, rt.width, rt.height);
+  renderer.setRenderTarget(prevRT);
+  renderer.setClearColor(prevClear, prevAlpha);
+  renderer.autoClear = prevAuto;
+  renderer.shadowMap.autoUpdate = prevShadow;
+  impRT = rt;
+  impReady = true;
+  if (impMat) impMat.uniforms.uImp.value = rt.texture;
+}
+/** bake once, outside any render call, the first time a tree batch is drawn */
+function scheduleImpostors(renderer: THREE.WebGLRenderer) {
+  if (impScheduled) return;
+  impScheduled = true;
+  setTimeout(() => bakeImpostors(renderer), 0);
+}
+
+let impMat: THREE.ShaderMaterial | null = null;
+function impostorMat() {
+  if (impMat) return impMat;
+  const rows = Math.ceil((IMP_MODELS * IMP_VIEWS) / IMP_COLS);
+  impMat = new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, THREE.UniformsLib.lights, { uImp: { value: null }, uSize: { value: impSize } }]),
+    lights: true,
+    fog: true,
+    vertexShader: `
+      #include <common>
+      #include <fog_pars_vertex>
+      attribute vec4 aImp; // model index, yaw, fade, size scale
+      uniform float uSize[${IMP_MODELS}];
+      varying vec2 vUv;
+      varying vec3 vNrm;
+      varying float vModel, vView, vFade;
+      void main() {
+        vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        vec2 toCam = cameraPosition.xz - origin.xz;
+        float len = max(length(toCam), 1e-3);
+        vec2 dir = toCam / len;
+        vec3 right = vec3(dir.y, 0.0, -dir.x);
+        float S = uSize[int(aImp.x + 0.5)] * aImp.w;
+        vec3 world = origin + right * position.x * S + vec3(0.0, position.y * S, 0.0);
+        // view index: camera azimuth in the tree's own frame (bake views look from +z rotating to +x)
+        float az = atan(dir.x, dir.y) - aImp.y;
+        vView = fract(az / 6.2831853) * ${IMP_VIEWS}.0;
+        vModel = aImp.x;
+        vFade = aImp.z;
+        vUv = uv;
+        vNrm = normalize((viewMatrix * vec4(normalize(vec3(dir.x, 0.8, dir.y)), 0.0)).xyz);
+        vec4 mvPosition = viewMatrix * vec4(world, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      #include <common>
+      #include <fog_pars_fragment>
+      #include <lights_pars_begin>
+      uniform sampler2D uImp;
+      varying vec2 vUv;
+      varying vec3 vNrm;
+      varying float vModel, vView, vFade;
+      vec4 frame(float f) {
+        float id = vModel * ${IMP_VIEWS}.0 + mod(f, ${IMP_VIEWS}.0);
+        vec2 cell = vec2(mod(id, ${IMP_COLS}.0), floor(id / ${IMP_COLS}.0));
+        return texture2D(uImp, (cell + vUv) / vec2(${IMP_COLS}.0, ${rows}.0));
+      }
+      void main() {
+        if (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) > vFade) discard;
+        float v0 = floor(vView);
+        vec4 c = mix(frame(v0), frame(v0 + 1.0), vView - v0);
+        if (c.a < 0.45) discard;
+        vec3 albedo = c.rgb / max(c.a, 1e-3);
+        // simple relighting: hemisphere/ambient + directional lights
+        vec3 irr = ambientLightColor;
+        #if NUM_HEMI_LIGHTS > 0
+          for (int i = 0; i < NUM_HEMI_LIGHTS; i++) irr += getHemisphereLightIrradiance(hemisphereLights[i], vNrm);
+        #endif
+        #if NUM_DIR_LIGHTS > 0
+          for (int i = 0; i < NUM_DIR_LIGHTS; i++) irr += directionalLights[i].color * (0.35 + 0.65 * max(dot(vNrm, directionalLights[i].direction), 0.0));
+        #endif
+        // 0.58: the bake has no self-shadowing inside the crown (matched by eye to the meshes)
+        gl_FragColor = vec4(albedo * irr * RECIPROCAL_PI * 0.58, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+  });
+  impMat.uniforms.uSize.value = impSize;
+  if (impRT) impMat.uniforms.uImp.value = impRT.texture;
+  return impMat;
+}
+const impQuad = (() => {
+  const g = new THREE.PlaneGeometry(1, 1);
+  g.translate(0, 0.5, 0);
+  return g;
+})();
+
 // ---------------------------------------------------------------- per-chunk batching
 
 /** per-tree distance (m) where a tree switches to its far model; hysteresis avoids flicker */
 export const TREE_LOD_DIST = 75;
 const LOD_IN = (TREE_LOD_DIST - 4) ** 2, LOD_OUT = (TREE_LOD_DIST + 4) ** 2;
+/** impostors fade in over [IMP_NEAR, IMP_FAR]; beyond IMP_FAR the mesh is hidden */
+const impParam = typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('impnear') ?? NaN) : NaN; // labs: ?impnear=<m>
+export const IMP_NEAR = Number.isFinite(impParam) ? impParam : 118, IMP_FAR = IMP_NEAR + 14;
 
 interface ChunkTrees {
   bark: THREE.BatchedMesh;
@@ -728,7 +884,8 @@ interface ChunkTrees {
   /** geometry ids per model key + lod, in each batched mesh */
   geo: Map<string, { bark: number; leaves: number }>;
   verts: { bark: number; leaves: number; barkI: number; leavesI: number };
-  trees: { bark: number; leaves: number; key: string; far: boolean; pos: THREE.Vector3; world: THREE.Vector3 | null }[];
+  trees: { bark: number; leaves: number; key: string; far: boolean; imp: number; model: number; yaw: number; scale: number; meshOn: boolean; pos: THREE.Vector3; world: THREE.Vector3 | null }[];
+  impostors: THREE.InstancedMesh | null;
 }
 
 const geoCount = (g: THREE.BufferGeometry) => [g.getAttribute('position').count, g.index ? g.index.count : 0] as const;
@@ -759,36 +916,100 @@ function chunkTrees(group: THREE.Object3D): ChunkTrees {
     geo: new Map(),
     verts: { bark: 0, leaves: 0, barkI: 0, leavesI: 0 },
     trees: [],
+    impostors: null,
   };
   const c = ct;
-  // per-tree LOD from the main camera, before the batch builds its draw list
-  const base = THREE.BatchedMesh.prototype.onBeforeRender;
+  // per-tree LOD from the main camera. A draw-less driver mesh (empty draw range, so no draw call)
+  // runs first every frame, even when the batches themselves are hidden.
   const camPos = new THREE.Vector3();
-  const lodUpdate = (camera: THREE.Camera) => {
+  const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  const lodUpdate = (renderer: THREE.WebGLRenderer, camera: THREE.Camera) => {
+    tickWind();
+    if (!impReady) scheduleImpostors(renderer);
     camPos.setFromMatrixPosition(camera.matrixWorld);
+    let anyMesh = false, anyImp = false, impDirty = false;
+    const im = c.impostors;
     for (const t of c.trees) {
       if (!t.world) t.world = t.pos.clone().applyMatrix4(c.leaves.matrixWorld);
       const d = t.world.distanceToSquared(camPos);
       const far = t.far ? d > LOD_IN : d > LOD_OUT;
-      if (far === t.far) continue;
-      t.far = far;
-      const g = c.geo.get(`${t.key}|${far ? 'lo' : 'hi'}`)!;
-      c.bark.setGeometryIdAt(t.bark, g.bark);
-      c.leaves.setGeometryIdAt(t.leaves, g.leaves);
+      if (far !== t.far) {
+        t.far = far;
+        const g = c.geo.get(`${t.key}|${far ? 'lo' : 'hi'}`)!;
+        c.bark.setGeometryIdAt(t.bark, g.bark);
+        c.leaves.setGeometryIdAt(t.leaves, g.leaves);
+      }
+      // impostor band: fade the card in, then drop the mesh
+      const dist = Math.sqrt(d);
+      const fade = impReady && im ? THREE.MathUtils.clamp((dist - IMP_NEAR) / (IMP_FAR - IMP_NEAR), 0, 1) : 0;
+      const meshOn = fade < 1;
+      if (meshOn !== t.meshOn) {
+        t.meshOn = meshOn;
+        c.bark.setVisibleAt(t.bark, meshOn);
+        c.leaves.setVisibleAt(t.leaves, meshOn);
+      }
+      if (meshOn) anyMesh = true;
+      if (im && fade > 0) anyImp = true;
+      if (im) {
+        const attr = im.geometry.getAttribute('aImp') as THREE.InstancedBufferAttribute;
+        if (attr.getZ(t.imp) !== fade) {
+          attr.setZ(t.imp, fade);
+          impDirty = true;
+        }
+      }
     }
+    c.bark.visible = c.leaves.visible = anyMesh;
+    if (im) {
+      im.visible = anyImp;
+      if (impDirty) im.geometry.getAttribute('aImp').needsUpdate = true;
+    }
+    void mtx; void q; void sc;
   };
-  c.leaves.onBeforeRender = function (renderer, scene, camera, geometry, material, grp) {
-    tickWind();
-    lodUpdate(camera);
-    base.call(this, renderer, scene, camera, geometry, material, grp);
-  };
-  c.bark.onBeforeRender = function (renderer, scene, camera, geometry, material, grp) {
-    tickWind();
-    lodUpdate(camera);
-    base.call(this, renderer, scene, camera, geometry, material, grp);
-  };
+  const driver = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+  driver.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+  driver.geometry.setDrawRange(0, 0);
+  driver.frustumCulled = false;
+  driver.renderOrder = -1e6;
+  driver.userData.owned = true;
+  driver.onBeforeRender = (renderer, _scene, camera) => lodUpdate(renderer, camera);
+  group.add(driver);
   group.userData.trees = c;
   return c;
+}
+
+/** one card per tree in the chunk's impostor InstancedMesh (grown by copying) */
+function addImpostor(ct: ChunkTrees, group: THREE.Object3D, x: number, y: number, z: number, model: number, yaw: number, scale: number) {
+  let im = ct.impostors;
+  const n = ct.trees.length;
+  if (!im || n >= im.instanceMatrix.count) {
+    const cap = im ? im.instanceMatrix.count * 2 : 32;
+    const g = impQuad.clone();
+    const attr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+    g.setAttribute('aImp', attr);
+    const nim = new THREE.InstancedMesh(g, impostorMat(), cap);
+    nim.castShadow = false;
+    nim.receiveShadow = false;
+    nim.userData.owned = true;
+    nim.frustumCulled = true;
+    if (im) {
+      nim.instanceMatrix.array.set(im.instanceMatrix.array);
+      attr.array.set((im.geometry.getAttribute('aImp') as THREE.InstancedBufferAttribute).array);
+      im.removeFromParent();
+      im.geometry.dispose();
+      im.dispose();
+    }
+    group.add(nim);
+    ct.impostors = im = nim;
+  }
+  im.setMatrixAt(n, new THREE.Matrix4().makeTranslation(x, y, z));
+  (im.geometry.getAttribute('aImp') as THREE.InstancedBufferAttribute).setXYZW(n, model, yaw, 0, scale);
+  im.count = n + 1;
+  im.instanceMatrix.needsUpdate = true;
+  im.geometry.getAttribute('aImp').needsUpdate = true;
+  // bounds: pad the quad's size (cards up to ~16 m) around the instance positions
+  im.boundingSphere = null;
+  im.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 8, 0), 12);
+  return n;
 }
 
 /** add both LODs of a model to the chunk's batched meshes (growing them if needed) */
@@ -841,7 +1062,10 @@ export function addTree(group: THREE.Object3D, species: Species, variant: number
   ct.bark.setMatrixAt(ib, m);
   ct.leaves.setMatrixAt(il, m);
   ct.leaves.setColorAt(il, tint);
-  ct.trees.push({ bark: ib, leaves: il, key, far: false, pos: new THREE.Vector3(x, y + model.height * 0.4, z), world: null });
+  const yaw = Math.atan2(m.elements[8], m.elements[10]);
+  const mi = modelIndex(species, variant);
+  const imp = addImpostor(ct, group, x, y, z, mi, yaw, s);
+  ct.trees.push({ bark: ib, leaves: il, key, far: false, imp, model: mi, yaw, scale: s, meshOn: true, pos: new THREE.Vector3(x, y + model.height * 0.4, z), world: null });
   ct.bark.boundingSphere = ct.leaves.boundingSphere = null;
   ct.bark.boundingBox = ct.leaves.boundingBox = null;
 }
