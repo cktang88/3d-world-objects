@@ -104,6 +104,74 @@ function pageHelpers() {
     dispatchEvent(new KeyboardEvent('keydown', { code, shiftKey: shift, bubbles: true }));
     dispatchEvent(new KeyboardEvent('keyup', { code, shiftKey: shift, bubbles: true }));
   };
+  /**
+   * Stand at `stand` (walk there), look at the portal's box centre, check the aim prompt picked
+   * this portal and press E. Waits for any transition to end. Returns what happened.
+   */
+  const useSeen = async (p, stand, o = {}) => {
+    const V = W.player.pos.constructor;
+    const w = stand ? await walk(stand.x, stand.z, { ms: o.ms ?? 25000, tol: 0.25 }) : null;
+    const c = p.box.getCenter(new V());
+    face(c.x, Math.min(c.y, 1.5), c.z);
+    if (o.dwell) await frames(o.dwell);
+    await frames(3);
+    const aimed = W.aimed === p;
+    const prompt = document.getElementById('prompt-label').textContent;
+    const before = W.desc;
+    if (aimed || o.force) key('KeyE');
+    await frames(2);
+    await until(() => !W.transitioning, 20000);
+    await frames(3);
+    return { walk: w, aimed, prompt, moved: W.desc !== before };
+  };
+  /**
+   * Open one of `list` ({ obj, label?/kind? } with obj's +z its front): walk in front of it, look
+   * at it, check the E prompt is for it (lazy.ts aimedBox) and press E. Returns the attempt log.
+   */
+  const openOne = async (list, o = {}) => {
+    const V = W.player.pos.constructor;
+    const tried = [];
+    for (const c of list) {
+      c.obj.updateWorldMatrix(true, false);
+      const mid = new V().setFromMatrixPosition(c.obj.matrixWorld);
+      const h = c.size?.y ?? 1;
+      const fw = new V(0, 0, 1).transformDirection(c.obj.matrixWorld);
+      fw.y = 0;
+      fw.normalize();
+      const stand = mid.clone().addScaledVector(fw, 1.0);
+      const w = await walk(stand.x, stand.z, { ms: 6000, tol: 0.25 });
+      // rooms are not straight lines away: when the walk is blocked, step there (logged)
+      if (o.teleport && w.dist > 0.4) {
+        W.player.place(new V(stand.x, W.player.pos.y, stand.z), W.player.yaw);
+        await frames(3);
+        w.teleported = true;
+        w.pos = pos();
+      }
+      // aim at the middle of its front
+      face(mid.x, mid.y + Math.min(h / 2, 1.3), mid.z);
+      await frames(4);
+      const L = W.aimedBox;
+      const aimed = !!L && L.obj === c.obj;
+      tried.push({ label: c.label ?? c.kind, at: w.pos, stuck: w.stuck, aimed, prompt: document.getElementById('prompt-label').textContent });
+      if (!aimed) continue;
+      const gen0 = W.lazy.stats.generated;
+      key('KeyE');
+      await until(() => L.contents && L.t >= 1, 8000);
+      let n = 0;
+      L.contents?.traverse((o) => { if (o.isMesh || o.isInstancedMesh) n++; });
+      return { tried, label: L.label, open: L.open, t: L.t, meshes: n, visible: !!L.contents?.visible, generated: W.lazy.stats.generated - gen0 };
+    }
+    return { tried, open: false };
+  };
+  /** press Q and wait for the transition */
+  const back = async () => {
+    const before = W.desc;
+    key('KeyQ');
+    await frames(2);
+    await until(() => !W.transitioning, 20000);
+    await frames(3);
+    return W.desc !== before;
+  };
   const descKey = (d) => (d ? JSON.stringify(d) : '');
   const info = () => ({
     desc: W.desc && { kind: W.desc.kind, name: W.desc.name, floor: W.desc.floor, theme: W.desc.theme },
@@ -126,7 +194,7 @@ function pageHelpers() {
   const r0 = W.renderer.__render0 ?? (W.renderer.__render0 = W.renderer.render);
   const draw = (on) => { W.renderer.render = on ? r0 : function () {}; };
   draw(false);
-  window.__e2e = { W, draw, raf, sleep, frames, until, walk, face, key, info, pos, yawTo, blocked, descKey, r2 };
+  window.__e2e = { W, draw, useSeen, back, openOne, raf, sleep, frames, until, walk, face, key, info, pos, yawTo, blocked, descKey, r2 };
 }
 
 export async function harness(name, scriptUrl) {
