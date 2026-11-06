@@ -197,6 +197,8 @@ export class InteriorLevel implements Level {
    * Units reached from a building hall (vertical.ts, floors: 1) have none.
    */
   stairCore?: { x: number; z: number; rot: number; len: number; width: number; rect: Rect };
+  /** every piece placed against a wall: its centre, the way its front faces (rot), and its room (for qa) */
+  placed: { x: number; z: number; rot: number; w: number; d: number; room: Room }[] = [];
   /** openable containers whose contents are generated only when needed (see Container) */
   containers: Container[] = [];
   private cellMap = new Map<Room, Cell>();
@@ -1027,6 +1029,7 @@ export class InteriorLevel implements Level {
       if (!c.free(fp, pad)) continue;
       sd.used.push({ a: t - w / 2, b: t + w / 2, h });
       c.occ.push(fp);
+      this.placed.push({ x, z, rot, w, d, room: c.room });
       this.cols.push(shrink(fp, 0.05));
       return { x, z, rot, t } as Frame & { t: number };
     }

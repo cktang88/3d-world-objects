@@ -15,8 +15,6 @@ const level = (d: Desc) => {
   if (!lv) built.set(d, (lv = new InteriorLevel(d)));
   return lv;
 };
-/** a known issue (listed in docs/research/qa-findings.md): reported as NOTE, does not fail */
-const known = (msg: string) => soft(false, `KNOWN ${msg}`);
 const tag = (d: Desc) => `${d.style}#${d.seed}/${d.floor}`;
 const H = (lv: InteriorLevel) => (lv as unknown as { H: number }).H;
 const outer = (lv: InteriorLevel): Rect => lv.rooms.reduce((a, r) => ({ minX: Math.min(a.minX, r.x0), minZ: Math.min(a.minZ, r.z0), maxX: Math.max(a.maxX, r.x1), maxZ: Math.max(a.maxZ, r.z1) }), { minX: 1e9, minZ: 1e9, maxX: -1e9, maxZ: -1e9 });
@@ -48,11 +46,12 @@ test('stairs: rise 15-20 cm, run 25-30 cm (per ceiling height in use)', () => {
   for (const h of heights) {
     const treads: { x: number; w: number; y: number }[] = [];
     const rec = { box: (_m: unknown, w: number, hh: number, _d: number, x: number, y: number) => { if (Math.abs(hh - 0.03) < 1e-6) treads.push({ x, w, y }); }, boxM() {}, sphere() {} };
-    F.stair(rec as unknown as Parameters<typeof F.stair>[0], 4.2, 1.05, h, null!, null!, null!);
+    // placeStairs sizes the flight to the storey: round(H / 0.185) treads of 27 cm
+    const len = Math.round(h / 0.185) * 0.27;
+    F.stair(rec as unknown as Parameters<typeof F.stair>[0], len, 1.05, h, null!, null!, null!);
     const rise = treads[1].y - treads[0].y, run = treads[1].x - treads[0].x;
     if (!(rise >= 0.15 && rise <= 0.2)) bad.push(`H=${h}: rise ${fmt(rise)} m`);
-    // KNOWN (docs/research/qa-findings.md #1): house floors (H 3.35) get 18 steps in 4.2 m
-    if (!(run >= 0.25 && run <= 0.3)) (h === 3.35 ? known : bad.push.bind(bad))(`H=${h}: run ${fmt(run)} m (${treads.length} steps in 4.2 m)`);
+    if (!(run >= 0.25 && run <= 0.3)) bad.push(`H=${h}: run ${fmt(run)} m (${treads.length} steps in ${fmt(len)} m)`);
   }
   none(bad, 'stairs out of code');
 });
@@ -113,7 +112,7 @@ test('furniture colliders do not overlap each other', () => {
     const furn = lv.colliders().filter((r) => Math.min(r.maxX - r.minX, r.maxZ - r.minZ) > 0.2);
     for (let i = 0; i < furn.length; i++) for (let j = i + 1; j < furn.length; j++) {
       const a = furn[i], b = furn[j];
-      if (JSON.stringify(a) === JSON.stringify(b)) { known(`${tag(d)}: the same ${fmt(a.maxX - a.minX)}x${fmt(a.maxZ - a.minZ)} collider is registered twice at (${fmt((a.minX + a.maxX) / 2)}, ${fmt((a.minZ + a.maxZ) / 2)}) (qa-findings #3)`); continue; }
+      if (JSON.stringify(a) === JSON.stringify(b)) { bad.push(`${tag(d)}: the same ${fmt(a.maxX - a.minX)}x${fmt(a.maxZ - a.minZ)} collider is registered twice at (${fmt((a.minX + a.maxX) / 2)}, ${fmt((a.minZ + a.maxZ) / 2)})`); continue; }
       const ix = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX), iz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
       if (ix > 0.05 && iz > 0.05) bad.push(`${tag(d)}: (${fmt((a.minX + a.maxX) / 2)}, ${fmt((a.minZ + a.maxZ) / 2)}) ${fmt(a.maxX - a.minX)}x${fmt(a.maxZ - a.minZ)} / (${fmt((b.minX + b.maxX) / 2)}, ${fmt((b.minZ + b.maxZ) / 2)}) ${fmt(b.maxX - b.minX)}x${fmt(b.maxZ - b.minZ)} overlap ${fmt(ix)}x${fmt(iz)}`);
     }
@@ -121,7 +120,6 @@ test('furniture colliders do not overlap each other', () => {
   none(bad, 'overlapping furniture');
 });
 
-const KNOWN_OVERFLOW = new Set(['dresser', 'nightstand', 'closet', 'cabinet', 'fridge']);
 test('containers face into their room and their contents fit inside them', () => {
   const bad: string[] = [];
   let n = 0;
@@ -149,9 +147,7 @@ test('containers face into their room and their contents fit inside them', () =>
       if (bb.isEmpty()) continue;
       const s = c.size, tol = 0.08;
       if (bb.min.x < -s.x / 2 - tol || bb.max.x > s.x / 2 + tol || bb.min.y < -tol || bb.max.y > s.y + tol || bb.min.z < -s.z - tol || bb.max.z > tol)
-        // KNOWN (qa-findings #2): drawer contents poke out of the back, cabinet/fridge contents out of the side,
-        // closet hats above the top. Remove a kind from this set once its contents fit.
-        (KNOWN_OVERFLOW.has(c.kind) ? known : bad.push.bind(bad))(`${tag(d)} ${c.kind} ${fmt(s.x)}x${fmt(s.y)}x${fmt(s.z)}: contents x[${fmt(bb.min.x)},${fmt(bb.max.x)}] y[${fmt(bb.min.y)},${fmt(bb.max.y)}] z[${fmt(bb.min.z)},${fmt(bb.max.z)}]`);
+        bad.push(`${tag(d)} ${c.kind} ${fmt(s.x)}x${fmt(s.y)}x${fmt(s.z)}: contents x[${fmt(bb.min.x)},${fmt(bb.max.x)}] y[${fmt(bb.min.y)},${fmt(bb.max.y)}] z[${fmt(bb.min.z)},${fmt(bb.max.z)}]`);
     }
   }
   expect(n > 5, `only ${n} containers`);
@@ -172,4 +168,29 @@ test('same seed, same interior (determinism)', () => {
   const a = level(d), b = new InteriorLevel({ ...d });
   expect(sceneHash(a.group) === sceneHash(b.group), `hash ${sceneHash(a.group)} vs ${sceneHash(b.group)}`);
   expect(JSON.stringify(a.colliders()) === JSON.stringify(b.colliders()), 'colliders differ');
+});
+
+test('the entry door is within 1.5 m of the spawn, facing in', () => {
+  for (const d of CASES) {
+    const lv = level(d);
+    const e = lv.entry, p = lv.spawn.pos;
+    const dist = Math.hypot(p.x - e.x, p.z - e.z);
+    expect(dist <= 1.5, `${tag(d)}: spawn ${fmt(dist)} m from the entry door`);
+  }
+});
+
+test('pieces against walls face into their room and stay inside it', () => {
+  const bad: string[] = [];
+  for (const d of CASES) {
+    const lv = level(d);
+    for (const p of lv.placed) {
+      const r = p.room;
+      const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+      const fx = Math.sin(p.rot), fz = Math.cos(p.rot);
+      // the front points away from the wall it backs onto: toward the room's middle
+      if (fx * (cx - p.x) + fz * (cz - p.z) <= 0) bad.push(`${tag(d)} ${r.type}: ${fmt(p.w)}x${fmt(p.d)} at (${fmt(p.x)}, ${fmt(p.z)}) faces the wall`);
+      if (p.x < r.x0 || p.x > r.x1 || p.z < r.z0 || p.z > r.z1) bad.push(`${tag(d)} ${r.type}: piece outside its room`);
+    }
+  }
+  none(bad, 'misplaced pieces');
 });
