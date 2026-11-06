@@ -58,48 +58,53 @@ type Quality = 'ultra' | 'high' | 'low';
 const params0 = new URLSearchParams(location.search);
 let quality: Quality = (params0.get('quality') as Quality) || 'ultra';
 const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+// the main pass's depth, shared by both composer buffers, feeds GTAO (no second scene pass)
+rt.depthTexture = new THREE.DepthTexture(1, 1);
 const composer = new EffectComposer(renderer, rt);
+composer.renderTarget2.depthTexture = rt.depthTexture;
 const renderPass = new RenderPass(scene, camera);
 const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
 gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.6, thickness: 1.2, scale: 1.1, samples: 16 });
 gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
 gtao.blendIntensity = 0.85;
-// sprites (glows, steam) and see-through glass would be written into GTAO's depth/normal
-// buffer as solid quads; hide them for that internal pass only
-{
-  const hidden: THREE.Object3D[] = [];
-  let tick = 0;
-  const refresh = () => {
-    hidden.length = 0;
-    scene.traverse((o) => {
-      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-      if ((o as THREE.Sprite).isSprite || (m && !Array.isArray(m) && m.transparent && (m.opacity < 0.6 || (m as THREE.MeshPhysicalMaterial).transmission > 0))) hidden.push(o);
-    });
-  };
-  const original = gtao.render.bind(gtao);
-  gtao.render = (r, w, rd, dt, mask) => {
-    if (tick++ % 20 === 0) refresh();
-    const vis = hidden.map((o) => o.visible);
-    hidden.forEach((o) => (o.visible = false));
-    // GTAOPass renders its normal/depth pass first, then composites over readBuffer
-    original(r, w, rd, dt, mask);
-    hidden.forEach((o, i) => (o.visible = vis[i]));
-  };
-}
+// AO from the composer's depth (normals reconstructed from depth): GTAO no longer re-renders the
+// scene with an override material, so sprites, glass, the sky dome and vertex-shader tricks
+// (window anchors, wind) are seen exactly as drawn
+gtao.setGBuffer(rt.depthTexture);
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.28, 0.5, 2.2);
 composer.addPass(renderPass);
 composer.addPass(gtao);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 // lighting.grade (colour grading) is appended once the lighting rig exists, below
+/** pixel-ratio ceiling per quality (hi-DPI panels pay 4x the pixels at DPR 2) */
+const dprCap = () => (quality === 'low' ? 1 : Math.min(devicePixelRatio, quality === 'ultra' ? 1.5 : 1));
+/** dynamic resolution: a factor on the cap, lowered when frames are slow (see frame()) */
+let dynScale = 1;
+function applySize() {
+  const pr = Math.max(0.5, dprCap() * dynScale);
+  renderer.setPixelRatio(pr);
+  renderer.setSize(innerWidth, innerHeight);
+  // at DPR > 1 two MSAA samples look the same as four
+  const samples = pr > 1 ? 2 : 4;
+  if (rt.samples !== samples) {
+    rt.samples = composer.renderTarget2.samples = samples;
+    rt.dispose();
+    composer.renderTarget2.dispose();
+  }
+  composer.setPixelRatio(pr);
+  composer.setSize(innerWidth, innerHeight);
+  // AO and bloom at half resolution (both are low-frequency)
+  const w = Math.max(1, Math.round(innerWidth * pr / 2)), h = Math.max(1, Math.round(innerHeight * pr / 2));
+  gtao.setSize(w, h);
+  bloom.setSize(w, h);
+}
 function applyQuality() {
   gtao.enabled = quality === 'ultra';
   setPbrResolution(quality === 'low' ? '1k' : '2k');
   bloom.enabled = quality !== 'low';
-  renderer.setPixelRatio(quality === 'low' ? 1 : Math.min(devicePixelRatio, 2));
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setPixelRatio(renderer.getPixelRatio());
-  composer.setSize(innerWidth, innerHeight);
+  dynScale = 1;
+  applySize();
   sun.shadow.mapSize.setScalar(quality === 'low' ? 2048 : 4096);
   sun.shadow.map?.dispose();
   sun.shadow.map = null;
@@ -134,8 +139,7 @@ const weather: Weather = new Weather(renderer, scene, camera, lighting);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+  applySize();
   lighting.resize();
 });
 
@@ -414,8 +418,23 @@ async function enter(p: Portal) {
   if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
   else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
   else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} wing — every doorway leads somewhere similar`);
+  await precompile();
   await fadeTo(0, shrink ? 700 : quick ? 260 : 350);
   transitioning = false;
+}
+
+/**
+ * Behind the black of a fade: let lighting set up the new level's materials (cascade defines,
+ * light budget), then compile every shader in parallel (KHR_parallel_shader_compile) so the first
+ * visible frame doesn't stall. Capped at 2 s.
+ */
+async function precompile() {
+  try {
+    lighting.update(0, player.pos);
+    await Promise.race([renderer.compileAsync(scene, camera), new Promise((r) => setTimeout(r, 2000))]);
+  } catch {
+    /* compileAsync is an optimisation only */
+  }
 }
 
 async function goBack() {
@@ -447,6 +466,7 @@ async function goBack() {
     const back = new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)).multiplyScalar(0.8);
     setLevel(seam.take(f.desc), f.pos.clone().add(back), f.yaw + Math.PI);
   }
+  await precompile();
   await fadeTo(0, wasCity ? 600 : 260);
 }
 
@@ -674,8 +694,29 @@ let time = 0;
 
 let lab: { controls: OrbitControls; level: LabLevel } | null = null;
 
+// dynamic resolution: watch real frame times; drop the pixel ratio when slower than ~45 fps,
+// raise it again under ~70 fps (checked every 2 s, so it never oscillates frame to frame)
+let dynT = 0, dynN = 0, dynSum = 0;
+const DYN = !params0.has('nodyn');
+function dynamicResolution(raw: number) {
+  if (!DYN || quality === 'low') return;
+  dynSum += raw;
+  dynN++;
+  dynT += raw;
+  if (dynT < 2) return;
+  const avg = dynSum / dynN;
+  dynT = dynSum = dynN = 0;
+  const next = avg > 1 / 45 ? Math.max(0.6, dynScale - 0.1) : avg < 1 / 70 ? Math.min(1, dynScale + 0.1) : dynScale;
+  if (Math.abs(next - dynScale) > 1e-3) {
+    dynScale = next;
+    applySize();
+  }
+}
+
 function frame() {
-  const dt = Math.min(0.05, clock.getDelta());
+  const raw = clock.getDelta();
+  const dt = Math.min(0.05, raw);
+  if (!document.hidden) dynamicResolution(Math.min(raw, 0.5));
   time += dt;
   if (lab) {
     lab.controls.update();
@@ -842,7 +883,7 @@ ready.then(() => {
 });
 
 Object.assign(window, {
-  __world: { seam, vert, renderer, lighting, weather, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+  __world: { seam, vert, renderer, lighting, weather, scene, camera, gtao, bloom, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
 });
 
 // ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----
