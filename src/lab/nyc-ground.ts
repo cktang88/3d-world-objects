@@ -4,6 +4,7 @@ import { AX, SZ, BX, BZ, LX, LZ, CURB, bake, B } from '../nyc/common';
 import { groundBase, groundDetails, groundReady, groundWeather, groundStrip, groundCurb, GM } from '../nyc/ground';
 import * as P from '../nyc/streetprops';
 import { mat } from '../build';
+import { surface, pbr } from '../pbr';
 import { Rng } from '../rng';
 
 /**
@@ -11,6 +12,7 @@ import { Rng } from '../rng';
  * crosswalks, ramps, curb, fixtures and the neighbouring blocks' halves of the roadway.
  *   &village=1   Belgian-block streets
  *   &props=0     no street furniture
+ *   &before=1    the previous look for comparison (paver texture sidewalk, plain asphalt, box curbs, no paint)
  *   &open=1      block (0,1) is an open space (park): groundStrip() sidewalks along its open edges
  *   &wet=0..1 &puddles=0..1 &snow=0..1   weather hook (groundWeather)
  * Views: corner  cam=57,1.6,21&look=49,0,28   avenue sidewalk  cam=50.5,1.6,2&look=50,0,14
@@ -32,7 +34,17 @@ const scene: LabScene = {
       const g = new THREE.Group();
       g.position.set(cx * AX, 0, cz * SZ);
       const stat = new THREE.Group();
-      if (params.get('open') === '1' && cx === 0 && cz === 1) {
+      if (params.get('before') === '1') {
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), surface('nyc_asphalt', [AX, SZ], { roughness: 1 }));
+        road.rotation.x = -Math.PI / 2;
+        g.add(road);
+        const sw = new THREE.Mesh(new THREE.PlaneGeometry(BX * 2, BZ * 2), surface('nyc_sidewalk', [BX * 2, BZ * 2], { roughness: 1, normalScale: 1.2 }));
+        sw.rotation.x = -Math.PI / 2;
+        sw.position.y = CURB;
+        stat.add(sw);
+        const cm = mat('#8f8b84', { rough: 0.8 });
+        for (const s of [-1, 1]) { B(stat, cm, BX * 2, CURB, 0.25, 0, 0, s * (BZ - 0.125), false); B(stat, cm, 0.25, CURB, BZ * 2, s * (BX - 0.125), 0, 0, false); }
+      } else if (params.get('open') === '1' && cx === 0 && cz === 1) {
         // an open space: road strip + plain sidewalk runs, as district-open.ts builds them
         const road = new THREE.Mesh(new THREE.PlaneGeometry(AX, SZ), GM.road());
         road.rotation.x = -Math.PI / 2;
@@ -46,9 +58,9 @@ const scene: LabScene = {
         group.add(g);
         continue;
       }
-      groundBase({ group: g, stat, cx, cz, village, cobble: village });
+      if (params.get('before') !== '1') groundBase({ group: g, stat, cx, cz, village, cobble: village });
       if (cx === 0 && cz === 0) {
-        groundDetails({ group: g, stat, cx, cz, village, doors: [], showcase: true });
+        if (params.get('before') !== '1') groundDetails({ group: g, stat, cx, cz, village, doors: [], showcase: true });
         if (params.get('props') !== '0') {
           const r = new Rng(3);
           P.signalPole(stat, BX - 0.9, BZ - 0.9, 1, 1);
@@ -66,6 +78,7 @@ const scene: LabScene = {
       group.add(g);
     }
     await groundReady();
+    if (params.get('before') === '1') await Promise.all([pbr('nyc_sidewalk')?.ready, pbr('nyc_asphalt')?.ready]);
   },
 };
 export default scene;

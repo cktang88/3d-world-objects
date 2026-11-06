@@ -66,3 +66,9 @@ Research for `src/nyc/ground.ts` (lab: `?lab=nyc-ground`). Everything below is w
 - Belgian block: `cobblestone_floor_05` — https://polyhaven.com/a/cobblestone_floor_05
 
 Colour is applied in the shader (per flag / per block), the photo only supplies luminance detail, so different sources share one consistent palette. Each flag samples the concrete map at its own random offset so neighbouring flags never repeat.
+
+## Before / after
+
+![before and after vs references](img/nyc-ground-before-after.jpg)
+
+Lab `?lab=nyc-ground&cam=54.5,1.6,18&look=49.5,0.2,25` with `&before=1` (the previous look, rebuilt with the old materials: paver-pattern sidewalk scan, plain asphalt scan, box curbs; no paint) and without (current). References: Park Av sidewalk and a Midtown crosswalk (links above).
