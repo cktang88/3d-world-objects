@@ -81,7 +81,8 @@ export async function cycles(name: string, n: number, cycle: (i: number) => Prom
       shownPath = true;
       // why: retainer paths of the first few survivors (tests/heap.ts)
       const { tagLeak, retainers } = await import('./heap');
-      for (const r of refs.filter((x) => x.deref()).slice(0, 3)) tagLeak(r.deref()!);
+      ((list: WeakRef<object>[]) => { for (const r of list.filter((x) => x.deref()).slice(0, 3)) tagLeak(r.deref()!); })(refs);
+      await settle(5); // a new job: deref() keeps its target only for the current one
       for (const p of retainers(3)) console.log(`   ${name} retained by: ${p}`);
     }
     rows.push({ counts: memCounts(), heap: heapMB(), alive, refs: refs.length, stale });

@@ -25,9 +25,7 @@ test('memory: city block build -> evict 10x (NycLevel streaming) frees its GPU r
   memTrack(lv.group, 'nyc');
   await cycles('city', 10, async (i) => {
     const before = new Set(lv.group.children);
-    const t0 = performance.now();
     walk(i % 2 ? 0 : 2 * AX);
-    if (process.env.QA_PROF) console.log(`   leg ${i}: ${(performance.now() - t0).toFixed(0)} ms`);
     memTrack(lv.group, 'nyc');
     // the chunks that were unloaded on this leg
     const gone = [...before].filter((c) => c.parent !== lv.group && c.type === 'Group');

@@ -35,7 +35,8 @@ function weighted<T>(rng: Rng, list: [T, number][]): T {
 }
 
 let started = false;
-const waiting: { obj: THREE.Group; id: string; paint: THREE.Material; cab: boolean }[] = [];
+/** cars waiting for their model (weak: an unloaded block's cars must not be kept alive by a load that never comes) */
+const waiting: { obj: WeakRef<THREE.Group>; id: string; paint: THREE.Material; cab: boolean }[] = [];
 function startLoading() {
   if (started) return;
   started = true;
@@ -51,7 +52,8 @@ function startLoading() {
         const w = waiting[i];
         if (w.id !== id) continue;
         waiting.splice(i, 1);
-        dress(w.obj, w.id, w.paint, w.cab);
+        const obj = w.obj.deref();
+        if (obj && !obj.userData.disposed) dress(obj, w.id, w.paint, w.cab);
       }
     });
 }
@@ -359,8 +361,11 @@ export function carMesh(kind: VehicleKind, rng: Rng): THREE.Group {
   else {
     obj.add(standin(f.paint ? color : id === 'taxi_cv' ? TAXI_YELLOW : '#e8e8e8', f.len, f.wid, /tahoe|suburban|explorer|escalade|sprinter/.test(id)));
     // forget cars of unloaded blocks still waiting for their model (a failed load never empties the list)
-    for (let i = waiting.length - 1; i >= 0; i--) if (waiting[i].obj.userData.disposed) waiting.splice(i, 1);
-    waiting.push({ obj, id, paint, cab: kind === 'cab' });
+    for (let i = waiting.length - 1; i >= 0; i--) {
+      const o = waiting[i].obj.deref();
+      if (!o || o.userData.disposed) waiting.splice(i, 1);
+    }
+    waiting.push({ obj: new WeakRef(obj), id, paint, cab: kind === 'cab' });
   }
   return obj;
 }
