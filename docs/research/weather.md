@@ -131,3 +131,11 @@ smoothly as rain sets in; umbrellas mostly black (see the 65th St reference).
   while something is wet or falling; skies/domes/decals without depth write are skipped).
 - No shader is compiled on a weather change; only uniforms change. Particle counts and the
   exposure map size follow the G quality levels.
+
+### Ground (nyc/ground.ts) and other custom shaders
+weather.ts writes `groundWeather.{wet,puddles,snow}.value` every frame; road / pavement / kerb
+materials (marked by lighting.wetSurface) get `WX_NOWET` + `WX_NOSNOW`, so only ground.ts shades
+their water and snow. Any MeshStandard/Physical shader can call `wxExposure(worldPos)` (1 = open
+sky, 0 = under a roof/awning/shed; declared in lights_physical_pars_fragment, valid inside main)
+to keep e.g. the pavement under a sidewalk shed free of snow — ground.ts does not do this yet.
+
