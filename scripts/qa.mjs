@@ -39,7 +39,7 @@ const t0 = performance.now();
 /** areas -> test files (tests/<name>.test.ts): `npm run qa -- people` runs tests/people.test.ts */
 const AREAS = {
   nyc: ['nyc', 'ground'], ground: ['ground'], streets: ['nyc', 'ground'], buildings: ['nyc', 'buildings'],
-  districts: ['districts', 'districts-blocks', 'districts-open'],
+  districts: ['districts', 'districts-blocks', 'districts-open', 'districts-scale'],
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
