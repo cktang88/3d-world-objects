@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
 import { Rng, hashN } from '../rng';
 import { CURB, AX, SZ, AVE, ST } from './common';
@@ -78,7 +79,7 @@ float pedRegion(vec3 p) {
   float ax = abs(p.x);
   if (ax > uBody.x && p.y > uCut.x + 0.25) return ax < uCut.z ? 1.0 : 0.0;   // arm (T-pose)
   if (p.y < uBody.y) return 3.0;
-  float neck = uCut.y - (uBody.w > 2.5 && uBody.w < 3.5 ? 0.07 : 0.035) * smoothstep(0.0, 0.07, p.z);
+  float neck = uCut.y - (uBody.w > 2.5 && uBody.w < 3.5 ? 0.07 : 0.035) * smoothstep(0.0, 0.07, p.z) * (1.0 - smoothstep(0.05, 0.1, ax)) + 0.6 * max(0.0, ax - 0.07);
   if (p.y > uCut.x) return p.y < neck ? 1.0 : 0.0;
   if (p.y > uBody.z && ax < 0.24 && uBody.w > 1.5) return 1.0;               // jacket hangs over the hips
   return p.y > uCut.w ? 2.0 : 0.0;
@@ -89,7 +90,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
   const m = base.clone();
   const b = BODY[g];
   const sleeve = o.topStyle === 0 ? b.shoulderX + 0.13 : b.wristX - 0.035;
-  const hem = o.bottomStyle === 2 ? b.knee + 0.07 : o.bottomStyle === 3 ? b.ankle + 0.06 : b.ankle;
+  const hem = o.bottomStyle === 2 ? b.knee + 0.07 : b.ankle;
   const neck = b.neck + (o.topStyle === 2 || o.topStyle === 4 ? 0.035 : o.topStyle === 3 ? 0.02 : 0);
   const infl = [[0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle], [0.007, 0.008, 0.007, 0.002][o.bottomStyle], 0.02];
   const u = {
@@ -97,8 +98,8 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
     uGeoScale: { value: geoScale },
     uGeoInv: { value: geo.clone().invert() },
     uSlimA: { value: new THREE.Vector4(r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
-    uSlimB: { value: new THREE.Vector4(r.range(0.86, 0.97), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
-    uSlimC: { value: new THREE.Vector4(r.range(0.8, 0.95), 0, 0, 0) },
+    uSlimB: { value: new THREE.Vector4(r.range(0.82, 0.93), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
+    uSlimC: { value: new THREE.Vector4(r.range(0.8, 0.95), b.neck, 0, 0) },
     uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
     uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
     uInfl: { value: new THREE.Vector4(infl[0], infl[1], infl[2], o.bottomStyle) },
@@ -129,6 +130,14 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
         bp.xz = lc + (bp.xz - lc) * mix(1.0, uSlimB.x, wl);
         float wt = smoothstep(uCut.x - 0.12, uCut.x, bp.y) * (1.0 - wa) * (1.0 - smoothstep(uCut.y - 0.06, uCut.y + 0.02, bp.y));
         bp.z = mix(bp.z, -0.03 + (bp.z + 0.03) * uSlimC.x, wt);
+        // thinner neck and lower trapezius
+        float wn = smoothstep(uSlimC.y - 0.14, uSlimC.y - 0.06, bp.y) * (1.0 - smoothstep(uSlimC.y + 0.03, uSlimC.y + 0.1, bp.y)) * (1.0 - smoothstep(0.07, 0.12, bax));
+        bp.xz = vec2(0.0, -0.035) + (bp.xz - vec2(0.0, -0.035)) * mix(1.0, 0.86, wn);
+        bp.y -= 0.018 * smoothstep(uSlimC.y - 0.16, uSlimC.y - 0.04, bp.y) * smoothstep(0.05, 0.1, bax) * (1.0 - smoothstep(uSlimA.w - 0.02, uSlimA.w + 0.04, bax)) * (1.0 - smoothstep(uSlimC.y, uSlimC.y + 0.06, bp.y));
+        // bare feet shrink inside the shoe meshes riding the foot bones
+        float wf = 1.0 - smoothstep(uBody.y - 0.03, uBody.y + 0.005, bp.y);
+        vec3 fc = vec3(sign(bp.x) * uSlimB.y, 0.045, 0.0);
+        bp = mix(bp, fc + (bp - fc) * vec3(0.75, 0.8, 0.85), wf);
         transformed = (uGeoInv * vec4(bp, 1.0)).xyz;
         float pr = pedRegion(vBody);
         float inf = pr == 1.0 ? uInfl.x : pr == 2.0 ? uInfl.y : pr == 3.0 ? uInfl.z : 0.0;
@@ -194,7 +203,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nvec3 pedGeoNormal = normal;')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, pedGeoNormal, cloth));');
   };
-  m.customProgramCacheKey = () => 'ped-body-v2';
+  m.customProgramCacheKey = () => 'ped-body-v4';
   return m;
 }
 
@@ -282,13 +291,45 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
 // ---------------------------------------------------------------- props
 const propGeo = {
   backpack: new RoundedBoxGeometry(0.3, 0.42, 0.15, 3, 0.045),
-  strap: new THREE.BoxGeometry(0.045, 0.34, 0.012),
+  strap: new THREE.BoxGeometry(0.045, 0.2, 0.012),
   crossbody: new RoundedBoxGeometry(0.22, 0.16, 0.07, 2, 0.02),
   tote: new RoundedBoxGeometry(0.36, 0.34, 0.1, 2, 0.015),
   phone: new RoundedBoxGeometry(0.075, 0.155, 0.009, 2, 0.006),
   beanie: new THREE.SphereGeometry(0.112, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
   cuff: new THREE.CylinderGeometry(0.106, 0.11, 0.05, 20, 1, true),
 };
+/** a sneaker / boot: low toe box, higher heel collar, separate sole; colours baked into vertex
+ *  colours so one shoe is one draw call. Built around the origin, toe toward +z. */
+const shoeGeos = new Map<string, THREE.BufferGeometry>();
+function shoeGeo(upper: string, sole: string, len: number, boot: boolean) {
+  const k = `${upper}|${sole}|${len}|${boot}`;
+  let g = shoeGeos.get(k);
+  if (g) return g;
+  const up = new THREE.SphereGeometry(1, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+  const p = up.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const zz = z * len * 0.5;
+    const front = THREE.MathUtils.smoothstep(zz, -0.04, len * 0.45);
+    const h = boot ? THREE.MathUtils.lerp(0.17, 0.07, front) : THREE.MathUtils.lerp(0.105, 0.055, front);
+    p.setXYZ(i, x * 0.05 * (1 - 0.15 * Math.max(0, -z)), 0.02 + y * h, zz);
+  }
+  up.computeVertexNormals();
+  const so = new RoundedBoxGeometry(0.104, 0.026, len + 0.012, 2, 0.01);
+  so.translate(0, 0.013, 0);
+  const paint = (geo: THREE.BufferGeometry, c: string) => {
+    const col = new THREE.Color(c);
+    const n = geo.attributes.position.count;
+    const a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) col.toArray(a, i * 3);
+    geo.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    return geo;
+  };
+  g = mergeGeometries([paint(up.toNonIndexed(), upper), paint(so.toNonIndexed(), sole)])!;
+  shoeGeos.set(k, g);
+  return g;
+}
+const shoeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
 const propMats = new Map<string, THREE.MeshStandardMaterial>();
 function propMat(color: string, rough = 0.8) {
   const k = `${color}|${rough}`;
@@ -393,14 +434,20 @@ export class Person {
       const bc = r.pick(['#151517', '#22262e', '#3a3f45', '#2f3a2a', '#5a1a1c', '#1f3d5a']);
       const bm = propMat(bc, 0.7);
       attach('spine_03', new THREE.Mesh(propGeo.backpack, bm), at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)));
-      for (const s of [-1, 1]) attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.07, 0.115 + (o.topStyle === 2 ? 0.03 : 0), -0.15, 0, 0));
+      for (const s of [-1, 1]) attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0));
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0));
     }
+    // shoes (the bare feet are shrunk inside them in the shader)
+    const dark = !/^#[de]/.test(o.shoe);
+    const sg = shoeGeo(o.shoe, o.sole, gender === 'male' ? 0.285 : 0.255, dark && r.chance(0.3));
+    for (const [s, bone] of [[1, 'foot_l'], [-1, 'foot_r']] as const) attach(bone, new THREE.Mesh(sg, shoeMat), at(s * b.legX, 0, gender === 'male' ? 0.02 : 0.025));
     // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
     const target = (gender === 'male' ? 1.76 : 1.63) * r.range(0.94, 1.06);
     model.scale.setScalar(target / b.height);
+    if (r.chance(0.3)) this.walkClip = 'Walk_Formal_Loop';
+    this.twoHands = r.chance(0.3);
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, clip] of A.clips) this.actions.set(name, this.mixer.clipAction(clip));
     // a phone, shown for phone-users
@@ -410,7 +457,7 @@ export class Person {
   }
   setActivity(a: Activity, phase = 0) {
     this.activity = a;
-    const clip = a === 'walk' ? 'Walk_Loop' : a === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop';
+    const clip = a === 'walk' ? this.walkClip : a === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop';
     for (const [n, act] of this.actions) {
       if (n === clip) {
         if (!act.isRunning()) {
@@ -423,7 +470,7 @@ export class Person {
   }
   /** walking speed in m/s drives the cadence (clip walks ~0.98 m/s) */
   setSpeed(v: number) {
-    const w = this.actions.get('Walk_Loop');
+    const w = this.actions.get(this.walkClip);
     if (w) w.timeScale = Math.max(0.5, v / (0.98 * this.model().scale.x * (BODY[this.gender].height / 1.83)));
   }
   private model() {
@@ -437,6 +484,7 @@ export class Person {
     if (this.activity === 'phone') this.phonePose();
   }
   twoHands = false;
+  walkClip = 'Walk_Loop';
   /** hold the phone up in front of the chest and look down at it (aimed in world space, so it
    *  does not depend on the rig's local bone axes) */
   private phonePose() {
@@ -539,6 +587,7 @@ export class Pedestrians {
       pd.p.setSpeed(pd.v);
     }
     pd.p.root.rotation.y = pd.axis === 'x' ? (pd.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : pd.dir > 0 ? 0 : Math.PI;
+    if (standing && pd.p.activity === 'talk') pd.p.root.rotation.y += r.pick([-1, 1]) * r.range(0.8, 2.2);
   }
   update(dt: number, p: THREE.Vector3) {
     if (!this.assets) return;
