@@ -1,0 +1,260 @@
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { gltf } from '../detail';
+
+/**
+ * The traffic fleet: detailed CC-BY car models (scripts/build_vehicles.mjs -> public/assets/vehicles/), each with a
+ * near LOD (~30-75k tris) and a far LOD (~6k tris). On load every model is merged into a handful of meshes:
+ * body paint (tintable clear-coat), glass, one per textured material and a few shared vertex-coloured buckets,
+ * so a car costs ~4-10 draw calls near and the same few far. Geometry and materials are shared by all cars.
+ */
+export interface FleetModel {
+  id: string;
+  /** real length/width (m) for traffic spacing and colliders */
+  len: number;
+  wid: number;
+  /** body paint can be tinted */
+  paint: boolean;
+  /** fixed paint colour when the model is used as a cab */
+  cab?: boolean;
+}
+
+export const FLEET: Record<string, FleetModel> = {
+  taxi_cv: { id: 'taxi_cv', len: 5.38, wid: 2.0, paint: false },
+  prius: { id: 'prius', len: 4.54, wid: 1.76, paint: true },
+  accord: { id: 'accord', len: 4.93, wid: 1.85, paint: true },
+  charger: { id: 'charger', len: 5.08, wid: 1.9, paint: true },
+  tahoe: { id: 'tahoe', len: 5.13, wid: 2.0, paint: true },
+  suburban: { id: 'suburban', len: 5.7, wid: 2.0, paint: true },
+  escalade: { id: 'escalade', len: 5.14, wid: 2.05, paint: true },
+  explorer: { id: 'explorer', len: 5.05, wid: 2.0, paint: true },
+  sprinter: { id: 'sprinter', len: 5.9, wid: 2.0, paint: false },
+};
+
+/** NYC taxi yellow (Dupont M6284 "taxi yellow", close to Pantone 116) */
+export const TAXI_YELLOW = '#f5b50c';
+
+/** street car colours, weighted like a real US fleet: white, black, greys/silvers dominate */
+export const PAINTS: { c: string; metal: number; w: number }[] = [
+  { c: '#f2f2ef', metal: 0.05, w: 22 }, // white
+  { c: '#0c0d0f', metal: 0.25, w: 20 }, // black
+  { c: '#5a5e63', metal: 0.7, w: 14 }, // gunmetal grey
+  { c: '#a9adb1', metal: 0.85, w: 14 }, // silver
+  { c: '#1f3558', metal: 0.6, w: 8 }, // dark blue
+  { c: '#7d1418', metal: 0.5, w: 7 }, // deep red
+  { c: '#2e3b33', metal: 0.5, w: 3 }, // dark green
+  { c: '#8a7a64', metal: 0.6, w: 3 }, // champagne
+  { c: '#3b5f8c', metal: 0.6, w: 3 }, // mid blue
+  { c: '#b9b3a6', metal: 0.4, w: 3 }, // pearl beige
+];
+
+const paintCache = new Map<string, THREE.MeshPhysicalMaterial>();
+export function paintMat(color: string, metal = 0.4) {
+  const key = `${color}|${metal}`;
+  let m = paintCache.get(key);
+  if (!m) {
+    m = new THREE.MeshPhysicalMaterial({
+      color,
+      metalness: metal,
+      roughness: 0.32 + (1 - metal) * 0.1,
+      clearcoat: 1,
+      clearcoatRoughness: 0.06,
+      envMapIntensity: 1.2,
+    });
+    m.name = 'paint';
+    paintCache.set(key, m);
+  }
+  return m;
+}
+
+let glassMat: THREE.MeshPhysicalMaterial | null = null;
+export function carGlass() {
+  return (glassMat ??= Object.assign(
+    new THREE.MeshPhysicalMaterial({
+      color: '#10161c',
+      metalness: 0.1,
+      roughness: 0.04,
+      transparent: true,
+      opacity: 0.86,
+      envMapIntensity: 1.6,
+      clearcoat: 1,
+      clearcoatRoughness: 0.02,
+    }),
+    { name: 'car-glass' },
+  ));
+}
+
+/** shared vertex-coloured buckets for every untextured part */
+const VC = {
+  chrome: new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 1, roughness: 0.22, name: 'car-chrome' }),
+  rubber: new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: 0.88, name: 'car-rubber' }),
+  plastic: new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.05, roughness: 0.5, name: 'car-plastic' }),
+  lamp: new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: 0.15, emissive: '#000', name: 'car-lamp' }),
+};
+
+const sidedCache = new WeakMap<THREE.Material, THREE.Material>();
+/** the double-sided twin of a shared material */
+export function sided<T extends THREE.Material>(m: T, double: boolean): T {
+  if (!double) return m;
+  let d = sidedCache.get(m) as T | undefined;
+  if (!d) {
+    d = m.clone() as T;
+    d.side = THREE.DoubleSide;
+    sidedCache.set(m, d);
+  }
+  return d;
+}
+
+export interface Part {
+  geo: THREE.BufferGeometry;
+  /** 'paint' takes the car's colour; anything else is a ready material */
+  mat: THREE.Material | 'paint';
+  /** source was double-sided (inside-out panels are common in these models) */
+  double: boolean;
+}
+export interface Prepared {
+  lod0: Part[];
+  lod1: Part[];
+}
+
+const prepared = new Map<string, Promise<Prepared | null>>();
+export function loadFleet(id: string): Promise<Prepared | null> {
+  let p = prepared.get(id);
+  if (!p) {
+    const base = `${import.meta.env.BASE_URL}assets/vehicles/${id}`;
+    p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`)])
+      .then(([a, b]) => ({ lod0: prepare(a.scene, id), lod1: prepare(b.scene, id) }))
+      .catch((e) => {
+        console.warn('vehicle', id, e);
+        return null;
+      });
+    prepared.set(id, p);
+  }
+  return p;
+}
+/** already-loaded models, for synchronous use */
+export const ready = new Map<string, Prepared>();
+export function preloadFleet() {
+  return Promise.all(Object.keys(FLEET).map((id) => loadFleet(id).then((p) => p && ready.set(id, p))));
+}
+
+const tmpC = new THREE.Color();
+function toFloat(g: THREE.BufferGeometry) {
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const a = g.getAttribute(name);
+    if (!a) continue;
+    const n = a.count, s = a.itemSize;
+    const arr = new Float32Array(n * s);
+    for (let i = 0; i < n; i++) {
+      arr[i * s] = a.getX(i);
+      if (s > 1) arr[i * s + 1] = a.getY(i);
+      if (s > 2) arr[i * s + 2] = a.getZ(i);
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, s));
+  }
+  if (g.index) out.setIndex(Array.from(g.index.array as ArrayLike<number>));
+  else out.setIndex(Array.from({ length: out.getAttribute('position').count }, (_, i) => i));
+  return out;
+}
+
+function prepare(root: THREE.Object3D, id: string): Part[] {
+  root.updateMatrixWorld(true);
+  const buckets = new Map<string, { mat: THREE.Material | 'paint'; geos: THREE.BufferGeometry[]; vc: boolean; double: boolean }>();
+  const texMats = new Map<THREE.Material, THREE.Material>();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const src = mesh.material as THREE.MeshStandardMaterial;
+    const g = toFloat(mesh.geometry);
+    g.applyMatrix4(mesh.matrixWorld);
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    const n = g.getAttribute('position').count;
+    if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+    const name = src.name || '';
+    const double = src.side === THREE.DoubleSide;
+    let key: string;
+    let mat: THREE.Material | 'paint';
+    let vc = false;
+    if (name === 'PAINT') {
+      key = 'paint' + double;
+      mat = 'paint';
+    } else if (name === 'GLASS') {
+      key = 'glass' + double;
+      mat = sided(carGlass(), double);
+    } else if (src.map) {
+      key = src.uuid;
+      let m = texMats.get(src);
+      if (!m) {
+        const chrome = /chrome|metal/i.test(name);
+        m = new THREE.MeshStandardMaterial({
+          map: src.map,
+          color: src.color,
+          metalness: chrome ? 0.9 : 0.1,
+          roughness: chrome ? 0.3 : 0.5,
+          transparent: src.transparent,
+          opacity: src.opacity,
+          alphaTest: src.alphaTest,
+          side: src.side,
+          name: `${id}:${name}`,
+        });
+        texMats.set(src, m);
+      }
+      mat = m;
+    } else {
+      // untextured: bucket by look, keep colour in vertices
+      tmpC.copy(src.color);
+      const lum = tmpC.r * 0.3 + tmpC.g * 0.59 + tmpC.b * 0.11;
+      const sat = Math.max(tmpC.r, tmpC.g, tmpC.b) - Math.min(tmpC.r, tmpC.g, tmpC.b);
+      const b =
+        /chrome|silver|alu|metal|rim/i.test(name) || (src.metalness > 0.5 && lum > 0.2)
+          ? 'chrome'
+          : /light|lamp|brake|signal|phare|feu/i.test(name) || (sat > 0.5 && lum > 0.1)
+            ? 'lamp'
+            : lum < 0.03 || /tyre|tire|rubber|wheel/i.test(name)
+              ? 'rubber'
+              : 'plastic';
+      key = b + double;
+      mat = sided(VC[b as keyof typeof VC], double);
+      vc = true;
+      const c = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        c[i * 3] = tmpC.r;
+        c[i * 3 + 1] = tmpC.g;
+        c[i * 3 + 2] = tmpC.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    }
+    let bk = buckets.get(key);
+    if (!bk) buckets.set(key, (bk = { mat, geos: [], vc, double }));
+    bk.geos.push(g);
+  });
+  const parts: Part[] = [];
+  for (const bk of buckets.values()) {
+    const geo = mergeGeometries(bk.geos, false);
+    if (!geo) continue;
+    geo.computeBoundingSphere();
+    geo.computeBoundingBox();
+    parts.push({ geo, mat: bk.mat, double: bk.double });
+  }
+  return parts;
+}
+
+/** Build one car object from prepared parts: a THREE.LOD (near, far) sharing everything but the paint. */
+export function fleetObject(p: Prepared, paint: THREE.Material, far = 26): THREE.LOD {
+  const lod = new THREE.LOD();
+  const level = (parts: Part[], shadow: boolean) => {
+    const g = new THREE.Group();
+    for (const part of parts) {
+      const m = new THREE.Mesh(part.geo, part.mat === 'paint' ? sided(paint, part.double) : part.mat);
+      m.castShadow = shadow;
+      m.receiveShadow = false;
+      m.userData.owned = false;
+      g.add(m);
+    }
+    return g;
+  };
+  lod.addLevel(level(p.lod0, true), 0);
+  lod.addLevel(level(p.lod1, true), far);
+  return lod;
+}

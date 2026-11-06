@@ -2,88 +2,157 @@ import * as THREE from 'three';
 import { Rng, hashN } from '../rng';
 import { mat } from '../build';
 import type { Portal, Rect } from '../level';
-import { B, C, M, bake, lightFor, AX, SZ, AVE, ST } from './common';
+import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST } from './common';
+import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready } from './vehicleFleet';
+import { busMesh } from './vehicleBus';
 
-/** Cars, cabs and buses, and the traffic that drives them. */
-export const carCache = new Map<string, THREE.Group>();
-export const CAR_COLORS = ['#1c1c1e', '#e8e8e8', '#7a8590', '#2a3f66', '#7a1d1d', '#3a4a3a', '#b8b8b8', '#4a3a2a'];
-export function carMesh(kind: 'cab' | 'sedan' | 'bus', rng: Rng): THREE.Group {
-  const color = kind === 'cab' ? '#f6c218' : kind === 'bus' ? '#e9edf2' : rng.pick(CAR_COLORS);
-  const key = `${kind}:${color}`;
-  const cached = carCache.get(key);
-  if (cached) return cached.clone();
-  const g = new THREE.Group();
-  const body = mat(color, { rough: 0.35, metal: 0.4 });
-  const glass = M.glassDark();
-  const black = mat('#111', { rough: 0.8 });
-  if (kind === 'bus') {
-    B(g, body, 2.55, 2.4, 12, 0, 0.45, 0);
-    B(g, glass, 2.6, 1.0, 10.5, 0, 1.55, 0.3, false);
-    B(g, mat('#1e4fa3'), 2.6, 0.35, 12.02, 0, 0.9, 0, false);
-    B(g, mat('#fff6d0', { emissive: '#fff2c0', ei: 0.8 }), 2.0, 0.4, 0.05, 0, 2.3, -6.0, false);
-    for (const z of [-4, 4]) for (const x of [-1.2, 1.2]) {
-      const w = C(g, black, 0.5, 0.3, x, 0, z);
-      w.rotation.z = Math.PI / 2;
-      w.position.y = 0.5;
+/**
+ * Cars, cabs and buses, and the traffic that drives them.
+ *
+ * Cars are detailed CC-BY models (see vehicleFleet.ts, CREDITS.md) with a near and a far LOD, tinted from a
+ * weighted palette of real street colours; cabs are the Crown Vic taxi or a Prius/Accord in taxi yellow with a
+ * roof light. Until the models have streamed in, a cars shows a simple stand-in that is swapped on load.
+ * Buses are a procedural MTA New Flyer Xcelsior (vehicleBus.ts).
+ */
+export type VehicleKind = 'cab' | 'sedan' | 'bus';
+
+/** which model a street car is, weighted like NYC traffic: lots of SUVs and sedans, some vans */
+const SEDANS: [string, number][] = [
+  ['accord', 18], ['prius', 12], ['charger', 8], ['tahoe', 12], ['suburban', 10], ['explorer', 12], ['escalade', 8], ['sprinter', 6],
+];
+const CABS: [string, number][] = [['taxi_cv', 4], ['prius', 3], ['accord', 3]];
+/** black-car (livery) SUVs are usually black */
+const BLACK_CAR = new Set(['suburban', 'escalade', 'tahoe']);
+
+function weighted<T>(rng: Rng, list: [T, number][]): T {
+  let t = rng.next() * list.reduce((a, [, w]) => a + w, 0);
+  for (const [v, w] of list) if ((t -= w) <= 0) return v;
+  return list[list.length - 1][0];
+}
+
+let started = false;
+const waiting: { obj: THREE.Group; id: string; paint: THREE.Material; cab: boolean }[] = [];
+function startLoading() {
+  if (started) return;
+  started = true;
+  preloadFleet().then(() => {
+    for (const w of waiting.splice(0)) dress(w.obj, w.id, w.paint, w.cab);
+  });
+}
+
+/** put the real model into a car object (replacing the stand-in) */
+function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean) {
+  const p = ready.get(id);
+  if (!p) return;
+  for (const c of [...obj.children]) if (c.userData.standin) obj.remove(c);
+  const lod = fleetObject(p, paint);
+  obj.add(lod);
+  if (cab && id !== 'taxi_cv') {
+    let top = 0, zc = 0;
+    for (const part of p.lod0) {
+      const bb = part.geo.boundingBox!;
+      if (bb.max.y > top) top = bb.max.y;
     }
-  } else {
-    // body: an extruded side profile with rounded (bevelled) edges, nose toward -z
-    const prof = (pts: [number, number][]) => {
-      const sh = new THREE.Shape();
-      pts.forEach(([x, y], i) => (i ? sh.lineTo(x, y) : sh.moveTo(x, y)));
-      sh.closePath();
-      return sh;
-    };
-    const extrude = (sh: THREE.Shape, width: number, bevel: number, m: THREE.Material) => {
-      const geo = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 4, curveSegments: 8 });
-      geo.translate(0, 0, -(width - bevel * 2) / 2);
-      geo.rotateY(-Math.PI / 2); // profile x -> world z, nose toward -z
-      const mesh = new THREE.Mesh(geo, m);
-      mesh.castShadow = true;
-      g.add(mesh);
-      return mesh;
-    };
-    const L = 2.3;
-    const bodyPts: [number, number][] = [
-      [-L, 0.32], [-L - 0.04, 0.5], [-L + 0.05, 0.74], [-1.25, 0.86], [-0.62, 1.36], [0.72, 1.4], [1.35, 0.96], [L - 0.06, 0.9], [L + 0.02, 0.62], [L - 0.02, 0.32],
-      [1.75, 0.32], [1.68, 0.55], [1.2, 0.62], [1.02, 0.42], [-1.05, 0.42], [-1.22, 0.62], [-1.7, 0.55], [-1.77, 0.32],
-    ];
-    extrude(prof(bodyPts), 1.8, 0.07, body);
-    // glasshouse slightly wider than the body so it shows on the sides
-    extrude(prof([[-1.18, 0.9], [-0.6, 1.32], [0.68, 1.36], [1.28, 0.95]]), 1.84, 0.02, glass);
-    // bumpers, lights, plate, mirrors
-    const chromeM = mat('#c9ccd0', { metal: 0.9, rough: 0.25 });
-    B(g, black, 1.86, 0.18, 0.18, 0, 0.3, -L - 0.03);
-    B(g, black, 1.86, 0.18, 0.18, 0, 0.3, L + 0.01);
-    B(g, mat('#fff6d0', { emissive: '#fff2c0', ei: 0.9 }), 0.36, 0.12, 0.04, -0.62, 0.66, -L - 0.03, false);
-    B(g, mat('#fff6d0', { emissive: '#fff2c0', ei: 0.9 }), 0.36, 0.12, 0.04, 0.62, 0.66, -L - 0.03, false);
-    B(g, mat('#a01010', { emissive: '#ff2020', ei: 0.7 }), 0.4, 0.12, 0.04, -0.6, 0.72, L + 0.02, false);
-    B(g, mat('#a01010', { emissive: '#ff2020', ei: 0.7 }), 0.4, 0.12, 0.04, 0.6, 0.72, L + 0.02, false);
-    B(g, mat('#f2f2ee'), 0.5, 0.13, 0.02, 0, 0.42, L + 0.11, false);
-    B(g, chromeM, 0.9, 0.14, 0.02, 0, 0.55, -L - 0.06, false);
-    for (const sx of [-1, 1]) B(g, body, 0.18, 0.1, 0.12, sx * 0.98, 0.98, -0.95, false);
-    // wheels: tyre + rim + hub
-    const rim = mat('#b8bcc2', { metal: 0.85, rough: 0.3 });
-    for (const z of [-1.4, 1.4]) for (const x of [-0.8, 0.8]) {
-      const t = C(g, black, 0.34, 0.24, x, 0, z, true);
-      t.rotation.z = Math.PI / 2;
-      t.position.y = 0.34;
-      const rr = C(g, rim, 0.2, 0.25, x + Math.sign(x) * 0.005, 0, z, false);
-      rr.rotation.z = Math.PI / 2;
-      rr.position.y = 0.34;
-    }
-    if (kind === 'cab') {
-      // roof sign, checker stripe, medallion number
-      B(g, mat('#ffffff', { emissive: '#fff4c0', ei: 0.7 }), 0.85, 0.3, 0.26, 0, 1.4, 0.0, false);
-      B(g, black, 0.86, 0.04, 0.27, 0, 1.4, 0.0, false);
-      for (let k = 0; k < 10; k++) for (const sx of [-1, 1]) B(g, k % 2 ? black : mat('#ffffff'), 0.02, 0.07, 0.36, sx * 0.915, 0.66, -1.6 + k * 0.36, false);
-    }
+    zc = id === 'prius' ? 0.15 : 0.25;
+    const sign = roofSign();
+    sign.position.set(0, top - 0.02, zc);
+    obj.add(sign);
   }
-  const baked = bake(g);
-  // these baked meshes are shared by every clone
-  baked.traverse((o) => (o.userData.owned = false));
-  carCache.set(key, baked);
-  return baked.clone();
+}
+
+/** NYC taxi roof light: a slim white box with "TAXI" and the medallion number, lit when the cab is free */
+let signParts: { geo: THREE.BufferGeometry; mats: THREE.Material[]; base: THREE.BufferGeometry; baseMat: THREE.Material } | null = null;
+function roofSign(): THREE.Object3D {
+  if (!signParts) {
+    const tex = canvasTex(256, 64, (g) => {
+      g.fillStyle = '#f4f1e6';
+      g.fillRect(0, 0, 256, 64);
+      g.fillStyle = '#111';
+      g.font = 'bold 30px Arial';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('TAXI', 128, 26);
+      g.font = 'bold 13px Arial';
+      g.fillText('NYC  7J' + (10 + ((Math.random() * 89) | 0)), 128, 52);
+    });
+    const face = new THREE.MeshStandardMaterial({ color: '#fff', map: tex, emissive: '#fff6dc', emissiveMap: tex, emissiveIntensity: 0.55, roughness: 0.3 });
+    const side = new THREE.MeshStandardMaterial({ color: '#e8e4d8', roughness: 0.35 });
+    signParts = {
+      geo: new THREE.BoxGeometry(0.78, 0.24, 0.2),
+      // box faces: +x, -x, +y, -y, +z, -z
+      mats: [side, side, side, side, face, face],
+      base: new THREE.BoxGeometry(0.5, 0.04, 0.3),
+      baseMat: mat('#111', { rough: 0.6 }),
+    };
+  }
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(signParts.geo, signParts.mats);
+  m.position.y = 0.16;
+  m.castShadow = true;
+  g.add(m);
+  const b = new THREE.Mesh(signParts.base, signParts.baseMat);
+  b.position.y = 0.02;
+  g.add(b);
+  g.traverse((o) => (o.userData.owned = false));
+  return g;
+}
+
+/** a low-detail stand-in shown until the models are loaded */
+const standinCache = new Map<string, THREE.Group>();
+function standin(color: string, len: number, wid: number, tall: boolean): THREE.Group {
+  const key = `${color}|${len}|${wid}|${tall}`;
+  let s = standinCache.get(key);
+  if (!s) {
+    const g = new THREE.Group();
+    const body = mat(color, { rough: 0.35, metal: 0.4 });
+    const black = mat('#111', { rough: 0.8 });
+    const h = tall ? 1.85 : 1.45;
+    B(g, body, wid, h * 0.45, len, 0, 0.3, 0);
+    B(g, M2.glass, wid * 0.92, h * 0.4, len * 0.55, 0, 0.3 + h * 0.45, tall ? 0.2 : 0.1);
+    for (const z of [-len * 0.31, len * 0.31])
+      for (const x of [-wid / 2 + 0.15, wid / 2 - 0.15]) {
+        const t = C(g, black, 0.34, 0.24, x, 0, z, false);
+        t.rotation.z = Math.PI / 2;
+        t.position.y = 0.34;
+      }
+    s = bake(g);
+    standinCache.set(key, s);
+  }
+  const c = s.clone();
+  c.userData.standin = true;
+  c.traverse((o) => (o.userData.owned = false));
+  return c;
+}
+const M2 = { glass: mat('#1e2a33', { rough: 0.15, metal: 0.4 }) };
+
+export function carMesh(kind: VehicleKind, rng: Rng): THREE.Group {
+  if (kind === 'bus') return busMesh(rng);
+  startLoading();
+  const id = kind === 'cab' ? weighted(rng, CABS) : weighted(rng, SEDANS);
+  const f = FLEET[id];
+  let color: string, metal: number;
+  if (kind === 'cab') {
+    color = TAXI_YELLOW;
+    metal = 0.15;
+  } else if (BLACK_CAR.has(id) && rng.chance(0.6)) {
+    color = '#0a0b0d';
+    metal = 0.3;
+  } else {
+    const p = weighted(rng, PAINTS.map((q) => [q, q.w] as [typeof q, number]));
+    color = p.c;
+    metal = p.metal;
+  }
+  const paint = paintMat(color, metal);
+  const obj = new THREE.Group();
+  obj.userData.len = f.len;
+  obj.userData.wid = f.wid;
+  obj.userData.model = id;
+  if (ready.has(id)) dress(obj, id, paint, kind === 'cab');
+  else {
+    obj.add(standin(f.paint ? color : id === 'taxi_cv' ? TAXI_YELLOW : '#e8e8e8', f.len, f.wid, /tahoe|suburban|explorer|escalade|sprinter/.test(id)));
+    waiting.push({ obj, id, paint, cab: kind === 'cab' });
+  }
+  return obj;
 }
 
 export interface Car {
@@ -131,7 +200,7 @@ export class Traffic {
       const kind = this.rng.chance(0.08) ? 'bus' : this.rng.chance(0.55) ? 'cab' : 'sedan';
       const obj = carMesh(kind, this.rng);
       this.group.add(obj);
-      const c: Car = { obj, axis: 'z', dir: 1, line: 0, t: 0, v: 0, vmax: this.rng.range(9, 14), len: kind === 'bus' ? 12 : 4.6, wid: kind === 'bus' ? 2.6 : 1.8, rect: { minX: 0, minZ: 0, maxX: 0, maxZ: 0 } };
+      const c: Car = { obj, axis: 'z', dir: 1, line: 0, t: 0, v: 0, vmax: this.rng.range(9, 14), len: obj.userData.len ?? 4.8, wid: obj.userData.wid ?? 1.9, rect: { minX: 0, minZ: 0, maxX: 0, maxZ: 0 } };
       this.place(c, p);
       this.cars.push(c);
     }
@@ -162,11 +231,12 @@ export class Traffic {
       c.t += c.dir * c.v * dt;
       const x = c.axis === 'x' ? c.t : c.line, z = c.axis === 'x' ? c.line : c.t;
       c.obj.position.set(x, 0, z);
+      const wheels = c.obj.userData.wheels as THREE.Object3D[] | undefined;
+      if (wheels) for (const w of wheels) w.rotation.x -= (c.v * dt) / c.obj.userData.wheelR;
       const hx = (c.axis === 'x' ? c.len : c.wid) / 2, hz = (c.axis === 'x' ? c.wid : c.len) / 2;
       c.rect.minX = x - hx; c.rect.maxX = x + hx; c.rect.minZ = z - hz; c.rect.maxZ = z + hz;
     }
   }
 }
 
-// ---------------------------------------------------------------- pedestrians
 
