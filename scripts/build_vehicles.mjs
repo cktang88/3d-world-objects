@@ -16,6 +16,8 @@ import { MeshoptEncoder, MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer
 import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
+// mesh-simplification skill: attribute-aware near LOD at one shared world-space error (see .claude/skills/mesh-simplification)
+import { simplifyDocument } from './lib/simplify-doc.mjs';
 
 /**
  * yaw: radians turning the raw model so its nose points -z (after the bbox's long axis is put on z)
@@ -39,7 +41,11 @@ export const FLEET = [
 const TRIS = { near: 25000, mid: 4500, far: 2000 };
 // LODS=0,1 rebuilds only those levels
 const LODS = (process.env.LODS ?? '0,1,2').split(',').map(Number);
-const OUT = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'vehicles');
+const OUT = process.env.OUT ?? path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'vehicles');
+// LOD method: 'attr' = simplifyDocument for every level (shared error, rebuilt crease normals, twin triangles dropped);
+// 'legacy' = per-primitive ratio simplify (near LODs stuck at 25-61k on seams); 'none' = unsimplified near LOD (comparison source)
+const NEAR = process.env.NEAR ?? 'attr';
+const NEAR_TRIS = Number(process.env.NEAR_TRIS ?? 14000);
 
 async function main() {
   const dir = process.argv[2];
@@ -100,22 +106,28 @@ async function main() {
       const target = [TRIS.near, TRIS.mid, TRIS.far][lod];
       await doc.transform(dedup({ propertyTypes: [PropertyType.ACCESSOR, PropertyType.MESH, PropertyType.TEXTURE] }), flatten(), join({ keepNamed: false }), weld({}));
       const tris = count(root);
-      const ratio = Math.min(1, target / tris);
-      if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? (cfg.err0 ?? 0.005) : 0.02, lockBorder: false }));
-      // seams (uv/normal splits) stop the simplifier early: for the far LOD drop normals (and uvs of untextured
-      // parts), weld by position alone and simplify again; normals are recomputed at load
-      // (the near LOD only for models whose triangles are all unwelded, flag weld0: welding blurs their hard edges)
-      if (count(root) > target * 1.15 && (lod > 0 || cfg.weld0)) {
-        for (const m of root.listMeshes())
-          for (const p of m.listPrimitives()) {
-            p.setAttribute('NORMAL', null);
-            const mt = p.getMaterial();
-            // the far LOD is drawn vertex-coloured (texture averages), so it needs no uvs at all: weld across seams
-            if (lod === 2 || !mt?.getBaseColorTexture()) for (const s of p.listSemantics()) if (s !== 'POSITION') p.setAttribute(s, null);
-          }
-        await doc.transform(weld({}));
-        const now = count(root);
-        await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, target / now), error: [0.006, 0.04, 0.09][lod], lockBorder: false }));
+      if (NEAR === 'attr' || (NEAR === 'none' && lod > 0)) {
+        // every LOD at one shared world-space error (bisected to the budget), normals rebuilt with 35° creases
+        const r = await simplifyDocument(doc, { targetTris: lod === 0 ? (cfg.near ?? NEAR_TRIS) : target, normals: 'rebuild', creaseDeg: 35, dropUv: lod === 2 });
+        console.log(cfg.id, 'lod', lod, 'shared error', (r.error * 1000).toFixed(2), 'mm');
+      } else if (NEAR !== 'none') {
+        const ratio = Math.min(1, target / count(root));
+        if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? (cfg.err0 ?? 0.005) : 0.02, lockBorder: false }));
+        // seams (uv/normal splits) stop the simplifier early: for the far LOD drop normals (and uvs of untextured
+        // parts), weld by position alone and simplify again; normals are recomputed at load
+        // (the near LOD only for models whose triangles are all unwelded, flag weld0: welding blurs their hard edges)
+        if (count(root) > target * 1.15 && (lod > 0 || cfg.weld0)) {
+          for (const m of root.listMeshes())
+            for (const p of m.listPrimitives()) {
+              p.setAttribute('NORMAL', null);
+              const mt = p.getMaterial();
+              // the far LOD is drawn vertex-coloured (texture averages), so it needs no uvs at all: weld across seams
+              if (lod === 2 || !mt?.getBaseColorTexture()) for (const s of p.listSemantics()) if (s !== 'POSITION') p.setAttribute(s, null);
+            }
+          await doc.transform(weld({}));
+          const now = count(root);
+          await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, target / now), error: [0.006, 0.04, 0.09][lod], lockBorder: false }));
+        }
       }
       await doc.transform(
         prune(),
