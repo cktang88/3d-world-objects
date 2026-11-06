@@ -259,7 +259,7 @@ export function windowMats() {
  * aRoom: x = depth (m), y = shop atlas cell (shops only), z = brightness by day, w = muntins
  */
 export function roomMaterial(shop: boolean, atlas?: THREE.Texture) {
-  const m = new THREE.MeshStandardMaterial({ color: '#0b0d10', roughness: 0.04, metalness: 0.0, envMapIntensity: 1.6 });
+  const m = new THREE.MeshStandardMaterial({ color: '#0b0d10', roughness: 0.04, metalness: shop ? 0.22 : 0.08, envMapIntensity: 1.6 });
   const uniforms = { uNight: NIGHT, uDay: INDOOR_DAY, uAtlas: { value: atlas ?? null } };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);

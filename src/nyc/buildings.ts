@@ -692,6 +692,8 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       if (style === 'panel') ww = L / n - 0.6;
     }
     const centres = bays(L, n, type === 'castiron' ? 0.2 : 0.35);
+    // floors with balconettes on pre-war fronts
+    const balcony = new Set<number>(type === 'prewar' && isFront ? [1, levels.length - 3].filter(() => rng.chance(0.6)) : []);
     // ---- upper floor windows
     levels.forEach((ly, i) => {
       const top = i === levels.length - 1;
@@ -704,6 +706,17 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
         // brownstone parlour door bay
         if (type === 'brownstone' && i === 0 && isFront && c === centres[0]) continue;
         F.window(c - ww / 2, wy, ww, whh, { ...winOpts, trim: type === 'prewar' && top ? 'arch' : winOpts.trim });
+        // pre-war balconettes: a stone shelf on brackets with an iron railing
+        if (balcony.has(i)) {
+          const bw = ww + 0.5;
+          PB(F.g, stoneMat(), bw, 0.14, 0.5, c, wy - 0.2, 0.25, '#e3dccb');
+          for (const s2 of [-1, 1]) B(F.f, mat('#d9d1bf', { rough: 0.85 }), 0.12, 0.3, 0.4, c + s2 * (bw / 2 - 0.12), wy - 0.5, 0.2, false);
+          const iron = M.iron();
+          B(F.f, iron, bw - 0.06, 0.04, 0.04, c, wy + 0.85, 0.47, false);
+          B(F.f, iron, 0.04, 0.04, 0.45, c - bw / 2 + 0.05, wy + 0.85, 0.25, false);
+          B(F.f, iron, 0.04, 0.04, 0.45, c + bw / 2 - 0.05, wy + 0.85, 0.25, false);
+          for (let u = -bw / 2 + 0.05; u <= bw / 2 - 0.04; u += 0.11) B(F.f, iron, 0.018, 0.9, 0.018, c + u, wy - 0.06, 0.47, false);
+        }
       }
     });
     wh = [];
@@ -775,7 +788,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       F.wall(fm, baseTop, h, tint);
       F.band(stoneMat(), baseTop - 0.05, 0.35, 0.12, 0.06);
     } else if (type === 'brownstone') {
-      F.wall(brownMat(), 0, baseTop, tint, 0.42);
+      F.wall(brownMat(), 0, baseTop, shade(tint, 1.3), 0.42);
       F.wall(fm, baseTop, h, tint);
       F.band(brownMat(), baseTop - 0.02, 0.18, 0.1, 0.04, false, tint);
     } else {
