@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng, hashN } from '../rng';
+import { noWeather } from '../weather';
 
 /**
  * Windows for NYC buildings: real openings with depth, instanced per block.
@@ -443,6 +444,8 @@ vec3 roomShade(out float lampGlow) {
       );
   };
   m.customProgramCacheKey = () => 'room:' + (shop ? 'shop' : 'apt');
+  // glass stays clear: no wet darkening or snow on the panes (weather.ts)
+  noWeather(m);
   return m;
 }
 

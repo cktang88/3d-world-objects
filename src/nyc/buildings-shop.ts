@@ -5,6 +5,7 @@ import { mat } from '../build';
 import { normalFrom } from '../textures';
 import { Rng, hashN } from '../rng';
 import { roomMaterial, onNight, NIGHT } from './buildings-win';
+import { noWeather } from '../weather';
 import type { BCtx, BType, Face } from './buildings';
 
 /** Storefronts: display windows with a shop behind the glass, recessed entries, signs, gates, awnings. */
@@ -277,6 +278,7 @@ function textMaterials() {
     paint: new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.45, vertexColors: true, roughness: 0.9 }),
     neon: vcEmissive(new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.3, vertexColors: true, roughness: 0.3, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 2.2, toneMapped: false }), 'neon'),
   };
+  for (const m of Object.values(textMats)) noWeather(m);
   onNight((f) => {
     textMats!.sign.emissiveIntensity = 0.15 + f * 1.6;
     textMats!.neon.emissiveIntensity = 2.0 + f * 2.5;
