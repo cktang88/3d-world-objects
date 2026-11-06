@@ -275,7 +275,8 @@ function stainMat() {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   // multiplied over the wall: white leaves it alone, the streaks darken it
-  stainM = anchored(new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, blending: THREE.MultiplyBlending, premultipliedAlpha: true, fog: false }), 'stain');
+  // [zfix] stains are decals on the wall: polygon offset so they never flicker with it
+  stainM = anchored(new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, blending: THREE.MultiplyBlending, premultipliedAlpha: true, fog: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), 'stain');
   return stainM;
 }
 const depthMat = anchored(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), 'depth');

@@ -280,6 +280,8 @@ function textMaterials() {
     neon: vcEmissive(new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.3, vertexColors: true, roughness: 0.3, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 2.2, toneMapped: false }), 'neon'),
   };
   for (const m of Object.values(textMats)) noWeather(m);
+  // [zfix] painted/sign letters lie a hair off their walls and boards: pull them toward the camera in depth
+  for (const m of Object.values(textMats)) Object.assign(m, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
   onNight((f) => {
     textMats!.sign.emissiveIntensity = 0.15 + f * 1.6;
     textMats!.neon.emissiveIntensity = 2.0 + f * 2.5;
@@ -447,7 +449,8 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
 
   // ---- pilasters framing the shop
   for (const s of [-1, 1]) {
-    B(G, frameM, 0.22, top, 0.14, uc + s * (W / 2 - 0.11), 0, 0.07);
+    // [zfix] stops under the sign band (their tops and backs were coplanar)
+    B(G, frameM, 0.22, top - 0.95, 0.14, uc + s * (W / 2 - 0.11), 0, 0.07);
     B(Fi, frameM, 0.3, 0.12, 0.2, uc + s * (W / 2 - 0.11), top - 1.0, 0.1, false);
   }
   // ---- sign band

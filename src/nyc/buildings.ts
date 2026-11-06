@@ -353,8 +353,12 @@ export class Face {
   }
   /** a horizontal band along the whole face */
   band(m: THREE.Material, y: number, h: number, out: number, extra = 0, fine = false, tint = '#e3dccb') {
-    if (m.userData.pbr) return PB(fine ? this.f : this.g, m, this.len + extra * 2, h, out, 0, y, out / 2, tint, !fine);
-    return B(fine ? this.f : this.g, m, this.len + extra * 2, h, out, 0, y, out / 2, !fine);
+    // [zfix] bands (cornices, belt courses) of neighbouring faces meet at the corners: on the side faces (E/W)
+    // they sit 4 mm higher and 4 mm prouder, so their top/bottom faces and the front/back faces' end caps
+    // never share a plane with them (they z-fought in a square at every corner)
+    const k = this.side === 'E' || this.side === 'W' ? 0.004 : 0;
+    if (m.userData.pbr) return PB(fine ? this.f : this.g, m, this.len + extra * 2, h, out + k, 0, y + k, (out + k) / 2, tint, !fine);
+    return B(fine ? this.f : this.g, m, this.len + extra * 2, h, out + k, 0, y + k, (out + k) / 2, !fine);
   }
 }
 
@@ -403,7 +407,7 @@ function cornice(F: Face, kind: CorniceKind, y: number, color: string, scale = 1
     if (kind === 'bracket') {
       const bw = (end ? 0.26 : 0.16) * s;
       B(F.f, cm, bw, fh * 0.62, 0.16 * s, u, y - fh * 0.9, 0.08 * s + 0.07, false);
-      B(F.f, cm, bw, fh * 0.2, 0.32 * s, u, y - fh * 0.48, 0.16 * s + 0.07, false);
+      B(F.f, cm, bw, fh * 0.2 + 0.004, 0.32 * s, u, y - fh * 0.48, 0.16 * s + 0.07, false); // [zfix] top 4 mm over the console's
       B(F.f, cm, bw * 0.9, fh * 0.14, 0.26 * s, u, y - fh * 0.98, 0.13 * s + 0.04, false);
       if (!end && i < n) {
         // panel between brackets
@@ -433,17 +437,23 @@ function roof(parent: THREE.Object3D, r: Rect, y: number) {
   parent.add(o);
 }
 
-/** parapet walls around a roof, with coping */
+/**
+ * parapet walls around a roof, with coping. [zfix] The walls stand 2 cm inside the facade planes (flush, their
+ * faces z-fought the facade's top storey all round every building), and the side walls and copings stop
+ * where the front/back ones begin, so no two faces overlap at the corners.
+ */
 function parapet(parent: THREE.Object3D, r: Rect, y: number, h: number, wallM: THREE.Material, copeM: THREE.Material) {
-  const w = r.maxX - r.minX, d = r.maxZ - r.minZ, cx = (r.minX + r.maxX) / 2, cz = (r.minZ + r.maxZ) / 2, t = 0.3;
-  B(parent, wallM, w, h, t, cx, y, r.minZ + t / 2);
-  B(parent, wallM, w, h, t, cx, y, r.maxZ - t / 2);
-  B(parent, wallM, t, h, d, r.minX + t / 2, y, cz);
-  B(parent, wallM, t, h, d, r.maxX - t / 2, y, cz);
-  B(parent, copeM, w + 0.06, 0.08, t + 0.08, cx, y + h, r.minZ + t / 2, false);
-  B(parent, copeM, w + 0.06, 0.08, t + 0.08, cx, y + h, r.maxZ - t / 2, false);
-  B(parent, copeM, t + 0.08, 0.08, d, r.minX + t / 2, y + h, cz, false);
-  B(parent, copeM, t + 0.08, 0.08, d, r.maxX - t / 2, y + h, cz, false);
+  const IN = 0.02;
+  const r2 = { minX: r.minX + IN, maxX: r.maxX - IN, minZ: r.minZ + IN, maxZ: r.maxZ - IN };
+  const w = r2.maxX - r2.minX, d = r2.maxZ - r2.minZ, cx = (r2.minX + r2.maxX) / 2, cz = (r2.minZ + r2.maxZ) / 2, t = 0.3, c = 0.04;
+  B(parent, wallM, w, h, t, cx, y, r2.minZ + t / 2);
+  B(parent, wallM, w, h, t, cx, y, r2.maxZ - t / 2);
+  B(parent, wallM, t, h, d - 2 * t, r2.minX + t / 2, y, cz);
+  B(parent, wallM, t, h, d - 2 * t, r2.maxX - t / 2, y, cz);
+  B(parent, copeM, w + 2 * c, 0.08, t + 2 * c, cx, y + h, r2.minZ + t / 2, false);
+  B(parent, copeM, w + 2 * c, 0.08, t + 2 * c, cx, y + h, r2.maxZ - t / 2, false);
+  B(parent, copeM, t + 2 * c, 0.08, d - 2 * (t + c), r2.minX + t / 2, y + h, cz, false);
+  B(parent, copeM, t + 2 * c, 0.08, d - 2 * (t + c), r2.maxX - t / 2, y + h, cz, false);
 }
 
 let staveTex: THREE.Texture | null = null;
@@ -815,8 +825,8 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   const fresh = parents.flatMap((p, i) => p.children.slice(n0[i]));
   if (ZFIX_ON) fixZFight(fresh, { passes: 2 });
 }
-/** set false to measure without the per-building z-fight pass */
-export let ZFIX_ON = true;
+/** the per-building runtime z-fight pass: off by default (source fixes instead; it doubled block build time). ?zfix=1 or setZfix(true) */
+export let ZFIX_ON = false;
 export function setZfix(v: boolean) {
   ZFIX_ON = v;
 }
@@ -1068,9 +1078,10 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
           const u = -L / 2 + 0.2 + ((L - 0.4) * k) / n;
           PB(F.g, fm, 0.62, fh - 0.4, 0.1, u, ly + 0.4, 0.05, tint);
           C(F.g, colM, 0.21, fh - 1.05, u, ly + 0.62, 0.17);
-          B(F.f, colM, 0.56, 0.24, 0.4, u, ly + fh - 0.45, 0.2, false);
-          B(F.f, colM, 0.66, 0.08, 0.46, u, ly + fh - 0.21, 0.23, false);
-          B(F.f, colM, 0.5, 0.22, 0.38, u, ly + 0.4, 0.19, false);
+          // [zfix] capitals and bases 3 mm off the wall, the base 4 mm above the pier's foot
+          B(F.f, colM, 0.56, 0.24, 0.4, u, ly + fh - 0.45, 0.203, false);
+          B(F.f, colM, 0.66, 0.08, 0.46, u, ly + fh - 0.21, 0.233, false);
+          B(F.f, colM, 0.5, 0.22, 0.38, u, ly + 0.404, 0.193, false);
         }
     } else if (type === 'tenement' && rng.chance(0.6)) {
       for (const ly of levels) F.band(bandM, ly + 0.7, 0.1, 0.07, 0, true);
@@ -1161,8 +1172,10 @@ function towerLobby(ctx: BCtx, F: Face, isFront: boolean, lobby: number, finM: T
   const granite = surface('marble', [0.9, lobby], { color: rng.pick(['#3a3836', '#5a5652', '#2a2c2e', '#7a746c']), roughness: 0.18, envMapIntensity: 0.9 });
   const mull = mat('#3a3e42', { rough: 0.35, metal: 0.8 });
   const np = Math.max(2, Math.round(F.len / 6));
-  for (let k = 0; k <= np; k++) B(F.g, granite, 0.9, lobby, 0.5, -F.len / 2 + 0.45 + ((F.len - 0.9) * k) / np, 0, 0.0);
-  B(F.g, granite, F.len, 0.9, 0.55, 0, lobby - 0.9, 0.02);
+  // [zfix] piers stop under the lintel beam; side-face beams sit 4 mm higher (they cross at the corners)
+  for (let k = 0; k <= np; k++) B(F.g, granite, 0.9, lobby - 0.9, 0.5, -F.len / 2 + 0.45 + ((F.len - 0.9) * k) / np, 0, 0.0);
+  const bk = F.side === 'E' || F.side === 'W' ? 0.004 : 0;
+  B(F.g, granite, F.len, 0.9, 0.55, 0, lobby - 0.9 + bk, 0.02 + bk);
   const gz = -0.25 + REVEAL;
   const transom = 3.4;
   const holeU: [number, number] = [Infinity, -Infinity];
@@ -1254,8 +1267,10 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
         }
       }
       F.wall(curtain ? spandrel : panelM, y0, y + th, curtain ? undefined : panelTint);
-      for (let k = 0; k <= nf; k++) B(k % 4 ? F.f : F.g, finM, 0.08, y + th - y0, k % 4 ? 0.12 : 0.3, -F.len / 2 + (k * F.len) / nf, y0, k % 4 ? 0.06 : 0.15, false);
-      for (let yy = y0 + 3.6; yy < y + th - 0.5; yy += 3.6) B(F.f, finM, F.len, 0.12, 0.05, 0, yy - 0.06, 0.025, false);
+      // [zfix] k < nf: each corner gets one fin (from the face where it is k = 0), not two crossing ones;
+      // floor bands start 3 mm off the wall so their backs don't share the fins' plane
+      for (let k = 0; k < nf; k++) B(k % 4 ? F.f : F.g, finM, 0.08, y + th - y0, k % 4 ? 0.12 : 0.3, -F.len / 2 + (k * F.len) / nf, y0, k % 4 ? 0.06 : 0.15, false);
+      for (let yy = y0 + 3.6; yy < y + th - 0.5; yy += 3.6) B(F.f, finM, F.len, 0.12, 0.05, 0, yy - 0.06, 0.028, false);
       if (t === 0) towerLobby(ctx, F, s === front, lobby, finM, addr, floors, front);
     }
     hullTiers.push({ rect: { ...rr }, y0: y, y1: y + th });

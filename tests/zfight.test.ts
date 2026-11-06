@@ -29,21 +29,32 @@ const BLOCKS: [string, [number, number] | null][] = [
 const verbose = !!process.env.QA_VERBOSE;
 const rows: string[] = [];
 
-test('z-fighting per block: without vs with the build-time fix (per building, before the bake)', () => {
+/** target from the shared fix task: <= 50 m² of flickering overlap per block */
+const TARGET = 50;
+
+test('z-fighting per block (source fixes, no runtime pass)', () => {
   for (const [label, at] of BLOCKS) {
     if (!at) continue;
-    setZfix(false);
-    const raw = nycChunk(1, at[0], at[1], true);
-    const before = scanZFight(raw.group);
-    setZfix(true);
     const ch = nycChunk(1, at[0], at[1], true);
-    const after = scanZFight(ch.group);
-    rows.push(`${label.padEnd(20)} (${at}) tris ${after.tris}  pairs ${before.pairs} -> ${after.pairs}  overlap ${fmt(before.area)} -> ${fmt(after.area)} m²  build ${Math.round(raw.ms)} -> ${Math.round(ch.ms)} ms  (scan ${Math.round(after.ms)} ms)`);
-    if (verbose) for (const l of topPairs(after, 10)) rows.push('     left: ' + l);
+    const s = scanZFight(ch.group);
+    rows.push(`${label.padEnd(20)} (${at}) tris ${s.tris}  pairs ${s.pairs}  overlap ${fmt(s.area)} m²  build ${Math.round(ch.ms)} ms  scan ${Math.round(s.ms)} ms`);
+    if (verbose) for (const l of topPairs(s, 10)) rows.push('     ' + l);
     console.log(rows.splice(0).join('\n'));
-    if (label !== 'park') expect(after.area < before.area * 0.5, `${label}: the build-time fix should remove most flickering overlap (${fmt(before.area)} -> ${fmt(after.area)} m²)`);
-    soft(after.area < 5, `KNOWN ${label}: ${fmt(after.area)} m² of coplanar overlap left (${after.pairs} pairs): see topPairs`);
+    soft(s.area <= TARGET, `KNOWN ${label}: ${fmt(s.area)} m² of flickering overlap (target <= ${TARGET})`);
   }
+});
+
+test('the runtime per-building pass still works when switched on (setZfix)', () => {
+  const at = BLOCKS[0][1]!;
+  const off = scanZFight(nycChunk(1, at[0], at[1], true).group);
+  setZfix(true);
+  const t = performance.now();
+  const ch = nycChunk(1, at[0], at[1], true);
+  const ms = performance.now() - t;
+  setZfix(false);
+  const on = scanZFight(ch.group);
+  console.log(`  runtime pass on spawn: ${fmt(off.area)} -> ${fmt(on.area)} m², build ${Math.round(ms)} ms`);
+  expect(on.area <= off.area, 'the runtime pass must not add overlap');
 });
 
 test('zfix: lifts a flush decal, a stacked chain and an instanced plate apart', () => {

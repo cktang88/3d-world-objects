@@ -36,6 +36,8 @@ export interface ZOptions {
   ignoreFloorDown?: boolean;
   /** fixZFight: only these meshes may be moved (pairs with one of them lift it, whichever is smaller) */
   movable?: (m: THREE.Object3D) => boolean;
+  /** skip pairs whose smaller face lies flush against the back of an opposite-facing surface (never seen). Default true */
+  hiddenBacks?: boolean;
   /** scanZFight: also return every pair in `list` */
   keepPairs?: boolean;
   /** fixZFight: at most this many scan+lift passes. Default 4 */
@@ -235,6 +237,33 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
       }
     return true;
   };
+  // a face lying flush against the back of an opposite-facing surface (a band's back on the wall it is fixed
+  // to, a sign's back on the facade) is never seen: pairs of such faces don't flicker
+  const backed = (t: number) => {
+    if (opts.hiddenBacks === false) return false;
+    const o = t * 14;
+    const nk = (nq(-F[o + 9]) * 129 + nq(-F[o + 10])) * 129 + nq(-F[o + 11]);
+    const cx = (F[o] + F[o + 3] + F[o + 6]) / 3, cy = (F[o + 1] + F[o + 4] + F[o + 7]) / 3, cz = (F[o + 2] + F[o + 5] + F[o + 8]) / 3;
+    const dk0 = Math.floor(-F[o + 12] / res);
+    for (let dk = dk0 - 1; dk <= dk0 + 1; dk++) {
+      const l = buckets.get(nk * 2 ** 26 + (dk + 2 ** 25));
+      if (!l) continue;
+      for (let i = 0; i < l.length && i < 4000; i++) {
+        const q = l[i] * 14;
+        // centroid inside triangle q (same-side test with q's normal)
+        let inside = true;
+        for (let e = 0; e < 3 && inside; e++) {
+          const a = q + e * 3, b = q + ((e + 1) % 3) * 3;
+          const ux = F[b] - F[a], uy = F[b + 1] - F[a + 1], uz = F[b + 2] - F[a + 2];
+          const vx = cx - F[a], vy = cy - F[a + 1], vz = cz - F[a + 2];
+          const c = (uy * vz - uz * vy) * F[q + 9] + (uz * vx - ux * vz) * F[q + 10] + (ux * vy - uy * vx) * F[q + 11];
+          inside = c > -1e-9;
+        }
+        if (inside) return true;
+      }
+    }
+    return false;
+  };
   for (const [key, l0] of buckets) {
     // this bucket plus the next one along the normal (faces straddling a bucket boundary)
     const l1 = buckets.get(key + 1);
@@ -267,6 +296,7 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
         proj(s, ax, A, 0);
         proj(t, ax, B, 0);
         if (!sepAxes(A, B)) continue;
+        if (backed(F[s * 14 + 13] >= F[t * 14 + 13] ? t : s)) continue;
         // overlap estimate: the projected bounding boxes' intersection, capped by the smaller triangle
         let ov = 1;
         for (let k = 0; k < 2; k++) {
