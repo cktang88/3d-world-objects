@@ -142,7 +142,7 @@ export class GalleryLevel extends MuseumBase {
     this.settle().then(() => {
       if (!this.alive) return;
       exits.forEach((ex, i) => {
-        if (ex.target.kind !== 'gallery') return;
+        if (ex.target.kind !== 'gallery' || isSi(ex.target.theme)) return;
         const tt = museum().themes[ex.target.theme];
         const pp = pageSize(tt.collection);
         const page = ex.target.page;
