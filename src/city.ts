@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BIOMES, ROLE_BIOMES, type Biome } from './biomes';
 import { Rng, hashN, streetName } from './rng';
+import { shrinkInto } from './macro';
 import { pickModel, spawn, scaleTo, normScale, type ModelEntry } from './assets';
 import { box, cyl, plane, mat, glow, worldUVBox, footprint, rectBox3, blob } from './build';
 import { facade, roofTex, concreteTex, grassTex, roadTex, circuitTex, signTex, type FacadeStyle } from './textures';
@@ -640,7 +641,8 @@ export class CityLevel implements Level {
 
   private objectPortal(e: ModelEntry, bx: THREE.Box3, size: number): Portal {
     const rng = new Rng(hashN(this.seed, bx.min.x * 100, bx.min.z * 100));
-    return { box: bx, label: `Shrink into “${e.title}”`, sub: `${e.role} · by ${e.author ?? 'unknown'}`, target: this.objectWorld(e, rng, size), shrink: size };
+    // macro.ts: a world built from the object (a city only for buildings / model towns)
+    return { box: bx, ...shrinkInto(e, size, hashN(rng.int(0, 1e9), this.seed), biomeForRole(e.role, rng)) };
   }
 
   objectWorld(e: ModelEntry, rng: Rng, size: number): LevelDesc {

@@ -16,6 +16,7 @@ import { drawerContents, cabinetContents, upperContents, fridgeContents, closetC
 import { readFrontSteps, cutOpeningsSteps, drain, runIdle, detectDrawers, compartment, frontSampleAt, paintWith, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
 import { adoptContainer, type LazyContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
+import { shrinkInto } from './macro';
 
 /**
  * Generated building interiors: a BSP floorplan of real rooms (living rooms, bedrooms, galley
@@ -2390,13 +2391,8 @@ export class InteriorLevel implements Level {
       const size = Math.max(sp.size.x, sp.size.y, sp.size.z);
       const rng = new Rng(hashN(this.desc.seed, x * 1000, z * 1000, y * 1000));
       const biome = rng.pick(ROLE_BIOMES[role] ?? ROLE_BIOMES[e.role] ?? Object.keys(BIOMES));
-      this.ports.push({
-        box: bx,
-        label: `Shrink into “${e.title}”`,
-        sub: `${e.role}${e.author ? ` · by ${e.author}` : ''}`,
-        target: { kind: 'city', seed: rng.int(0, 2 ** 31), biome, name: `Inside “${e.title}”`, source: e, sourceScale: size },
-        shrink: size,
-      });
+      // macro.ts: the world inside it is built from the object (a garden in a plant, the inside of a box...)
+      this.ports.push({ box: bx, ...shrinkInto(e, size, rng.int(0, 2 ** 31), biome) });
     }
     return sp;
   }
@@ -2458,13 +2454,7 @@ export class InteriorLevel implements Level {
     const rng = new Rng(hashN(this.desc.seed, p.x * 999, p.z * 999));
     const biome = rng.pick(ROLE_BIOMES[e.role] ?? Object.keys(BIOMES));
     const bx = new THREE.Box3(new THREE.Vector3(p.x - pw / 2, 0, p.z - pw / 2), new THREE.Vector3(p.x + pw / 2, ph + sp.size.y + 0.1, p.z + pw / 2));
-    this.ports.push({
-      box: bx,
-      label: `Shrink into “${e.title}”`,
-      sub: `exhibit · ${e.role}${e.author ? ` · by ${e.author}` : ''}`,
-      target: { kind: 'city', seed: rng.int(0, 2 ** 31), biome, name: `Inside “${e.title}”`, source: e, sourceScale: Math.max(sp.size.x, sp.size.y, sp.size.z) },
-      shrink: Math.max(sp.size.x, sp.size.y, sp.size.z),
-    });
+    this.ports.push({ box: bx, ...shrinkInto(e, Math.max(sp.size.x, sp.size.y, sp.size.z), rng.int(0, 2 ** 31), biome) }); // macro.ts
   }
 
   /** a framed painting (a portal) on a side at `t`, its centre at height `y` */

@@ -34,6 +34,7 @@ import { probePedCar } from './probe';
 const PROBE_PEDCAR = new URLSearchParams(location.search).get('probe') === 'pedcar';
 import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
 import { Vertical } from './vertical';
+import { MacroLevel } from './macro';
 import { preloadFleet } from './nyc/vehicleFleet';
 import { enableMemTracker, installMemProbe, memTrackChildren, memTrackerOn } from './dispose';
 
@@ -217,6 +218,7 @@ function build(desc: LevelDesc, staged = false): Level {
     case 'gallery': return new GalleryLevel(desc);
     case 'interior': return desc.shop ? new ShopLevel(desc, { staged }) : new InteriorLevel(desc, { staged });
     case 'floor': return new FloorLevel(desc, { staged }); // src/rooms/vertical.ts
+    case 'macro': return new MacroLevel(desc, { staged }); // src/macro.ts: the world inside an object
   }
 }
 
@@ -308,6 +310,7 @@ function placeOf(d: LevelDesc): Place {
     case 'gallery': return 'museum';
     case 'interior': return d.shop ? 'shop' : 'interior';
     case 'floor': return d.floor >= d.floors ? 'outdoor' : 'interior';
+    case 'macro': return 'studio';
     default: return 'studio';
   }
 }
@@ -398,7 +401,7 @@ async function enter(p: Portal) {
     return;
   }
   const target = p.target;
-  const shrink = target.kind === 'city';
+  const shrink = target.kind === 'city' || target.kind === 'macro';
   const quick = target.kind === 'gallery' || target.kind === 'atrium';
   if (!shrink && seam.enabled && seam.ready(target)) {
     // seamless: already built (and maybe on show behind this door): no fade, no rebuild
@@ -460,7 +463,7 @@ async function goBack(walked = false) {
     toast(mode === 'museum' ? 'This is the atrium — pick a wing.' : 'This is the outermost world.');
     return;
   }
-  const wasCity = currentDesc.kind === 'city';
+  const wasCity = currentDesc.kind === 'city' || currentDesc.kind === 'macro';
   const parent = seam.slots.get(descKey(f.desc));
   if (seam.enabled && !wasCity && parent?.ready) {
     // seamless: the level you came from is still alive; walk back out where you went in

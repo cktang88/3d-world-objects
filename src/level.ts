@@ -26,7 +26,9 @@ export type LevelDesc =
   | { kind: 'atrium' }
   | { kind: 'gallery'; theme: number; page: number; wing?: string }
   /** a storey of a building (src/rooms/vertical.ts): floor 0 is the lobby, floor === floors the roof */
-  | { kind: 'floor'; seed: number; name: string; type: string; floor: number; floors: number };
+  | { kind: 'floor'; seed: number; name: string; type: string; floor: number; floors: number }
+  /** the world inside a small object, built from the object (src/macro.ts): garden, vessel, circuit, food, surface */
+  | { kind: 'macro'; seed: number; name: string; mode: string; title: string; source?: ModelEntry; sourceScale: number };
 
 export interface Portal {
   box: THREE.Box3;

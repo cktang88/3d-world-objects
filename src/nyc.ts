@@ -15,6 +15,7 @@ import { building, makeCtx, finishBuildings, setBlockDetail, setNight as setBuil
 onTimeChange((_t, n) => setBuildingNight(n));
 setBuildingNight(getNight());
 import { Rng, hashN } from './rng';
+import { shrinkInto } from './macro';
 import { pickModel, spawn, normScale, type ModelEntry } from './assets';
 import { mat, glow } from './build';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
@@ -451,10 +452,8 @@ function objectPortal(e: ModelEntry, x: number, z: number, size: THREE.Vector3, 
   const biomes = ['town', 'toyland', 'candy', 'neon', 'snow', 'desert', 'circuit', 'metropolis'];
   return {
     box: new THREE.Box3(new THREE.Vector3(x - size.x / 2 - 0.15, 0, z - size.z / 2 - 0.15), new THREE.Vector3(x + size.x / 2 + 0.15, size.y + 0.2, z + size.z / 2 + 0.15)),
-    label: `Shrink into “${e.title}”`,
-    sub: `${e.role} · by ${e.author ?? 'unknown'} — a whole world inside`,
-    target: { kind: 'city', seed: r.int(0, 2 ** 31), biome: r.pick(biomes), name: `Inside “${e.title}”`, source: e, sourceScale: Math.max(size.x, size.y, size.z) },
-    shrink: Math.max(size.x, size.y, size.z),
+    // macro.ts: the world inside is built from the object itself
+    ...shrinkInto(e, Math.max(size.x, size.y, size.z), r.int(0, 2 ** 31), r.pick(biomes)),
   };
 }
 
