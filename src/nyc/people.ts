@@ -303,8 +303,13 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
               c *= 0.72 + 0.32 * smoothstep(0.0, 0.55, d);
               clothRough = 0.42;
             } else if (st > 2.5 && st < 3.5) {     // open coat: shirt shows down the front
-              if (!arm && vBody.z > 0.02 && ax < 0.012 + 0.055 * smoothstep(uCut.x + 0.18, uCut.y, vBody.y) && vBody.y > uCut.x + 0.12) c = uInner;
-              else if (!arm && vBody.z > 0.02 && ax < 0.008) c *= 0.6;   // closure line
+              // lapel V: closed below a top button at mid-chest, opening linearly to the collar
+              // (was an S-curve that bulged into a light-bulb blob over the bust)
+              float vt = clamp((vBody.y - (uCut.x + 0.27)) / (uCut.y - uCut.x - 0.27), 0.0, 1.0);
+              float vw = vBody.y > uCut.x + 0.27 ? 0.004 + 0.05 * vt : -1.0;
+              if (!arm && vBody.z > 0.02 && ax < vw) c = uInner * (0.88 + 0.12 * vt);
+              else if (!arm && vBody.z > 0.02 && vw > 0.0 && ax < vw + 0.012) c *= 0.72;   // lapel edge folding back
+              else if (!arm && vBody.z > 0.02 && ax < 0.006) c *= 0.6;   // closure line
               if (!arm && vBody.y < uCut.x + 0.02 && vBody.y > uCut.x - 0.01) c *= 0.7;
               clothRough = 0.8;
             } else if (st > 3.5) {                  // hoodie: kangaroo pocket seam + hood bulk at the neck
@@ -469,9 +474,48 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
 }
 
 // ---------------------------------------------------------------- props
+/** a backpack strap with real thickness that follows the torso: up the chest, over the
+ *  trapezius and down into the top of the pack (model space; was a flat 12 mm card standing off
+ *  the chest). Cached per body / side / padding. */
+const strapGeos = new Map<string, THREE.BufferGeometry>();
+function strapGeo(side: number, neck: number, sp: number, pad: number) {
+  const k = `${side}|${neck}|${sp}|${pad}`;
+  let g = strapGeos.get(k);
+  if (g) return g;
+  const x = side * 0.1;
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(x + side * 0.035, sp + 0.0, 0.085 + pad), // ends low on the chest, toward the armpit
+    new THREE.Vector3(x + side * 0.012, sp + 0.12, 0.092 + pad),
+    new THREE.Vector3(x, neck - 0.04, 0.06 + pad),
+    new THREE.Vector3(x - side * 0.005, neck, 0.0), // over the trapezius
+    new THREE.Vector3(x, neck - 0.04, -0.075 - pad),
+    new THREE.Vector3(x, sp + 0.13, -0.12 - pad), // into the pack's top
+  ]);
+  const N = 14, hw = 0.022, ht = 0.007;
+  const pos: number[] = [], idx: number[] = [];
+  const t = new THREE.Vector3(), w = new THREE.Vector3(), n = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i <= N; i++) {
+    curve.getPointAt(i / N, c);
+    curve.getTangentAt(i / N, t);
+    w.set(1, 0, 0).addScaledVector(t, -t.x).normalize();
+    n.crossVectors(t, w).normalize();
+    for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) pos.push(c.x + w.x * hw * a + n.x * ht * b, c.y + w.y * hw * a + n.y * ht * b, c.z + w.z * hw * a + n.z * ht * b);
+  }
+  for (let i = 0; i < N; i++)
+    for (let j = 0; j < 4; j++) {
+      const a = i * 4 + j, b = i * 4 + ((j + 1) % 4);
+      idx.push(a, b, b + 4, a, b + 4, a + 4);
+    }
+  for (const e of [0, N * 4]) idx.push(e, e + 1, e + 2, e, e + 2, e + 3, e, e + 2, e + 1, e, e + 3, e + 2);
+  g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  strapGeos.set(k, g);
+  return g;
+}
 const propGeo = {
   backpack: new RoundedBoxGeometry(0.3, 0.42, 0.15, 3, 0.045),
-  strap: new THREE.BoxGeometry(0.045, 0.2, 0.012),
   crossbody: new RoundedBoxGeometry(0.22, 0.16, 0.07, 2, 0.02),
   tote: new RoundedBoxGeometry(0.36, 0.34, 0.1, 2, 0.015),
   phone: new RoundedBoxGeometry(0.075, 0.155, 0.009, 2, 0.006),
@@ -1004,7 +1048,7 @@ export class Person {
       parts.push({ geo: propGeo.backpack, bone: 'spine_03', m: at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)), color: bc });
       this.far.props |= 1;
       this.far.bag.set(bc);
-      for (const s of [-1, 1]) parts.push({ geo: propGeo.strap, bone: 'spine_03', m: at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0), color: bc });
+      for (const s of [-1, 1]) parts.push({ geo: strapGeo(s, b.neck, sp, o.topStyle === 2 ? 0.03 : o.topStyle === 3 || o.topStyle === 4 ? 0.012 : 0), bone: 'spine_03', m: new THREE.Matrix4(), color: bc });
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       parts.push({ geo: propGeo.crossbody, bone: 'pelvis', m: at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0), color: bc });
