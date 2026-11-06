@@ -583,15 +583,21 @@ function buildStub(k: Kit, d: Dims, m: Mats, s: Spec) {
   k.unshadowed(() => k.sphere(M.diffuser(), 0.12, 0, d.Hc - 0.1, d.Ld + L / 2, 0.6));
 }
 
-function columnFor(key: string, d: Dims, m: Mats, s: Spec): Column {
+/** the building's stair column, built once (in slices) and shared by all its floors */
+function* columnFor(key: string, d: Dims, m: Mats, s: Spec): Generator<void, Column> {
   let c = columns.get(key);
   if (!c) {
     const ks = new Kit(), kb = new Kit(), kc = new Kit(), kt = new Kit();
     buildSegment(ks, d, m, s);
+    yield;
+    const segment = meshes(ks);
+    yield;
     buildBase(kb, d, m);
     buildCap(kc, d, m);
     buildStub(kt, d, m, s);
-    c = { segment: meshes(ks), base: meshes(kb), cap: meshes(kc), stub: meshes(kt), users: 0 };
+    yield;
+    // another floor of the same building may have finished it meanwhile
+    c = columns.get(key) ?? { segment, base: meshes(kb), cap: meshes(kc), stub: meshes(kt), users: 0 };
     columns.set(key, c);
   }
   c.users++;
@@ -721,9 +727,11 @@ export class FloorLevel implements Level {
     this.group.name = `floor:${this.name}`;
     this.well.name = 'stairwell';
     this.group.add(this.well);
-    this.staging = this.generate();
+    this.staging = timed(this.generate(), this.slices);
     if (!opts.staged) finishBuilding(this);
   }
+  /** ms of each construction slice (for perf checks) */
+  slices: number[] = [];
 
   colliders() {
     // the lift door opening is blocked unless its doors are (nearly) open
@@ -737,8 +745,9 @@ export class FloorLevel implements Level {
   update() {}
   dispose() {
     disposeTree(this.group);
-    releaseColumn(this.colKey);
+    if (this.hasColumn) releaseColumn(this.colKey);
   }
+  private hasColumn = false;
 
   /** the walkable height near y at (x, z) */
   ground(x: number, z: number, y: number) {
@@ -791,7 +800,8 @@ export class FloorLevel implements Level {
   private *generate() {
     const d = this.d, s = this.spec, f = this.floor, H = d.H;
     // 1. the stair column: one instance per storey, relative to this floor
-    const col = columnFor(this.colKey, d, this.m, s);
+    const col = yield* columnFor(this.colKey, d, this.m, s);
+    this.hasColumn = true;
     const segYs: number[] = [];
     for (let j = 0; j < this.floors; j++) segYs.push((j - f) * H);
     instanced(col.segment, segYs, this.well);
@@ -824,12 +834,22 @@ export class FloorLevel implements Level {
       yield* this.roofTop();
     } else {
       yield* this.hall();
-      if (f === 0) yield* this.lobby();
+      if (f === 0) {
+        // merge the hall now, the lobby in its own slice
+        this.flush('hall');
+        yield;
+        yield* this.lobby();
+      }
     }
+    yield;
+    this.flush(this.roof ? 'roof' : f === 0 ? 'lobby' : 'hall');
+  }
+  private flush(name: string) {
     const g = new THREE.Group();
-    g.name = 'hall';
+    g.name = name;
     this.kit.finish(g);
     this.group.add(g);
+    this.kit = new Kit();
   }
 
   /** stencilled (or plaque) floor numbers at every landing, merged into one mesh */
@@ -1426,6 +1446,16 @@ export class FloorLevel implements Level {
     g.name = 'skyline';
     k.finish(g, false);
     this.group.add(g);
+  }
+}
+
+function* timed(g: Iterator<unknown>, out: number[]) {
+  for (;;) {
+    const t = performance.now();
+    const r = g.next();
+    out.push(+(performance.now() - t).toFixed(1));
+    if (r.done) return;
+    yield;
   }
 }
 
