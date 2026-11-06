@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from '../rng';
-import { SIG, CYCLE } from './common';
+import { SIG, CYCLE, SIGNAL } from './common';
 
 /**
  * Painted texture atlases for street furniture, so every decal in a chunk bakes into one draw call:
@@ -460,7 +460,7 @@ export function pedState() {
   const aveG = SIG.aveG.emissiveIntensity > 1;
   if (aveG && !lastAveG) pedT0 = now;
   lastAveG = aveG;
-  if (pedT0 < 0) pedT0 = now - (aveG ? 0 : SIG.stG.emissiveIntensity > 1 ? 13 : 23);
+  if (pedT0 < 0) pedT0 = now - (aveG ? 0 : SIG.stG.emissiveIntensity > 1 ? SIGNAL.stGreen + 0.5 : SIGNAL.stRed + 0.5);
   const t = pedDebug.t >= 0 ? pedDebug.t : (now - pedT0) % CYCLE;
   const ch = (walk0: number, walk1: number, end: number): [number, number] => {
     const tt = (t - walk0 + CYCLE) % CYCLE;
@@ -469,8 +469,9 @@ export function pedState() {
     if (tt < len) return [2, Math.ceil(len - tt)];
     return [0, 0];
   };
-  const [am, ac] = ch(0, 6, 12.5);
-  const [sm, sc] = ch(12.5, 17, 24);
+  // walk for the first part of each green, then the flashing hand counts down to that phase's red
+  const [am, ac] = ch(SIGNAL.aveGreen, SIGNAL.aveGreen + 6, SIGNAL.aveRed);
+  const [sm, sc] = ch(SIGNAL.stGreen, SIGNAL.stGreen + 4, SIGNAL.stRed);
   return [am, ac, sm, sc, now];
 }
 function pedAnimation(m: THREE.MeshStandardMaterial) {

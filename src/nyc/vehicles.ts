@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rng, hashN } from '../rng';
 import { mat } from '../build';
 import type { Portal, Rect } from '../level';
-import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST } from './common';
+import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST, CYCLE, SIGNAL } from './common';
 import { laneOpen } from './districts'; // [districts]
 import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
@@ -277,6 +277,14 @@ export class Traffic {
     }
     // [districts] roads end at parks, the airport and the river: start on a road that is there
     for (let i = 0; i < 8 && !laneOpen(c.axis, c.line, c.t); i++) c.t += c.dir * SZ;
+    // never drop a car onto (or right behind) one already in that lane: back off until there is a gap
+    for (let i = 0; i < 20; i++) {
+      const hit = this.cars.find(
+        (o) => o !== c && o.axis === c.axis && o.dir === c.dir && Math.abs(o.line - c.line) <= 1 && Math.abs(o.t - c.t) < (o.len + c.len) / 2 + 6,
+      );
+      if (!hit) break;
+      c.t = hit.t - c.dir * ((hit.len + c.len) / 2 + 8);
+    }
     c.v = c.vmax;
     c.obj.rotation.y = c.axis === 'z' ? (c.dir > 0 ? Math.PI : 0) : c.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
   }
@@ -298,11 +306,19 @@ export class Traffic {
       const period = c.axis === 'z' ? SZ : AX;
       const halfCross = c.axis === 'z' ? ST / 2 : AVE / 2;
       const front = c.t + (c.dir * c.len) / 2;
-      const k = c.dir > 0 ? Math.ceil((front - period / 2 + halfCross + 4) / period) : Math.floor((front - period / 2 - halfCross - 4) / period);
+      // the next intersection is the first whose near edge is still ahead of the front bumper, so a car that
+      // overshoots its stop line keeps stopping for this intersection instead of retargeting the next one
+      const k = c.dir > 0 ? Math.floor((front + halfCross) / period - 0.5) + 1 : Math.ceil((front - halfCross) / period - 0.5) - 1;
       const centre = (k + 0.5) * period;
       const stopAt = centre - c.dir * (halfCross + 4.2);
       const dist = (stopAt - front) * c.dir;
-      if (lightFor(c.axis, time) !== 'g' && dist > -0.5 && dist < 30) target = Math.min(target, Math.max(0, (dist - 0.5) * 1.2));
+      const light = lightFor(c.axis, time);
+      // red: always stop (hard if already past the line); yellow: stop if there is room to (~4 m/s²), else clear
+      // (going on yellow only if the front reaches the box before the red)
+      const ph = ((time % CYCLE) + CYCLE) % CYCLE;
+      const yellowLeft = (c.axis === 'z' ? SIGNAL.aveRed : SIGNAL.stRed) - ph;
+      const stop = light === 'r' || (light === 'y' && (dist > (c.v * c.v) / 8 - 1 || (dist + 4.2) / Math.max(c.v, 0.1) > yellowLeft - 0.15));
+      if (stop && dist < 30) target = Math.min(target, Math.max(0, (dist - 0.5) * 1.2));
       // [districts] a dead end ahead (park, airport, river): stop there; vanish once out of sight range
       {
         const ahead = c.t + c.dir * (c.len / 2 + 6);
@@ -314,8 +330,11 @@ export class Traffic {
       // follow the car ahead in the same lane
       for (const o of this.cars) {
         if (o === c || o.axis !== c.axis || o.dir !== c.dir || Math.abs(o.line - c.line) > 1) continue;
-        const gap = (o.t - c.t) * c.dir - (o.len + c.len) / 2;
-        if (gap > -1 && gap < 25) target = Math.min(target, Math.max(0, (gap - 2.5) * 1.0));
+        const ahead = (o.t - c.t) * c.dir;
+        // o is ahead (ties broken by order) — also when they already overlap, so the rear one waits
+        if (ahead < 0 || (ahead === 0 && this.cars.indexOf(o) > this.cars.indexOf(c))) continue;
+        const gap = ahead - (o.len + c.len) / 2;
+        if (gap < 25) target = Math.min(target, Math.max(0, (gap - 2.5) * 1.0));
       }
       // don't run the player over
       const pg = (along - c.t) * c.dir - c.len / 2;

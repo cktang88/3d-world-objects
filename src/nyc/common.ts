@@ -169,12 +169,17 @@ export const SIG = {
   stY: new THREE.MeshStandardMaterial({ color: '#332200', emissive: '#ffb21a' }),
   stG: new THREE.MeshStandardMaterial({ color: '#002211', emissive: '#2aff8a' }),
 };
-export const CYCLE = 24;
+/**
+ * Signal plan (s into the cycle): avenue green 0-10, yellow 10-12.5, all-red 12.5-14.5, street green 14.5-21.5,
+ * yellow 21.5-24, all-red 24-26. NYC uses ~2 s of all-red so yellow-light runners clear the box.
+ */
+export const CYCLE = 26;
+export const SIGNAL = { aveGreen: 0, aveYellow: 10, aveRed: 12.5, stGreen: 14.5, stYellow: 21.5, stRed: 24 };
 /** 'g' | 'y' | 'r' for traffic moving along avenues (z) or streets (x) */
 export function lightFor(axis: 'x' | 'z', time: number): 'g' | 'y' | 'r' {
-  const t = time % CYCLE;
-  if (axis === 'z') return t < 10 ? 'g' : t < 12.5 ? 'y' : 'r';
-  return t < 12.5 ? 'r' : t < 22 ? 'g' : t < 24 ? 'y' : 'r';
+  const t = ((time % CYCLE) + CYCLE) % CYCLE;
+  if (axis === 'z') return t < SIGNAL.aveYellow ? 'g' : t < SIGNAL.aveRed ? 'y' : 'r';
+  return t < SIGNAL.stGreen ? 'r' : t < SIGNAL.stYellow ? 'g' : t < SIGNAL.stRed ? 'y' : 'r';
 }
 
 // ---------------------------------------------------------------- the level

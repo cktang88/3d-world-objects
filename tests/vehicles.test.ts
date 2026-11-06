@@ -73,24 +73,18 @@ test('cars stay in their lanes (72 s of traffic at dt 0.1)', () => {
 
 test('cars do not enter an intersection on red', () => {
   const red = trafficLog().red;
-  // KNOWN (qa-findings #6): a car that overshoots its stop point retargets the next intersection
-  // and drives through the red. Tighten the limit to 0 once fixed.
-  if (red.length) known(`${red.length} red-light runs in 72 s, e.g. ${red.slice(0, 2).join('; ')}`);
-  expect(red.length <= 10, `${red.length} cars ran a red light: ${red.slice(0, 4).join('; ')}`);
+  none(red, 'red-light runs');
 });
 
 test('cars in the same lane never overlap', () => {
   const l = trafficLog();
-  // KNOWN (qa-findings #7): Traffic.place() drops a car onto a lane without checking for one already there,
-  // and the follow logic ignores gaps < -1 m, so the two drive through each other
-  if (l.overlap) known(`${l.overlap} car-in-car frames in 72 s (min gap ${fmt(l.minGap)} m)`);
-  expect(l.overlap < 1000, `${l.overlap} car-in-car frames (min gap ${fmt(l.minGap)} m)`);
+  expect(l.overlap === 0, `${l.overlap} car-in-car frames (min gap ${fmt(l.minGap)} m)`);
 });
 
 test('the signal plan has an all-red clearance between phases', () => {
   // one direction's red must start before the other's green (NYC: ~2 s all-red)
   let clear = 0;
   for (let t = 0; t < CYCLE; t += 0.05) if (lightFor('x', t) === 'r' && lightFor('z', t) === 'r') clear += 0.05;
-  if (clear < 1) known(`no all-red interval in the ${CYCLE} s cycle (${fmt(clear)} s): yellow-light runners meet cross traffic (qa-findings #5)`);
+  expect(clear >= 1.5, `only ${fmt(clear)} s of all-red in the ${CYCLE} s cycle`);
 });
 
