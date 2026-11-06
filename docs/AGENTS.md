@@ -16,14 +16,27 @@ The Blender + sand3d Python env (for rebuilding objects from their programs) is 
 
 Nothing may run long or crash-loop. Shots and perf runs stop at `--max` seconds (default 240). Lock waits use `flock -w 300`. Batch jobs run in chunks of 15 minutes or less that can resume. Log progress to a file. After two failures, shrink the experiment rather than retrying it. `scripts/reap.sh` kills overruns. The full workflow is in `.claude/skills/fast-3d-testing/SKILL.md`.
 
+## Testing: fast first
+
+Most questions don't need pixels. Answer them in Node, with no browser:
+
+- **Logic and proportions:** run `npm run qa:changed` (the tests covering files you changed) or `npm run qa -- <area>`. Areas include `nyc`, `people`, `vehicles`, `shop`, `interior`, `museum`, `seamless` and `districts`. The checks run the real generators: sizes, distances, angles, overlaps, reachability, simulations, budgets and determinism. One area takes a few seconds; the whole suite takes under 30 s. Run the whole suite only at check-ins.
+- **Writing tests:** add one in `tests/` for each rule you care about. See the skill for the helpers.
+- **Known bugs:** they are listed in `docs/research/qa-findings.md`.
+- **Screenshots are only for how things look.** Take them in a lab, small, with `--fast` (or `--notex --nopost`). Never render the full city in dev/QA.
+
+The full workflow is in `.claude/skills/fast-3d-testing/SKILL.md`.
+
 ## Iterate fast: the lab
 
 Never iterate in the full world. Make a lab scene showing just your thing:
 
 - `src/lab/<name>.ts` default-exports a `LabScene` (see `src/lab.ts`; `src/lab/vehicles.ts` is a minimal example). Files there are picked up automatically.
 - Open `/?lab=<name>&cam=x,y,z&look=x,y,z&env=studio|nyc|museum|night`. `?lab=index` lists all scenes.
-- Screenshot it: `node scripts/shot.mjs --port <port> --url "/?lab=<name>" --out /tmp/…/x.png --w 960 --h 540`. Then look at the PNG.
-- Software rendering is slow: use `--quality high` (default) or `low`. Avoid `ultra` in screenshots.
+- Screenshot it: `node scripts/shot.mjs --port <port> --url "/?lab=<name>" --out /tmp/…/x.png --fast`. Then look at the PNG.
+- **Defaults:** 480×270, `--quality low`.
+- **Fast preset:** `--fast` (`?fast=1`) also turns off textures, post-processing, shadows and people, and streams only your block.
+- **Materials:** drop `--fast` only when materials matter. Even then, avoid `ultra`.
 - **Full-world runs (`?mode=world`, `?mode=museum`) use ~2 GB RAM each and the machine has 16 GB shared by many agents.** Run them one at a time across all agents: `flock -w 300 /tmp/claude-0/world-shot.lock node scripts/shot.mjs --max 600 ...`. Lab scenes don't need the lock.
 - `--eval "<js>"` runs code first. `window.__world` exposes the renderer, player and level (in the full game).
 
@@ -44,7 +57,7 @@ Write what you learned to `docs/research/<area>.md` with the image URLs and the 
 
 ## Commits
 
-- **Size:** small and frequent, each a working state: `npx tsc --noEmit -p .` passes, plus only the tests relevant to what you changed (`npm run qa -- <pattern>`). Don't run the full suite or re-render scenes on every commit.
+- **Size:** small and frequent, each a working state: `npx tsc --noEmit -p .` passes, plus only the tests relevant to what you changed (`npm run qa:changed` or `npm run qa -- <area>`). Don't run the full suite or re-render scenes on every commit.
 - **Pushing:** `git fetch origin main && git rebase origin/main && git push origin HEAD:main`. If the push is rejected, rebase and push again. Never force-push `main`.
 - **Messages:** say what changed and why. End with:
 

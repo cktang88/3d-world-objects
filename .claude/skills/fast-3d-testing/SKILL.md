@@ -10,15 +10,15 @@ This machine has **no GPU** (SwiftShader software rendering), 4 CPUs shared by m
 | Question | Cheapest check | Cost |
 |---|---|---|
 | Does it compile? | `npx tsc --noEmit -p .` | seconds |
-| Sizes, distances, angles, overlaps, reachability, game logic, budgets, determinism | `npm run qa [-- <pattern>]` (Node only: real generators, no renderer, no textures) | < 30 s for all |
+| Sizes, distances, angles, overlaps, reachability, game logic, budgets, determinism | `npm run qa:changed` or `npm run qa -- <area>` (Node only: real generators, no renderer, no textures) | 2–15 s per area |
 | One number from a real scene (tris, mesh count, a position) | lab scene + `--eval` returning JSON, tiny viewport | ~10–30 s |
-| Does it *look* right? | lab scene screenshot, small, low quality, no textures/post if the look doesn't depend on them | ~20–60 s |
+| Does it *look* right? | lab scene screenshot with `--fast` (or `--notex --nopost` at small size) | ~30–60 s under load |
 | Draw calls / triangles of the real world | `node scripts/perf.mjs` (counts only, takes the world lock) | minutes |
 | Full-world screenshot | last resort, under the lock | minutes, ~2 GB |
 
 ## 0. Never the full city while developing
 
-Don't render or simulate the whole city for dev, QA or e2e work. Use the smallest slice that answers the question:
+**Never render the full city in dev/QA. Use Node `qa` first, then `?fast=1` labs.** Don't render or simulate the whole city for dev, QA or e2e work. Use the smallest slice that answers the question:
 - **Node `qa` tests:** no rendering at all.
 - **A lab scene:** one object, building, room or corner.
 - **`?mode=world&r=0`:** only the block you're on. `&r=1` gives a 3×3 patch. Add `&people=0` and the fast flags.
@@ -27,7 +27,21 @@ Even a three-car lab takes minutes to render here under load. Full-city counts a
 
 ## 1. Logic and proportions: `npm run qa`
 
-- Tests live under `tests/` and run the real level generators (NYC chunks, buildings, shops, interiors, museum, people, vehicles) in Node with a shim for canvas/Image/fetch/Worker/localStorage. No textures, no remote models.
+- **Run only what you touched:**
+  - `npm run qa:changed` picks the tests for the files you changed vs `origin/main` (the `SRC_MAP` in `scripts/qa.mjs`).
+  - `npm run qa -- <area>` runs one area: `nyc`, `ground`, `people`, `vehicles`, `shop`, `interior`, `vertical`, `museum`, `seamless`, `districts`, … (`AREAS` in `scripts/qa.mjs`), or any test-file path pattern.
+  - `-t "<regex>"` picks tests by name. `QA_VERBOSE=1` lists passes and known-issue notes.
+  - The whole suite (`npm run qa`) takes about 15–30 s under load. Run it only at check-ins.
+- **Hard limits:** 20 s per test (`QA_TEST_TIMEOUT`), 45 s per file (`QA_FILE_TIMEOUT`, the process is killed), 120 s total (`QA_MAX`).
+- **How it works:** `tests/*.test.ts` are bundled by esbuild and run in plain Node processes (three.js scene graphs work without a renderer).
+  - `tests/shim.ts` fakes `document`, canvas (no-op 1×1), `Image` (loads at once), `fetch`, `Worker` and `localStorage`. `fetch` serves `public/` from disk and blocks remote URLs; binary assets 404 unless a test calls `allowModels(/assets\/people\//)`. `Worker` answers every request with an error.
+  - **Helpers:**
+    - `tests/qa.ts`: `test`, `expect`, `between`, `none`, `soft`, `stats()` (meshes/tris/materials), `sceneHash()`, `Grid` (collider flood fill).
+    - `tests/world.ts`: `nycChunk(seed, cx, cz)` builds one block, not the 3×3 the level constructor builds.
+    - `tests/env.ts`: `settle`, `allowModels`, `setSearch('people=40')`. A URL flag must be set before you dynamically `import()` the module that reads it.
+  - **Known bugs** go in `docs/research/qa-findings.md`. In the test they are `soft(false, 'KNOWN …')`: a NOTE that does not fail. Remove the allowance when you fix the bug.
+  - **New test file:** add its area to `AREAS` and its source files to `SRC_MAP` in `scripts/qa.mjs`.
+- Tests run the real level generators (NYC chunks, buildings, shops, interiors, museum, people, vehicles). No textures, no remote models.
 - Add a test for every rule you care about, instead of eyeballing a screenshot:
   - **real-scale ranges:** door 2.0–2.4 m, stair rise 15–20 cm / run 25–30 cm, counter ~0.9 m, curb 15–18 cm, car 4–5.5 m, person 1.5–1.95 m; museum objects never scaled down
   - **AABB overlaps:** props vs walls vs each other, nothing blocking doors
@@ -42,16 +56,18 @@ Even a three-car lab takes minutes to render here under load. Full-city counts a
 
 - Never iterate in the full world. Build only your thing in `src/lab/<name>.ts` (see `src/lab.ts`; files there are auto-registered; `?lab=index` lists them).
 - Screenshot:
-  `node scripts/shot.mjs --port <port> --url "/?lab=<name>&cam=x,y,z&look=x,y,z" --out <scratchpad>/x.png --w 480 --h 270 --quality low`
-- **Flags:**
-  - `--quality low` (G key levels)
-  - `?notex=1` / `--notex`: flat colours, no texture/HDRI/PBR loads
-  - `?post=0` / `--nopost`: no GTAO/bloom
-  - `--wait <ms>`: wait for streaming
-  - `&settle=<ms>`: lab settle time
+  `node scripts/shot.mjs --port <port> --url "/?lab=<name>&cam=x,y,z&look=x,y,z" --out <scratchpad>/x.png --fast`
+- **Defaults:** 480×270, `--quality low`. Go bigger only for a final comparison shot.
+- **Flags** (in `src/flags.ts`, which works for labs, the world and the museum):
+  - `?fast=1` / `--fast`: the preset. It is `r=0` (just your block), `people=0`, `notex=1`, `post=0`, `shadows=0` and `quality=low` (pixel ratio 1). Flags you give explicitly win, e.g. `--fast --url "/?lab=x&people=20"`.
+  - `?notex=1` / `--notex`: flat colours. No image/texture/HDRI/PBR downloads (shot.mjs aborts them), and every material's maps are removed. Alpha-cut cards such as leaves become solid quads.
+  - `?post=0` / `--nopost`: no GTAO/bloom/grading passes, a direct render.
+  - `?shadows=0` / `--noshadows`: no shadow maps.
+  - `--quality low|high|ultra`
+  - `--wait <ms>`: wait for streaming.
+  - `&settle=<ms>`: lab settle time.
 
-  Use `--notex --nopost` whenever you are judging shape, layout or proportion, not materials.
-- Use a 480×270 viewport by default. Go bigger only for a final comparison shot.
+  Use `--fast` (or `--notex --nopost`) whenever you are judging shape, layout or proportion, not materials.
 - Prefer one `--eval "JSON.stringify(...)"` over a screenshot when you need a number (`window.__world` exposes renderer, player and level; `window.__world.perf()` gives counts).
 - Compare against reference photos side by side (download a reference, Read both images).
 
@@ -83,5 +99,5 @@ Even a three-car lab takes minutes to render here under load. Full-city counts a
 
 1. Write or extend a `qa` test for the rule. It runs in seconds: make it fail, fix it, make it pass.
 2. Tune looks in a lab scene with tiny screenshots (`--notex --nopost` until materials matter).
-3. Before each commit run `tsc` and only the tests for what you touched (`npm run qa -- <area or file pattern>`). Never run the whole suite per commit. Run the full suite only occasionally, e.g. at the end of a feature, and the coordinator runs it at check-ins. Commit small, push to main.
+3. Before each commit run `tsc` and only the tests for what you touched (`npm run qa:changed`, or `npm run qa -- <area or file pattern>`). Never run the whole suite per commit. Run the full suite only occasionally, e.g. at the end of a feature, and the coordinator runs it at check-ins. Commit small, push to main.
 4. Only at the end of a feature: one perf count or one full-world shot under the lock.
