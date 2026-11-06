@@ -446,7 +446,7 @@ export function analyse(tex: THREE.DataTexture, clampMul: number, sat = 1): Omit
       }
       sum += l * w;
       if (el > 0) { skySum += l * w; skyN += w; }
-      if (el > 1 && el < 10 && (c & 3) === 0) {
+      if (el > 5 && el < 16 && (c & 3) === 0) {
         hz.r += half(data[p]); hz.g += half(data[p + 1]); hz.b += half(data[p + 2]);
         hzN++;
       }
@@ -529,6 +529,7 @@ const SkyDomeShader = {
   uniforms: {
     tA: { value: null as THREE.Texture | null }, tB: { value: null as THREE.Texture | null }, tC: { value: null as THREE.Texture | null },
     wA: { value: 0 }, wB: { value: 1 }, wC: { value: 0 },
+    uFog: { value: new THREE.Color() },
   },
   vertexShader: /* glsl */ `varying vec3 vDir;
 void main() {
@@ -538,6 +539,7 @@ void main() {
 }`,
   fragmentShader: /* glsl */ `uniform sampler2D tA, tB, tC;
 uniform float wA, wB, wC;
+uniform vec3 uFog;
 varying vec3 vDir;
 #include <common>
 vec2 eqUv(vec3 d) {
@@ -550,6 +552,10 @@ void main() {
   if (wA > 0.0) c += texture2D(tA, uv).rgb * wA;
   if (wB > 0.0) c += texture2D(tB, uv).rgb * wB;
   if (wC > 0.0) c += texture2D(tC, uv).rgb * wC;
+  // the HDRIs were shot at street level in other cities: below ~10 degrees their buildings would
+  // show at the end of every avenue, so the low sky melts into the fog colour (Manhattan's haze)
+  float el = normalize(vDir).y;
+  c = mix(uFog, c, smoothstep(0.02, 0.2, el));
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -1085,6 +1091,7 @@ export class Lighting {
     }
     fog.density = p.fog * w.fogMul;
     if (w.fogColor && w.fogMix > 0) fog.color.lerp(new THREE.Color(w.fogColor), w.fogMix);
+    this.dome.material.uniforms.uFog.value.copy(fog.color);
   }
 
   private physicalSky(dir: THREE.Vector3) {
