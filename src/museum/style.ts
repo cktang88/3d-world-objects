@@ -49,15 +49,15 @@ export const STYLES: Record<Arch, Style> = {
   }),
   // Petersen / Mercedes-Benz / Making the Modern World: dark hall, cars on low platforms, spotlit
   motor: S({
-    arch: 'motor', walls: ['#2b2d31', '#3a3530', '#1f2429', '#45403a'], floors: ['concrete', 'terrazzo'], ceilings: ['truss', 'flat'], dark: true, height: [6.5, 9], aspect: [1.0, 1.8],
+    arch: 'motor', walls: ['#55595f', '#5e5449', '#3f4f5e', '#6a6158'], floors: ['concrete', 'terrazzo'], ceilings: ['truss', 'flat'], dark: true, height: [6.5, 9], aspect: [1.0, 1.8],
     barrier: ['rope', 'glass', 'edge'], plinth: ['#e9e7e2', '#202224', '#7a7f85'], trim: '#55595e', ink: '#f2efe8', small: ['vitrine', 'wallcase'], medium: ['plinth', 'riser'], hang: false, mount: true,
-    caseFrame: '#1a1a1a', light: '#fff4e6', hemi: 0.4,
+    caseFrame: '#1a1a1a', light: '#fff4e6', hemi: 0.7,
   }),
   // Vasa / National Maritime: boats on cradles in a dim, tall hall
   maritime: S({
     arch: 'maritime', walls: ['#24323d', '#2f2a26', '#3b4a52'], floors: ['oak', 'concrete'], ceilings: ['truss', 'flat'], dark: true, height: [7, 10], aspect: [1.2, 2.4],
     barrier: ['rope', 'rail'], plinth: ['#3d3127', '#2a2a2a'], trim: '#5a4a3a', ink: '#efe6d2', small: ['wallcase', 'vitrine', 'table'], medium: ['plinth'], hang: false, mount: true,
-    caseFrame: '#2a2018', light: '#ffe8c8', hemi: 0.45,
+    caseFrame: '#2a2018', light: '#ffe8c8', hemi: 0.7,
   }),
   // Deutsches Museum Kraftmaschinen / Science Museum Energy Hall: brick, cast-iron, machines on the floor behind yellow lines
   machine: S({
@@ -79,9 +79,9 @@ export const STYLES: Record<Arch, Style> = {
   }),
   // Met musical instruments / Wallace Collection armoury: dark walls, each object a pool of light
   treasury: S({
-    arch: 'treasury', walls: ['#1d2430', '#2a1f24', '#1f2a24', '#23201c'], floors: ['carpet', 'oak', 'parquet'], ceilings: ['flat', 'coffer'], dark: true, height: [4.5, 6], aspect: [1.0, 2.2],
-    barrier: ['edge', 'rope'], plinth: ['#15171a', '#2a2622'], trim: '#3a332a', ink: '#e8dcc3', small: ['vitrine', 'wallcase', 'hood'], medium: ['plinth'], hang: false, mount: true,
-    caseFrame: '#0f0f0f', light: '#ffe6c0', hemi: 0.32,
+    arch: 'treasury', walls: ['#2f4f86', '#7a2e2e', '#3d5e4c', '#4d4170'], floors: ['oak', 'parquet', 'carpet'], ceilings: ['flat', 'coffer'], dark: true, height: [4.5, 6], aspect: [1.0, 2.2],
+    barrier: ['edge', 'rope'], plinth: ['#d8c4a0', '#2a2622'], trim: '#c9b48a', ink: '#f3ead6', small: ['vitrine', 'wallcase', 'hood'], medium: ['plinth'], hang: false, mount: true,
+    caseFrame: '#2a2622', light: '#ffe6c0', hemi: 0.7,
   }),
   // V&A ceramics visible storage / Pitt Rivers / Science Museum stores: dense glass cabinets, flat table cases
   study: S({
@@ -93,7 +93,7 @@ export const STYLES: Record<Arch, Style> = {
   science: S({
     arch: 'science', walls: ['#1d3557', '#243b2f', '#3a2d5c'], floors: ['terrazzo', 'concrete'], ceilings: ['flat', 'truss'], dark: true, height: [4.8, 6.5], aspect: [1.0, 1.8],
     barrier: ['edge'], plinth: ['#f2f2f0', '#e9c46a', '#2a2d34'], trim: '#3f5f8a', ink: '#f1f5fb', small: ['hood', 'vitrine', 'table'], medium: ['plinth', 'cluster'], hang: false, mount: false,
-    caseFrame: '#1b1b1b', light: '#f3f7ff', hemi: 0.5,
+    caseFrame: '#1b1b1b', light: '#f3f7ff', hemi: 0.75,
   }),
   // Skansen / Weald & Downland: buildings stand outdoors on a lawn within a park wall
   openair: S({

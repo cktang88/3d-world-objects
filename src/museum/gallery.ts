@@ -81,9 +81,9 @@ export class GalleryLevel extends MuseumBase {
     // light and sky
     this.env = {
       ...this.env,
-      hemi: { sky: st.dark ? '#d9d4ff' : '#fff8ee', ground: st.dark ? '#201c18' : '#6a6055', intensity: st.hemi },
-      ambient: st.dark ? 0.04 : 0.1,
-      envIntensity: st.dark ? 0.35 : 0.6,
+      hemi: { sky: st.dark ? '#f2eadc' : '#fff8ee', ground: st.dark ? '#4a4036' : '#6a6055', intensity: st.hemi },
+      ambient: st.dark ? 0.12 : 0.1,
+      envIntensity: st.dark ? 0.5 : 0.6,
       exposure: st.dark ? 1.05 : 1.0,
     };
     if (st.outdoor) {

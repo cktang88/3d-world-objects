@@ -326,7 +326,7 @@ export function doorSign(lv: MuseumBase, d: Door, W: number, D: number, top: str
 function ceilingOf(lv: MuseumBase, p: Plan, st: Style) {
   const { W, D, H, Hw } = p;
   const g = lv.group;
-  const ceilM = mat(st.dark ? '#1b1a19' : '#f3f1ec', { rough: 1 });
+  const ceilM = mat(st.dark ? '#5d5a56' : '#f3f1ec', { rough: 1 });
   const cz = -D / 2;
   const glazing = mat('#eef4fa', { emissive: '#f2f6ff', ei: st.dark ? 0.4 : 1.25 });
   switch (p.ceiling) {
@@ -341,7 +341,7 @@ function ceilingOf(lv: MuseumBase, p: Plan, st: Style) {
     }
     case 'coffer': {
       g.add(flatCeil(ceilM, W, D, H, cz));
-      const beam = mat(st.dark ? '#262321' : '#ece6da', { rough: 0.9 });
+      const beam = mat(st.dark ? '#6b665f' : '#ece6da', { rough: 0.9 });
       const s = 2.4;
       for (let x = -W / 2 + s; x < W / 2 - 0.5; x += s) lv.bx(beam, 0.28, 0.38, D, x, H - 0.38, cz);
       for (let z = -D + s; z < -0.5; z += s) lv.bx(beam, W, 0.38, 0.28, 0, H - 0.38, z);
@@ -353,7 +353,7 @@ function ceilingOf(lv: MuseumBase, p: Plan, st: Style) {
       // a long glazed roof lantern over the middle (V&A Room 143)
       const lw = Math.min(W * 0.5, 6), ld = D - 3;
       const side = (W - lw) / 2;
-      const flat = mat(st.dark ? '#1b1a19' : '#f3f1ec', { rough: 1 });
+      const flat = mat(st.dark ? '#5d5a56' : '#f3f1ec', { rough: 1 });
       lv.bx(flat, side, 0.3, D, -W / 2 + side / 2, H, cz);
       lv.bx(flat, side, 0.3, D, W / 2 - side / 2, H, cz);
       lv.bx(flat, lw, 0.3, 1.5, 0, H, -D + 0.75);
@@ -369,7 +369,7 @@ function ceilingOf(lv: MuseumBase, p: Plan, st: Style) {
     }
     case 'truss': {
       // a roof above steel trusses spanning the width; clerestory light along the top of the walls
-      const roof = mat(st.dark ? '#1e1f21' : '#d9dadb', { rough: 0.9 });
+      const roof = mat(st.dark ? '#4a4b4d' : '#d9dadb', { rough: 0.9 });
       lv.bx(roof, W + 0.6, 0.2, D + 0.6, 0, H + 1.6, cz);
       for (const s of [-1, 1]) lv.bx(st.dark ? mat('#2a2c2e') : glazing, 0.1, 1.6, D, (s * W) / 2 + s * 0.2, H, cz);
       lv.bx(st.dark ? mat('#2a2c2e') : glazing, W, 1.6, 0.1, 0, H, -D - 0.2);
