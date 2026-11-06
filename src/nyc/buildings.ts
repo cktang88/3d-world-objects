@@ -242,7 +242,7 @@ export class Face {
     return Math.atan2(-n.x, -n.z);
   }
   /** an opening with an instanced window in it */
-  window(u0: number, y0: number, w: number, h: number, o: { trim: TrimKind; sash: SashKind; trimColor: THREE.Color; revealColor: THREE.Color; sashColor: THREE.Color; kind: 'apt' | 'office' | 'loft'; ac?: number; muntins?: number }) {
+  window(u0: number, y0: number, w: number, h: number, o: { trim: TrimKind; sash: SashKind; trimColor: THREE.Color; revealColor: THREE.Color; sashColor: THREE.Color; kind: 'apt' | 'office' | 'loft'; ac?: number; muntins?: number; sleeves?: number }) {
     this.holes.push({ u0, u1: u0 + w, y0, y1: y0 + h });
     const rng = this.ctx.rng;
     const d = dressWindow(rng, o.kind);
@@ -251,7 +251,9 @@ export class Face {
     this.ctx.win.add({
       m, w, h, trim: o.trim, sash: o.sash, trimColor: o.trimColor, revealColor: o.revealColor, sashColor: o.sashColor,
       lit: d.lit, blind: hasAc ? Math.max(d.blind, 0.15) : d.blind, curtains: d.curtains, depth: d.depth, muntins: o.muntins ?? 0,
-      ac: hasAc ? new THREE.Color(rng.pick(['#d9d6cc', '#c9c6bd', '#e6e3da', '#a9a8a2', '#cfc8b4'])) : undefined,
+      ac: hasAc ? new THREE.Color(rng.pick(['#d9d6cc', '#c9c6bd', '#e6e3da', '#a9a8a2', '#cfc8b4', '#8f9294', '#e9e6dc'])) : undefined,
+      acKind: hasAc ? (o.sleeves && rng.chance(o.sleeves) ? 'sleeve' : rng.chance(0.35) ? 'big' : 'window') : undefined,
+      stain: hasAc && rng.chance(0.45),
     });
   }
   /** cut an opening without a window (doors, storefronts) */
@@ -538,6 +540,27 @@ function fireEscape(F: Face, uc: number, w: number, levels: number[], top: numbe
     B(F.f, iron, w, 0.03, 0.03, uc, y + 0.12, D - 0.03, false);
     for (let u = u0 + 0.13; u < u1 - 0.08; u += 0.12) B(F.f, iron, 0.018, rail - 0.1, 0.018, u, y + 0.1, D - 0.03, false);
     for (const uu of [u0 + 0.03, u1 - 0.03]) for (let z = 0.12; z < D - 0.08; z += 0.12) B(F.f, iron, 0.018, rail - 0.1, 0.018, uu, y + 0.1, z, false);
+    // life on the balcony: potted plants, a folding chair, a milk crate
+    const r = F.ctx.rng;
+    if (r.chance(0.35)) {
+      const pots = r.int(1, 4);
+      for (let k = 0; k < pots; k++) {
+        const pu = u0 + 0.3 + r.next() * (w - 0.6), pr = r.range(0.1, 0.18);
+        C(F.f, mat(r.pick(['#a0522d', '#8a4a2a', '#6b6b6b', '#2a2a2a']), { rough: 0.9 }), pr, pr * 1.6, pu, y, D - 0.25, false);
+        const leaf = new THREE.Mesh(unitSphere, mat(r.pick(['#4f7a34', '#5f8a3c', '#3f6a2c']), { rough: 0.9 }));
+        leaf.scale.set(pr * 3, pr * 2.6, pr * 3);
+        leaf.position.set(pu, y + pr * 1.6 + pr * 1.1, D - 0.25);
+        F.f.add(leaf);
+      }
+    }
+    if (r.chance(0.15)) {
+      const cu = u0 + 0.5 + r.next() * (w - 1);
+      const cm = mat(r.pick(['#3a6a9a', '#c4c0b4', '#2a2a2a', '#9a3a2a']), { rough: 0.6, metal: 0.3 });
+      B(F.f, cm, 0.42, 0.04, 0.4, cu, y + 0.44, 0.55, false);
+      B(F.f, cm, 0.42, 0.45, 0.04, cu, y + 0.46, 0.35, false);
+      for (const dx of [-0.19, 0.19]) for (const dz of [0.37, 0.73]) B(F.f, cm, 0.025, 0.44, 0.025, cu + dx, y, dz, false);
+    }
+    if (r.chance(0.12)) B(F.f, mat(r.pick(['#1d5ca8', '#c4161c', '#2a7a3a']), { rough: 0.7 }), 0.33, 0.28, 0.33, u1 - 0.4, y, 0.3, false);
     // diagonal brackets into the wall
     for (const u of [u0 + 0.25, u1 - 0.25]) {
       const br = B(F.g, iron, 0.05, 1.3, 0.05, u, y - 0.9, 0.5);
@@ -783,9 +806,10 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   const trim: TrimKind = opts.trim ?? (type === 'brownstone' ? 'hood' : type === 'castiron' ? 'arch' : type === 'tenement' ? rng.pick(['stone', 'stone', 'arch', 'hood', 'flat'] as const) : type === 'prewar' ? rng.pick(['stone', 'flat', 'stone'] as const) : rng.pick(['flat', 'none'] as const));
   const sash: SashKind = type === 'castiron' ? 'case' : type === 'midrise' && style === 'panel' ? 'case' : 'dh';
   const kind = type === 'castiron' ? 'loft' : type === 'midrise' && style === 'panel' ? 'office' : 'apt';
-  const acRate = opts.acUnits ?? (type === 'tenement' ? 0.22 : type === 'prewar' ? 0.15 : type === 'midrise' ? 0.12 : type === 'brownstone' ? 0.08 : 0.04);
+  // window AC units: roughly one window in three or four on walk-ups and pre-war houses (references)
+  const acRate = opts.acUnits ?? (type === 'tenement' ? 0.32 : type === 'prewar' ? 0.26 : type === 'midrise' ? 0.24 : type === 'brownstone' ? 0.12 : 0.08);
   const muntins = type === 'brownstone' && rng.chance(0.3) ? 1 : type === 'tenement' && rng.chance(0.15) ? 1 : 0;
-  const winOpts = { trim, sash, trimColor: trimC, revealColor: revealC, sashColor: sashC, kind: kind as 'apt' | 'office' | 'loft', ac: acRate, muntins };
+  const winOpts = { trim, sash, trimColor: trimC, revealColor: revealC, sashColor: sashC, kind: kind as 'apt' | 'office' | 'loft', ac: acRate, muntins, sleeves: type === 'midrise' ? 0.45 : type === 'prewar' ? 0.25 : 0 };
 
   for (const s of sides) {
     const isFront = s === front;
@@ -981,7 +1005,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
     if (isFront && (type === 'tenement' || type === 'castiron' || (type === 'midrise' && floors <= 8)) && levels.length >= 2 && rng.chance(opts.fireEscape ?? (type === 'castiron' ? 0.5 : 0.85))) {
       const fw = n >= 4 ? (centres[1] - centres[0]) * 2 + 0.6 : Math.min(L - 0.6, 3.6);
       const fu = n >= 4 ? (rng.chance(0.5) ? (centres[0] + centres[1]) / 2 : (centres[n - 2] + centres[n - 1]) / 2) : 0;
-      fireEscape(F, fu, Math.min(fw, L - 0.4), levels.map((l) => l - 0.02), h, rng.pick(['#1c1d1f', '#1c1d1f', '#2a3a2e', '#3a2420']));
+      fireEscape(F, fu, Math.min(fw, L - 0.4), levels.map((l) => l - 0.02), h, rng.pick(['#1c1d1f', '#1c1d1f', '#232220', '#2b2420', '#2a3a2e', '#3a2420', '#4a2e22']));
     }
   }
 

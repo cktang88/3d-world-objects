@@ -194,21 +194,39 @@ function glassGeo() {
 }
 
 /** a through-the-window air conditioner sitting on the sill of the lower sash */
-function acGeo() {
-  return geo('ac', () => {
+export type AcKind = 'window' | 'big' | 'sleeve';
+function acGeo(kind: AcKind) {
+  if (kind === 'sleeve') {
+    // through-the-wall unit in a metal sleeve under the window
+    return geo('ac:sleeve', () => {
+      const a = new AGeo();
+      a.box(H(-0.36), H(0.36), L(-1.0), L(-0.55), -0.05, 0.05);
+      for (let i = 0; i < 6; i++) a.box(H(-0.32), H(0.32), L(-0.97 + i * 0.065), L(-0.95 + i * 0.065), 0.05, 0.065);
+      return a.done();
+    });
+  }
+  return geo('ac:' + kind, () => {
     const a = new AGeo();
-    const w = 0.33, z0 = -REVEAL + 0.02, z1 = 0.36;
-    a.box(H(-w), H(w), L(0.04), L(0.46), z0, z1);
+    const big = kind === 'big';
+    const w = big ? 0.38 : 0.31, z0 = -REVEAL + 0.02, z1 = big ? 0.46 : 0.34;
+    const top = big ? 0.5 : 0.42;
+    a.box(H(-w), H(w), L(0.04), L(top), z0, z1);
+    // a slightly raised cabinet top on the big units
+    if (big) a.box(H(-w + 0.02), H(w - 0.02), L(top), L(top + 0.03), z0 + 0.05, z1 - 0.04);
     // front grille: raised louvres
-    for (let i = 0; i < 5; i++) a.box(H(-w + 0.04), H(w - 0.04), L(0.1 + i * 0.065), L(0.125 + i * 0.065), z1, z1 + 0.012);
+    for (let i = 0; i < (big ? 6 : 5); i++) a.box(H(-w + 0.04), H(w - 0.04), L(0.1 + i * 0.065), L(0.125 + i * 0.065), z1, z1 + 0.012);
     // side accordion panels filling the rest of the opening
-    a.box(L(0.06), H(-w), L(0.05), L(0.46), z0 + 0.04, z0 + 0.06);
-    a.box(H(w), R(-0.06), L(0.05), L(0.46), z0 + 0.04, z0 + 0.06);
+    a.box(L(0.06), H(-w), L(0.05), L(top), z0 + 0.04, z0 + 0.06);
+    a.box(H(w), R(-0.06), L(0.05), L(top), z0 + 0.04, z0 + 0.06);
     // support bracket under the unit
     a.box(H(-w + 0.05), H(-w + 0.08), L(-0.25), L(0.04), 0.05, z1 - 0.05);
     a.box(H(w - 0.08), H(w - 0.05), L(-0.25), L(0.04), 0.05, z1 - 0.05);
     return a.done();
   });
+}
+/** a drip / rust stain running down the wall under an AC unit */
+function stainGeo() {
+  return geo('stain', () => new AGeo().quad(H(-0.16), H(0.16), L(-1.7), L(-0.08), 0.006).done());
 }
 
 // ---------------------------------------------------------------- materials
@@ -233,6 +251,31 @@ function anchored<T extends THREE.Material>(m: T, key: string): T {
   };
   m.customProgramCacheKey = () => 'anchored:' + key;
   return m;
+}
+let stainM: THREE.MeshBasicMaterial | null = null;
+// (anchored() is declared below; stainMat() is only called at build time)
+function stainMat() {
+  if (stainM) return stainM;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 64, 256);
+  // a dark streak, strongest under the unit and fading down the wall, with ragged drips
+  for (let i = 0; i < 9; i++) {
+    const x = 10 + Math.random() * 44, w = 4 + Math.random() * 10, len = 80 + Math.random() * 170;
+    const gr = g.createLinearGradient(0, 0, 0, len);
+    gr.addColorStop(0, 'rgba(40,28,18,0.55)');
+    gr.addColorStop(1, 'rgba(40,28,18,0)');
+    g.fillStyle = gr;
+    g.fillRect(x, 0, w, len);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  // multiplied over the wall: white leaves it alone, the streaks darken it
+  stainM = anchored(new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, blending: THREE.MultiplyBlending, premultipliedAlpha: true, fog: false }), 'stain');
+  return stainM;
 }
 const depthMat = anchored(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), 'depth');
 
@@ -422,6 +465,9 @@ export interface WinSpec {
   muntins: number;
   depth: number;
   ac?: THREE.Color;
+  acKind?: AcKind;
+  /** drip stain on the wall below the unit */
+  stain?: boolean;
   /** no glass (bricked up, louvre) */
   noGlass?: boolean;
 }
@@ -460,8 +506,8 @@ export class WindowBatch {
     make(revealGeo(), M.reveal, L, (s) => s.revealColor, false);
     for (const k of ['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]) make(trimGeo(k), M.trim, L.filter((s) => s.trim === k), (s) => s.trimColor, true, undefined, fine);
     for (const k of ['dh', 'case', 'store'] as SashKind[]) make(sashGeo(k), M.sash, L.filter((s) => s.sash === k), (s) => s.sashColor, false, undefined, fine);
-    const ac = L.filter((s) => s.ac);
-    make(acGeo(), M.ac, ac, (s) => s.ac!, true, undefined, fine);
+    for (const k of ['window', 'big', 'sleeve'] as AcKind[]) make(acGeo(k), M.ac, L.filter((s) => s.ac && (s.acKind ?? 'window') === k), (s) => s.ac!, true, undefined, fine);
+    make(stainGeo(), stainMat(), L.filter((s) => s.ac && s.acKind !== 'sleeve' && s.stain), () => null, false, undefined, fine);
     const gl = L.filter((s) => !s.noGlass);
     make(glassGeo(), M.glass, gl, () => null, false, (im, items) => {
       const info = new Float32Array(items.length * 4), room = new Float32Array(items.length * 4);
