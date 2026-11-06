@@ -145,6 +145,10 @@ export abstract class MuseumBase implements Level {
   ready: Promise<void> = Promise.resolve();
   private pendingLoads: Promise<unknown>[] = [];
 
+  constructor() {
+    this.rig();
+  }
+
   colliders() {
     return this.cols;
   }
@@ -230,17 +234,63 @@ export abstract class MuseumBase implements Level {
     this.group.add(m);
   }
 
-  /** a real spotlight (no shadows) if the room's budget allows */
+  /**
+   * Every museum room carries the same light rig (RIG_SPOTS spotlights, RIG_POINTS point lights,
+   * no shadows), unused ones dark: the light count never changes between rooms, so moving from
+   * room to room never recompiles a shader.
+   */
+  static readonly RIG_SPOTS = 10;
+  static readonly RIG_POINTS = 3;
+  private rigSpots: THREE.SpotLight[] = [];
+  private rigPoints: THREE.PointLight[] = [];
+  private points = 0;
+  private rig() {
+    if (this.rigSpots.length) return;
+    for (let i = 0; i < MuseumBase.RIG_SPOTS; i++) {
+      const l = new THREE.SpotLight('#fff1dc', 0, 0, 0.4, 0.65, 2);
+      l.castShadow = false;
+      this.rigSpots.push(l);
+      this.group.add(l, l.target);
+    }
+    for (let i = 0; i < MuseumBase.RIG_POINTS; i++) {
+      const l = new THREE.PointLight('#fff1dc', 0, 10, 1.4);
+      l.castShadow = false;
+      this.rigPoints.push(l);
+      this.group.add(l);
+    }
+  }
+
+  /** a real spotlight from the rig, if the room's budget allows */
   spot(from: THREE.Vector3, to: THREE.Vector3, opts: { color?: string; boost?: number; angle?: number } = {}) {
-    if (this.spots >= this.maxSpots) return false;
-    this.spots++;
+    this.rig();
+    if (this.spots >= Math.min(this.maxSpots, MuseumBase.RIG_SPOTS)) return false;
+    const l = this.rigSpots[this.spots++];
     const d = from.distanceTo(to);
-    const l = new THREE.SpotLight(opts.color ?? '#fff1dc', (opts.boost ?? 8) * d * d, 0, opts.angle ?? 0.38, 0.65, 2);
+    l.color.set(opts.color ?? '#fff1dc');
+    l.intensity = (opts.boost ?? 8) * d * d;
+    l.angle = opts.angle ?? 0.38;
     l.position.copy(from);
     l.target.position.copy(to);
-    l.castShadow = false;
-    this.group.add(l, l.target);
     return true;
+  }
+
+  /** a point light from the rig */
+  point(at: THREE.Vector3, color: string, intensity: number, distance: number, decay = 1.4) {
+    this.rig();
+    if (this.points >= MuseumBase.RIG_POINTS) return null;
+    const l = this.rigPoints[this.points++];
+    l.color.set(color);
+    l.intensity = intensity;
+    l.distance = distance;
+    l.decay = decay;
+    l.position.copy(at);
+    return l;
+  }
+
+  /** give the rig back (e.g. when a waiting room is replaced by the real one) */
+  protected resetRig() {
+    this.spots = this.points = 0;
+    for (const l of [...this.rigSpots, ...this.rigPoints]) l.intensity = 0;
   }
 
   /** a track-light can at `from` aimed at `to` (merged geometry; emissive lens) */

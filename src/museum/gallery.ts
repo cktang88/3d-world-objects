@@ -225,9 +225,7 @@ export class GalleryLevel extends MuseumBase {
     this.board = textPlane(this.boardLines(0, n), 4.6, 1.6, '#24201b', 300);
     this.board.position.set(0, 1.7, -5.88);
     g.add(this.board);
-    const l = new THREE.PointLight('#ffe6c4', 8, 12, 1.6);
-    l.position.set(0, 3.4, -3.5);
-    g.add(l);
+    this.point(new THREE.Vector3(0, 3.4, -3.5), '#ffe6c4', 8, 12, 1.6);
     this.group.add(g);
     this.ante = g;
     const r = (x: number, z: number, w: number, d: number): Rect => ({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
@@ -247,6 +245,7 @@ export class GalleryLevel extends MuseumBase {
         }
       });
       this.ante = null;
+      this.resetRig();
       this.cols.length = 0;
       this.ports.length = 0;
     }
@@ -293,7 +292,7 @@ export class GalleryLevel extends MuseumBase {
     const st = this.style;
     const { W, D, H } = plan;
     if (st.outdoor && st.arch === 'openair') return;
-    this.maxSpots = st.dark ? 12 : 5;
+    this.maxSpots = st.dark ? MuseumBase.RIG_SPOTS : 5;
     const high = H > 7.5;
     const trackY = high ? Math.min(H - 0.5, 6.5) : H - 0.06;
     const lit = plan.floor.filter((p) => p.u.items.length);
@@ -339,9 +338,7 @@ export class GalleryLevel extends MuseumBase {
     if (!st.dark) {
       const n = Math.min(3, Math.max(1, Math.round(D / 14)));
       for (let i = 0; i < n; i++) {
-        const l = new THREE.PointLight(st.light, 0.6 * W * D ** 0.5, Math.max(W, D) * 1.4, 1.2);
-        l.position.set(0, H - 1, -D * ((i + 0.5) / n));
-        this.group.add(l);
+        this.point(new THREE.Vector3(0, H - 1, -D * ((i + 0.5) / n)), st.light, 0.6 * W * D ** 0.5, Math.max(W, D) * 1.4, 1.2);
       }
     }
   }
