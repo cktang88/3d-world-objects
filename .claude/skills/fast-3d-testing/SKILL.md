@@ -14,6 +14,7 @@ This machine has **no GPU** (SwiftShader software rendering), 4 CPUs shared by m
 | One number from a real scene (tris, mesh count, a position) | lab scene + `--eval` returning JSON, tiny viewport | ~10–30 s |
 | Does it *look* right? | lab scene screenshot with `--fast` (or `--notex --nopost` at small size) | ~30–60 s under load |
 | Draw calls / triangles of the real world | `node scripts/perf.mjs` (counts only, takes the world lock) | minutes |
+| Why is a page slow to boot / to its first frame? | `node scripts/boot.mjs --url "/?lab=x&fast=1" [--profile] [--programs] [--frames 5] [--steady 30]` | ~10–60 s |
 | Full-world screenshot | last resort, under the lock | minutes, ~2 GB |
 
 ## 0. Never the full city while developing
@@ -74,7 +75,8 @@ Even a three-car lab takes minutes to render here under load. Full-city counts a
 ## 3. Perf counts
 
 - `window.__world.perf()` returns whole-frame and per-pass draw calls, triangles and programs. `perf({top: 20})` lists the heaviest in-frustum meshes. `?perf=1` shows the overlay.
-- `node scripts/perf.mjs [--poses avenue,...] [--compare docs/research/perf-baseline.json]` records counts at fixed poses. **Counts only.** SwiftShader frame times are meaningless; never report them.
+- `node scripts/perf.mjs --poses avenue[,...] [--compare docs/research/perf-baseline.json]` records counts at fixed poses (city at `?r=1`; `--full` only once at the end). **Counts only.** SwiftShader frame times are meaningless; never report them.
+- `node scripts/boot.mjs --url ...` times the boot stages (`src/boot.ts` marks: modules, manifest, museum data, pbr, level build, programs, first frame) and with `--profile` / `--steady 30` shows where the CPU goes. Typical costs found so far: shader compiles (~0.3–1 s per program here: keep program counts down), per-pixel canvas texture generation (skip it under `notex`), work in background systems (seamless prebuilding).
 
 ## 4. Rules for the shared machine
 

@@ -879,6 +879,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
 );
 
 applyQuality();
+mark('quality applied');
 ready.then(() => {
   if (!params.has('lab') && seam.enabled) prewarmShops();
   hud.loading.classList.add('hidden');
