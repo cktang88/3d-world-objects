@@ -840,7 +840,8 @@ export class Pedestrians {
     pd.axis = r.chance(0.6) ? 'z' : 'x';
     pd.dir = r.chance(0.5) ? 1 : -1;
     pd.off = 0;
-    pd.wd = r.range(0.5, 1.5);
+    // a stroller or a dog out front needs more room before the kerb
+    pd.wd = pd.p.noPhone ? r.range(1.5, 2.0) : r.range(0.5, 1.5);
     const along = pd.axis === 'x' ? p.x : p.z, across = pd.axis === 'x' ? p.z : p.x;
     const P2 = pd.axis === 'x' ? SZ : AX; // spacing of the parallel roads
     const k = Math.round(across / P2 - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
@@ -868,12 +869,13 @@ export class Pedestrians {
       pd.state = 'stand';
       pd.wait = r.range(8, 40) + (pd.buddy ? 20 : 0);
       pd.line = this.clampLine(pd, pd.c + pd.s * (sideHalf(pd.axis) + SW - 0.9));
-      pd.yaw += pd.s * (pd.axis === 'x' ? 1 : -1) * pd.dir * r.range(0.6, 1.4);
+      if (!pd.buddy) pd.yaw += pd.s * (pd.axis === 'x' ? 1 : -1) * pd.dir * r.range(0.6, 1.4);
       pd.p.setActivity(pd.buddy ? 'talk' : r.chance(0.6) ? 'phone' : 'idle', r.range(0, 5));
     } else {
       pd.p.setActivity('walk', r.range(0, 5));
       pd.p.setSpeed(pd.v);
     }
+    for (let i = 0; i < 6 && pd.state === 'stand' && this.blocked(pd, pd.t, pd.line, 0.45); i++) pd.t += r.range(-2, 2);
     pd.p.root.rotation.y = pd.yaw;
   }
   update(dt: number, p: THREE.Vector3, time?: number, colliders?: Rect[]) {
@@ -1028,19 +1030,26 @@ export class Pedestrians {
     const lp = l.p.root.position;
     f.axis = l.axis;
     f.dir = l.dir;
-    if (l.state !== 'walk' || l.v0 < 0.05) {
-      const talk = l.state === 'stand';
+    f.c = l.c;
+    f.s = l.s;
+    // work in (along, across) sidewalk coordinates so the companion stays on the sidewalk
+    const la = l.axis === 'x' ? lp.x : lp.z, lc = l.axis === 'x' ? lp.z : lp.x;
+    const leftSign = (l.axis === 'x' ? -1 : 1) * l.dir;
+    let fa = la, fc = lc;
+    const talk = l.state === 'stand';
+    if (talk) fa = la + l.dir * 0.95; // face to face along the sidewalk
+    else {
+      fc = lc + leftSign * 0.62; // shoulder to shoulder, on the leader's left if there is room
+      if (Math.abs(this.clampLine(l, fc) - fc) > 0.01) fc = lc - leftSign * 0.62;
+      fc = this.clampLine(l, fc);
+    }
+    f.p.root.position.set(l.axis === 'x' ? fa : fc, lp.y, l.axis === 'x' ? fc : fa);
+    if (talk || l.v0 < 0.05) {
       if (f.p.activity === 'walk') f.p.setActivity(talk ? 'talk' : 'idle', 1.3);
-      const d = talk ? 0.95 : 0.62;
-      const a = talk ? l.yaw : l.yaw + Math.PI / 2;
-      f.p.root.position.set(lp.x + Math.sin(a) * d, lp.y, lp.z + Math.cos(a) * d);
-      f.p.root.rotation.y = talk ? l.yaw + Math.PI : l.yaw;
+      f.p.root.rotation.y = talk ? yawOf(l.axis, -l.dir) : l.yaw;
     } else {
       if (f.p.activity !== 'walk') f.p.setActivity('walk', 0.3);
       f.p.setSpeed(l.v0);
-      // to the leader's left
-      const left = l.yaw + Math.PI / 2;
-      f.p.root.position.set(lp.x + Math.sin(left) * 0.62, lp.y, lp.z + Math.cos(left) * 0.62);
       f.p.root.rotation.y = l.yaw;
     }
   }
