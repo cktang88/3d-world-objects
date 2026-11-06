@@ -764,7 +764,15 @@ interface Ped {
   /** set on the companion: the person it follows */
   lead?: Ped;
 }
-const COUNT = 110;
+/** crowd size; ?people=N overrides (0 turns pedestrians off, for perf comparisons) */
+const COUNT = (() => {
+  try {
+    const n = new URLSearchParams(location.search).get('people');
+    return n !== null && isFinite(Number(n)) ? Number(n) : 110;
+  } catch {
+    return 110;
+  }
+})();
 const yawOf = (axis: 'x' | 'z', dir: number) => (axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI);
 /** walking along x crosses avenues, along z crosses streets */
 const crossPeriod = (axis: 'x' | 'z') => (axis === 'x' ? AX : SZ);
