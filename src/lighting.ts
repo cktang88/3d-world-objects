@@ -400,6 +400,7 @@ export class Lighting {
   /** preset values before weather modifiers */
   private base = { env: 0.55, bg: 1, fog: 0.0015, fogColor: new THREE.Color('#aab6c2') };
   private frame = 0;
+  private csmWraps = 0;
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -474,7 +475,7 @@ export class Lighting {
   debug() {
     return {
       tod, place: this.place, night, hdri: this.hdriKey, status: this.status, csm: this.csm?.cascades ?? 0,
-      csmMats: this.csmMats.size, lamps: this.markers.length, emissives: this.emissives.size,
+      csmMats: this.csmMats.size, csmWraps: this.csmWraps, frame: this.frame, programs: this.renderer.info.programs?.length ?? 0, lamps: this.markers.length, emissives: this.emissives.size,
       sun: this.sunDir.toArray().map((v) => +v.toFixed(2)), envI: +this.scene.environmentIntensity.toFixed(3),
       rot: +this.scene.environmentRotation.y.toFixed(2), exposure: this.renderer.toneMappingExposure,
     };
@@ -830,6 +831,7 @@ export class Lighting {
         m.onBeforeCompile = hook;
         m.needsUpdate = true;
         this.csmMats.add(m);
+        this.csmWraps++;
       }
     });
   }

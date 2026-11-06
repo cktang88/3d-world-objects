@@ -21,6 +21,11 @@ const scene: LabScene = {
     group.add(level.group);
     // only the initial 3x3 blocks (no streaming ring) to keep memory down; &live=1 animates and streams
     live = params.has('live');
+    // hide the blocks that are behind the default camera (software rendering on a shared machine)
+    if (!params.has('all')) for (const c of level.group.children) {
+      const { x, z } = c.position;
+      if (x < 0 || x > 120 || z > 0 || z < -64) c.visible = false;
+    }
   },
   update(dt, time) {
     if (live) level?.update(dt, focus, time);
