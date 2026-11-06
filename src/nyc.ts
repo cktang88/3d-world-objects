@@ -293,10 +293,11 @@ export class NycLevel implements Level {
     }
     this.street(ctx, village, tower);
 
+    // buildings: windows, shop glass, lettering, instanced small parts (pulled out of stat first)
+    finishBuildings(ctx);
     // merge everything static into a few meshes
     const baked = bake(stat);
     group.add(baked);
-    finishBuildings(ctx);
     // dispose the per-building geometries that were merged
     stat.traverse((o) => {
       const m = o as THREE.Mesh;

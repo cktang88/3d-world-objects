@@ -40,16 +40,85 @@ export interface BCtx {
   win: WindowBatch;
   shop: ShopGlass;
   text: TextBatch;
+  /** facade groups inside stat (their unit boxes are instanced by finishBuildings) */
+  faceGroups: THREE.Object3D[];
 }
 
 export function makeCtx(rng: Rng, group: THREE.Group, stat: THREE.Group, cx: number, cz: number, seed: number): BCtx {
   const fine = new THREE.Group();
-  return { rng, group, stat, fine, colliders: [], portals: [], cx, cz, seed, doors: [], win: new WindowBatch(), shop: new ShopGlass(), text: new TextBatch() };
+  return { rng, group, stat, fine, colliders: [], portals: [], cx, cz, seed, doors: [], win: new WindowBatch(), shop: new ShopGlass(), text: new TextBatch(), faceGroups: [] };
 }
 
 /** bake the block's buildings and add the instanced windows and shop glass */
+/**
+ * Plain unit boxes and cylinders (brackets, dentils, balusters, rails, cornice bands...) become
+ * instances instead of being merged: the same triangles in a fraction of the memory.
+ */
+const instMats = new Map<string, THREE.MeshStandardMaterial>();
+const bars: Partial<Record<'x' | 'y' | 'z', THREE.BufferGeometry>> = {};
+/** a unit box without its two end caps along `axis` (for balusters, rails, rungs) */
+function openBar(axis: 'x' | 'y' | 'z') {
+  if (bars[axis]) return bars[axis]!;
+  const g = new THREE.BoxGeometry(1, 1, 1);
+  const skip = { x: [0, 1], y: [2, 3], z: [4, 5] }[axis];
+  const idx: number[] = [];
+  const src = g.index!.array;
+  for (let f = 0; f < 6; f++) if (!skip.includes(f)) for (let k = 0; k < 6; k++) idx.push(src[f * 6 + k]);
+  g.setIndex(idx);
+  return (bars[axis] = g);
+}
+function instanceUnits(roots: THREE.Object3D[], parent: THREE.Object3D, shadow: boolean) {
+  const buckets = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial; m: THREE.Matrix4[]; c: THREE.Color[] }>();
+  const dead: THREE.Mesh[] = [];
+  for (const root of roots) {
+    root.updateMatrixWorld(true);
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || (mesh.geometry !== unitBox && mesh.geometry !== unitCyl) || mesh.userData.tint) return;
+      const sm = mesh.material as THREE.MeshStandardMaterial;
+      if (!sm.isMeshStandardMaterial || sm.map || sm.transparent || (sm.emissive && sm.emissive.getHex() !== 0 && sm.emissiveIntensity > 0)) return;
+      const rough = Math.round(sm.roughness * 2) / 2, metal = sm.metalness >= 0.4 ? 0.6 : 0;
+      let gk = mesh.geometry === unitBox ? 'b' : 'c';
+      if (gk === 'b') {
+        const sc = mesh.scale;
+        const thin = [sc.x < 0.06, sc.y < 0.06, sc.z < 0.06].filter(Boolean).length >= 2;
+        if (thin) gk = sc.x >= sc.y && sc.x >= sc.z ? 'bx' : sc.y >= sc.z ? 'by' : 'bz';
+      }
+      const key = `${gk}|${rough}|${metal}`;
+      let b = buckets.get(key);
+      if (!b) {
+        let mm = instMats.get(`${rough}|${metal}`);
+        if (!mm) instMats.set(`${rough}|${metal}`, (mm = new THREE.MeshStandardMaterial({ roughness: rough, metalness: metal })));
+        buckets.set(key, (b = { geo: gk.length === 2 ? openBar(gk[1] as 'x' | 'y' | 'z') : mesh.geometry, mat: mm, m: [], c: [] }));
+      }
+      b.m.push(mesh.matrixWorld.clone());
+      b.c.push(sm.color.clone());
+      dead.push(mesh);
+    });
+  }
+  for (const d of dead) d.parent?.remove(d);
+  for (const b of buckets.values()) {
+    const im = new THREE.InstancedMesh(b.geo, b.mat, b.m.length);
+    b.m.forEach((m, i) => {
+      im.setMatrixAt(i, m);
+      im.setColorAt(i, b.c[i]);
+    });
+    im.castShadow = shadow;
+    im.receiveShadow = true;
+    im.computeBoundingSphere();
+    parent.add(im);
+  }
+}
+
+/** call before bake(stat): pulls the buildings' unit boxes out of stat into instances */
 export function finishBuildings(ctx: BCtx) {
-  const fine = bake(ctx.fine);
+  const main = new THREE.Group();
+  main.userData.owned = true;
+  instanceUnits(ctx.faceGroups, main, true);
+  ctx.group.add(main);
+  const fine = new THREE.Group();
+  instanceUnits([ctx.fine], fine, false);
+  fine.add(bake(ctx.fine));
   fine.name = 'fine';
   fine.userData.fine = true;
   ctx.win.build(ctx.group, fine);
@@ -148,6 +217,7 @@ export class Face {
     }
     this.m.makeRotationY(ROT[side]).setPosition(p);
     ctx.stat.add(this.g);
+    ctx.faceGroups.push(this.g);
     ctx.fine.add(this.f);
   }
   /** block-local point from face coordinates */

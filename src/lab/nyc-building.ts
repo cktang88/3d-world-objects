@@ -45,8 +45,8 @@ const scene: LabScene = {
     road.position.set(0, 0, 19.5);
     road.receiveShadow = true;
     group.add(road);
-    blockG.add(bake(stat));
     finishBuildings(ctx);
+    blockG.add(bake(stat));
     setNight(Number(params.get('night') ?? 0));
   },
 };
