@@ -140,6 +140,20 @@ const U = {
 };
 /** layer of the meshes that show in wet-ground reflections (emissive things; lighting.ts tags them) */
 export const REFLECT_LAYER = 5;
+/** shadow casters with a bounding radius of at least 0.8 m / 6 m (bounding-sphere radius) also sit on these layers: the middle / far cascades draw only them */
+export const CASTER_MID = 6;
+export const CASTER_FAR = 7;
+function tagCaster(m: THREE.Mesh) {
+  const g = m.geometry;
+  if (!g) return;
+  if (!g.boundingSphere) g.computeBoundingSphere();
+  const r = (g.boundingSphere?.radius ?? 0) * m.matrixWorld.getMaxScaleOnAxis();
+  m.userData.casterR = r;
+  // instanced/batched meshes span many objects: always keep them
+  const many = (m as THREE.InstancedMesh).isInstancedMesh || (m as unknown as { isBatchedMesh?: boolean }).isBatchedMesh;
+  if (many || r >= 0.8) m.layers.enable(CASTER_MID);
+  if (many || r >= 6) m.layers.enable(CASTER_FAR);
+}
 let night = 0;
 let tod: TimeOfDay = 'day';
 const listeners: ((t: TimeOfDay, night: number) => void)[] = [];
@@ -833,13 +847,14 @@ export class Lighting {
       if (this.sunOn) {
         this.camera.updateMatrixWorld();
         this.csm.update();
-        // the near cascade re-renders every frame, the middle one on odd frames, the far one on
-        // frames 2 mod 4: never two wide cascades in one frame (no spikes), 1.75 shadow passes per
-        // frame on average. A skipped cascade keeps its previous map and matching shadow matrix.
+        // the near cascade re-renders every frame, the middle one on frames 1 mod 4, the far one on
+        // frames 3 mod 4: never two wide cascades in one frame (no spikes), 1.5 shadow passes per
+        // frame on average (15 Hz for the wide ones at 60 fps; they are texel-snapped, so static
+        // shadows don't swim). A skipped cascade keeps its previous map and matching shadow matrix.
         const f = this.frame;
         this.csm.lights.forEach((l, i) => {
           l.shadow.autoUpdate = false;
-          if (i === 0 || (i === 1 && f % 2 === 1) || (i === 2 && f % 4 === 2) || f < 2) l.shadow.needsUpdate = true;
+          if (i === 0 || (i === 1 && f % 4 === 1) || (i === 2 && f % 4 === 3) || f < 2) l.shadow.needsUpdate = true;
         });
       } else for (const l of this.csm.lights) l.shadow.autoUpdate = false;
     }
@@ -1200,7 +1215,7 @@ export class Lighting {
       camera: this.camera,
       parent: this.scene,
       cascades: q === 'low' ? 2 : 3,
-      maxFar: q === 'low' ? 160 : 260,
+      maxFar: q === 'low' ? 160 : 230,
       mode: 'practical',
       shadowMapSize: q === 'low' ? 1024 : 2048,
       lightDirection: this.sunDir.clone().negate(),
@@ -1210,6 +1225,11 @@ export class Lighting {
       lightMargin: 300,
     });
     csm.fade = q !== 'low';
+    // the wider cascades only draw casters big enough to matter at their distance
+    csm.lights.forEach((l, i) => {
+      if (i === 1) l.shadow.camera.layers.set(CASTER_MID);
+      if (i === 2) l.shadow.camera.layers.set(CASTER_FAR);
+    });
     fixCsmChunk();
     csm.lights.forEach((l, i) => {
       l.shadow.bias = -0.00025 * (i + 1);
@@ -1262,6 +1282,7 @@ export class Lighting {
         return;
       }
       const mats = (o as THREE.Mesh).material;
+      if ((o as THREE.Mesh).isMesh && o.castShadow && o.userData.casterR === undefined) tagCaster(o as THREE.Mesh);
       if (!mats || !wrap) return;
       for (const m of Array.isArray(mats) ? mats : [mats]) {
         if (!(m as THREE.MeshStandardMaterial).isMeshStandardMaterial && !(m as THREE.MeshLambertMaterial).isMeshLambertMaterial && !(m as THREE.MeshPhongMaterial).isMeshPhongMaterial) continue;
