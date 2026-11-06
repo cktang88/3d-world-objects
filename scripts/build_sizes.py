@@ -250,10 +250,11 @@ def main():
             done[e[3]] = v
             out.write(json.dumps([e[3], v]) + '\n')
             n[0] += 1
-            if n[0] % 500 == 0:
+            if n[0] % 100 == 0:
                 out.flush()
                 dt = time.time() - t0
-                print(f'{n[0]}/{len(todo)}  {n[0] / dt:.1f}/s  eta {(len(todo) - n[0]) / max(1e-6, n[0] / dt) / 60:.0f} min', flush=True)
+                if n[0] % 500 == 0:
+                    print(f'{n[0]}/{len(todo)}  {n[0] / dt:.1f}/s  eta {(len(todo) - n[0]) / max(1e-6, n[0] / dt) / 60:.0f} min', flush=True)
 
     if not args.write_only:
         with ThreadPoolExecutor(args.workers) as ex:

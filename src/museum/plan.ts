@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Rng } from '../rng';
 import { Frame } from './base';
-import { along, bench, cluster, hang, mount, platform, plinth, riser, tableCase, vitrine, wallCase, type Unit } from './displays';
+import { along, bench, cluster, drawers, hang, mount, platform, plinth, riser, tableCase, typeKey, vitrine, wallCase, type Unit } from './displays';
 import type { Measured } from './sizes';
 import type { Ceiling, Floor, Style } from './style';
 
@@ -75,7 +75,17 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   // long flat things lie in table cases whatever the room
   const table: Measured[] = [...buckets.flat];
   const main: Measured[] = [];
-  for (const m of [...buckets.tiny, ...buckets.small]) {
+  // the tiniest things in study rooms live in specimen drawers
+  let tiny = buckets.tiny;
+  if ((st.arch === 'study' || st.arch === 'science') && tiny.length >= 4) {
+    while (tiny.length >= 3) {
+      const d = drawers(tiny);
+      if (!d.unit.items.length) break;
+      units.push(d.unit);
+      tiny = d.rest;
+    }
+  }
+  for (const m of [...tiny, ...buckets.small]) {
     const flat = m.real.y <= 0.25;
     // table cases for some flat things; the rest fill the room's shelves (dense, like visible storage)
     if (st.small.includes('table') && flat && r.chance(st.small[0] === 'table' ? 0.7 : 0.35)) table.push(m);
@@ -83,7 +93,7 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   }
   let rest = table;
   while (rest.length) {
-    const n = r.int(4, 8);
+    const n = r.int(6, 12);
     const t = tableCase(rest.slice(0, n), r.pick([1.2, 1.8, 2.4]));
     t.rest.push(...rest.slice(n));
     if (!t.unit.items.length) {
@@ -93,7 +103,8 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
     units.push(t.unit);
     rest = t.rest;
   }
-  rest = main;
+  // like with like: cases are filled type by type (cups with cups, keys with keys)
+  rest = [...main].sort((a, b) => typeKey(a).localeCompare(typeKey(b)));
   if (primary === 'hood') {
     while (rest.length) {
       const n = r.chance(0.65) ? Math.min(rest.length, r.int(2, 4)) : 1;
@@ -209,8 +220,8 @@ function wallSpan(wall: Wall, W: number, D: number): [number, number] {
   return wall === 'N' || wall === 'S' ? [-W / 2, W / 2] : [-D, 0];
 }
 
-function exitDoors(W: number, D: number, n: number, big: boolean, r: Rng): Door[] {
-  const w = big ? 3.4 : 2.2, h = big ? 4.4 : 3.0;
+function exitDoors(W: number, D: number, n: number, big: boolean, r: Rng, small = false): Door[] {
+  const w = big ? 3.4 : small ? 1.8 : 2.2, h = big ? 4.4 : small ? 2.6 : 3.0;
   const pats: Door[][] = [];
   if (W >= 3 * w + 6) pats.push([-W / 4, 0, W / 4].map((at) => ({ wall: 'N', at, w, h })));
   if (D >= 10) {
@@ -273,11 +284,14 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   const heroU = floorU.find((u) => u.hero);
   const others = floorU.filter((u) => !u.hero);
 
-  const ceiling = r.pick(st.ceilings);
+  // rooms of small things only are small and intimate (cabinet rooms): lower, closer, smaller doors
+  const SMALL = ['table', 'vitrine', 'hood', 'cluster', 'drawers', 'wallcase', 'storage', 'mount', 'bench'];
+  const intimate = !st.outdoor && !hangU.length && units.every((u) => SMALL.includes(u.type) || (u.hero && u.type === 'hood'));
+  const ceiling = intimate && r.chance(0.6) ? 'flat' : r.pick(st.ceilings);
   const floorKind = r.pick(st.floors);
   const wallColor = r.pick(st.walls);
   const wallDepth = wallU.length ? Math.max(...wallU.map((u) => u.d)) : 0;
-  const aisle = st.outdoor ? 3 : 1.7;
+  const aisle = st.outdoor ? 3 : intimate ? 1.4 : 1.7;
   const gapX = st.outdoor ? 4 : 1.2;
   const inset = wallU.length ? wallDepth + 1.5 : st.arch === 'openair' ? 5 : 1.3;
 
@@ -305,19 +319,19 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   if (heroU) rows.splice(rows.length >= 2 ? Math.floor(rows.length / 2) : rows.length, 0, [heroU]);
 
   const hangLanes = hangU.length >= 7 ? 3 : hangU.length >= 3 ? 2 : 1;
-  let W = Math.max(Wf + 2 * inset, 8, hangLanes * (hangS + 1.5));
+  let W = Math.max(Wf + 2 * inset, intimate ? 6 : 8, hangLanes * (hangS + 1.5));
   const entry = Math.max(3.6, wallDepth + 2);
   const rowD = rows.map((rw) => Math.max(...rw.map((u) => u.d)));
   const minD = entry + rowD.reduce((s, d) => s + d, 0) + aisle * Math.max(0, rows.length - 1) + (heroU ? 2 : 0) + inset;
   const laneLen = Math.max(0, ...Array.from({ length: hangLanes }, (_, li) => hangU.filter((_, i) => i % hangLanes === li).reduce((s, u) => s + u.d + 2, 2)));
-  let D = Math.max(minD, 10, laneLen);
+  let D = Math.max(minD, intimate ? 7.5 : 10, laneLen);
   if (st.outdoor && st.arch === 'openair') {
     W = Math.max(W, 24);
     D = Math.max(D, 24);
   }
 
   // height
-  let H = r.range(st.height[0], st.height[1]);
+  let H = intimate ? r.range(3.5, 4.3) : r.range(st.height[0], st.height[1]);
   const floorTop = Math.max(0, ...floorU.map((u) => u.h));
   const wallTop = Math.max(0, ...wallU.map((u) => u.h));
   const hangH = Math.max(0, ...hangU.map((u) => u.h));
@@ -330,14 +344,14 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   let wall: Placed[] | null = null;
   const order = r.shuffle<Wall>(['W', 'E', 'N']).concat(['S']);
   for (let it = 0; it < 40; it++) {
-    doors = [{ wall: 'S', at: 0, w: big ? 3.4 : 2.4, h: big ? 4.4 : 3.2 }, ...exitDoors(W, D, exits, big, r.fork(it))];
+    doors = [{ wall: 'S', at: 0, w: big ? 3.4 : intimate ? 2.0 : 2.4, h: big ? 4.4 : intimate ? 2.7 : 3.2 }, ...exitDoors(W, D, exits, big, r.fork(it), intimate)];
     wall = allocateWalls(wallU, W, D, doors, wallDepth + 0.3, order);
     if (wall) break;
     D += 2;
     if (it % 3 === 2) W += 1.5;
   }
   wall ??= [];
-  H = Math.max(H, Math.max(...doors.map((d) => d.h)) + 2.2);
+  H = Math.max(H, Math.max(...doors.map((d) => d.h)) + (intimate ? 1.0 : 2.2));
   let Hw = H;
   if (ceiling === 'vault') {
     Hw = H - 0.3 * W;

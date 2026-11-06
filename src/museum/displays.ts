@@ -6,6 +6,7 @@ import { Frame, shade, type MuseumBase } from './base';
 import type { Measured } from './sizes';
 import type { Barrier, Style } from './style';
 import { textPlane, fmtDims, SANS, SERIF, type Line } from './text';
+import { typicalSize } from '../realscale';
 
 /**
  * Display furniture, sized from the real dimensions of what it holds (references in
@@ -106,12 +107,13 @@ function itemLines(c: Ctx, m: Measured, big: boolean): Line[] {
 }
 
 /** a label panel: one object (full tombstone) or a numbered list */
-export function labelPanel(c: Ctx, items: Measured[], w = 0.42, big = false) {
-  if (items.length === 1) {
+export function labelPanel(c: Ctx, items: Measured[], w = 0.42, big = false, header?: string) {
+  if (items.length === 1 && !header) {
     const h = big ? 0.34 : 0.25;
     return textPlane(itemLines(c, items[0], big), w, h, c.labelBg, 1100, 'left');
   }
-  const lines: Line[] = items.slice(0, 14).map((m, i) => ({ text: `${i + 1}. ${m.entry.title} — ${fmtDims(m.real)}`, size: 0.03, color: c.labelInk, weight: 500, font: SANS }));
+  const lines: Line[] = header ? [{ text: `${header} · ${items.length}`, size: 0.04, color: c.labelInk, weight: 700, font: SERIF }] : [];
+  lines.push(...items.slice(0, 14).map((m, i) => ({ text: `${i + 1}. ${m.entry.title} — ${fmtDims(m.real)}`, size: 0.03, color: c.labelInk, weight: 500, font: SANS })));
   if (items.length > 14) lines.push({ text: `and ${items.length - 14} more`, size: 0.03, color: c.labelSub, weight: 400, font: SANS });
   return textPlane(lines, w, 0.06 + lines.length * 0.0385, c.labelBg, 1100, 'left');
 }
@@ -360,10 +362,33 @@ export function riser(items: Measured[], barrierKind: Barrier): Unit {
   };
 }
 
-/** pack things into shelves of length `len`, tallest first; returns the shelves and what did not fit */
+export interface ShelfItem {
+  m: Measured;
+  w: number;
+  rot: number;
+  /** centre along the shelf, from the shelf's middle */
+  x: number;
+  /** front / back lane offset (two-deep shelves) */
+  z: number;
+  /** raised on the back step */
+  dy: number;
+}
+export interface Shelf {
+  h: number;
+  used: number;
+  twoDeep: boolean;
+  items: ShelfItem[];
+}
+
+/**
+ * Pack things onto shelves of length `len`, tallest first. Small things go two deep (a front
+ * row, and a back row raised on a glass step), as in the V&A's visible storage.
+ */
 export function packShelves(items: Measured[], len: number, maxH: number, depth: number, gap = 0.08) {
   const sorted = [...items].sort((a, b) => b.real.y - a.real.y);
-  const shelves: { h: number; items: { m: Measured; w: number; rot: number }[]; used: number }[] = [];
+  const halfD = depth / 2 - 0.02;
+  type Raw = { h: number; used: [number, number]; twoDeep: boolean; allHalf: boolean; items: { m: Measured; w: number; rot: number; lane: number }[] };
+  const raw: Raw[] = [];
   const rest: Measured[] = [];
   let total = 0;
   for (const m of sorted) {
@@ -372,21 +397,52 @@ export function packShelves(items: Measured[], len: number, maxH: number, depth:
       rest.push(m);
       continue;
     }
-    let s = shelves[shelves.length - 1];
-    if (!s || s.used + a.w + gap > len) {
-      const sh = m.real.y + 0.1;
+    const half = a.d <= halfD;
+    let s = raw[raw.length - 1];
+    let lane = -1;
+    if (s) {
+      if (s.used[0] + a.w + gap <= len && (!s.twoDeep || half)) lane = 0;
+      else if (half && s.allHalf && s.used[1] + a.w + gap <= len) lane = 1;
+    }
+    if (lane < 0) {
+      const sh = m.real.y + 0.1 + (half ? 0.05 : 0);
       if (total + sh > maxH) {
         rest.push(m);
         continue;
       }
-      s = { h: sh, items: [], used: gap };
-      shelves.push(s);
+      s = { h: sh, used: [gap, gap], twoDeep: false, allHalf: true, items: [] };
+      raw.push(s);
       total += sh;
+      lane = 0;
     }
-    s.items.push({ m, w: a.w, rot: a.rot });
-    s.used += a.w + gap;
+    s.items.push({ m, w: a.w, rot: a.rot, lane });
+    s.used[lane] += a.w + gap;
+    if (!half) s.allHalf = false;
+    if (lane === 1) s.twoDeep = true;
   }
+  const shelves: Shelf[] = raw.map((s) => {
+    const cur = [-(s.used[0] - gap) / 2 + gap / 2, -(s.used[1] - gap) / 2 + gap / 2];
+    const items = s.items.map((it) => {
+      const x = cur[it.lane] + it.w / 2 - gap / 2;
+      cur[it.lane] += it.w + gap;
+      return { m: it.m, w: it.w, rot: it.rot, x, z: s.twoDeep ? (it.lane ? -depth / 4 : depth / 4) : 0, dy: it.lane ? 0.05 : 0 };
+    });
+    return { h: s.h, used: Math.max(s.used[0], s.used[1]), twoDeep: s.twoDeep, items };
+  });
   return { shelves, rest, total };
+}
+
+/** what kind of thing it is, for grouping a case's contents and naming the group */
+export function typeKey(m: Measured) {
+  return (typicalSize(m.entry.title, m.entry.entry)?.word ?? (m.entry.entry || m.entry.family || 'object')).replace(/_/g, ' ').toLowerCase();
+}
+
+function groupTitle(items: Measured[]) {
+  const counts = new Map<string, number>();
+  for (const m of items) counts.set(typeKey(m), (counts.get(typeKey(m)) ?? 0) + 1);
+  const keys = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  const name = (k: string) => k.replace(/\b\w/g, (c) => c.toUpperCase()) + (k.endsWith('s') ? '' : 's');
+  return keys.length <= 2 ? keys.map(name).join(' and ') : `${name(keys[0])}, ${name(keys[1])} and more`;
 }
 
 /** Tall free-standing glass tower with glass shelves, lit from the top (V&A Room 143). */
@@ -410,11 +466,8 @@ export function vitrine(items: Measured[], inner: number): { unit: Unit; rest: M
         let y = base + 0.02;
         for (const s of shelves) {
           if (y > base + 0.05) lv.bx(c.m.shelf, inner, 0.012, inner, 0, y - 0.012, 0, f);
-          let x = -inner / 2 + (inner - (s.used - 0.06)) / 2 + 0.06;
-          for (const it of s.items) {
-            lv.exhibit(it.m, f, x + it.w / 2, y, 0, it.rot, { prio: c.prio() });
-            x += it.w + 0.06;
-          }
+          if (s.twoDeep) lv.bx(c.m.shelf, inner, 0.05, inner / 2, 0, y, -inner / 4, f);
+          for (const it of s.items) lv.exhibit(it.m, f, it.x, y + it.dy, it.z, it.rot, { prio: c.prio() });
           y += s.h;
         }
         lv.col(f, 0, 0, W + 0.1, W + 0.1);
@@ -440,18 +493,19 @@ export function tableCase(items: Measured[], maxLen: number): { unit: Unit; rest
       rest.push(m);
       continue;
     }
-    let r = rows.find((row) => row.used + a.w + 0.06 <= maxLen && a.d <= row.d + 0.001);
+    const g = gapFor(a.w);
+    let r = rows.find((row) => row.used + a.w + g <= maxLen && a.d <= row.d + 0.001);
     if (!r) {
-      if (dz + a.d + 0.06 > depth) {
+      if (dz + a.d + g > depth) {
         rest.push(m);
         continue;
       }
-      r = { d: a.d, items: [], used: 0.06 };
+      r = { d: a.d, items: [], used: g };
       rows.push(r);
-      dz += a.d + 0.06;
+      dz += a.d + g;
     }
     r.items.push({ m, w: a.w, rot: a.rot });
-    r.used += a.w + 0.06;
+    r.used += a.w + g;
   }
   const used = rows.flatMap((r) => r.items.map((i) => i.m));
   const L = Math.max(1.2, Math.min(maxLen, Math.max(...rows.map((r) => r.used), 0) + 0.1));
@@ -471,17 +525,111 @@ export function tableCase(items: Measured[], maxLen: number): { unit: Unit; rest
         lv.bx(c.m.frame, W + 0.01, 0.015, D + 0.01, 0, base + hoodH, 0, f);
         let z = -depth / 2 + 0.03;
         for (const r of rows) {
-          let x = -L / 2 + (L - r.used) / 2 + 0.06;
+          let x = -L / 2 + (L - r.used) / 2 + gapFor(r.items[0].w);
           for (const it of r.items) {
             lv.exhibit(it.m, f, x + it.w / 2, base + 0.001, z + r.d / 2, it.rot, { prio: c.prio() });
-            x += it.w + 0.06;
+            x += it.w + gapFor(it.w);
           }
-          z += r.d + 0.06;
+          z += r.d + gapFor(r.d);
         }
+        magnifier(c, f, used, base + hoodH, L, depth);
         lv.col(f, 0, 0, W + 0.1, D + 0.1);
         const p = labelPanel(c, used, Math.min(0.9, W - 0.1));
         put(c, p, f, 0, base - 0.08 - (p.geometry as THREE.PlaneGeometry).parameters.height / 2, D / 2 - 0.045);
         lv.pool(f.x, base, f.z, Math.max(W, D) * 0.45, '#fff1d6', 0.22);
+      },
+    },
+  };
+}
+
+/** small things sit closer together */
+function gapFor(w: number) {
+  return w < 0.06 ? 0.03 : w < 0.15 ? 0.045 : 0.06;
+}
+
+const torus = new THREE.TorusGeometry(0.07, 0.008, 6, 24);
+const lensMat = new THREE.MeshStandardMaterial({ color: '#e8f4ff', roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.22, depthWrite: false });
+/** a magnifying glass on a stand, on the case top, for things under ~4 cm */
+function magnifier(c: Ctx, f: Frame, items: Measured[], top: number, L: number, depth: number) {
+  if (!items.some((m) => Math.max(m.real.x, m.real.y, m.real.z) < 0.04)) return;
+  const lv = c.lv;
+  const x = L / 2 - 0.15, z = depth / 2 - 0.12;
+  lv.cy(c.m.brass, 0.05, 0.012, x, top, z, f, true);
+  lv.cy(c.m.brass, 0.008, 0.16, x, top, z, f, true);
+  const p = f.point(x - 0.05, top + 0.17, z - 0.04);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2 + 0.5, f.rot, 0, 'YXZ'));
+  lv.geo(c.m.brass, torus, new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1)));
+  lv.geo(lensMat, new THREE.CylinderGeometry(0.068, 0.068, 0.004, 20), new THREE.Matrix4().compose(p, q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2)), new THREE.Vector3(1, 1, 1)));
+}
+
+/**
+ * A specimen cabinet of shallow drawers (natural-history stores, Pitt Rivers): the two top drawers
+ * pulled out under glass, full of tiny things; the rest closed, with brass pulls and label cards.
+ */
+export function drawers(items: Measured[]): { unit: Unit; rest: Measured[] } {
+  const W = 1.3, D = 0.72, H = 1.0, trayW = 0.58, trayD = 0.6, pull = 0.42;
+  const trays: { m: Measured; x: number; z: number; rot: number }[][] = [[], []];
+  const rest: Measured[] = [];
+  const sorted = [...items].sort((a, b) => along(b).d - along(a).d);
+  const cur = [{ x: 0, z: 0, row: 0 }, { x: 0, z: 0, row: 0 }];
+  for (const m of sorted) {
+    const a = along(m);
+    if (m.real.y > 0.07 || a.w > trayW || a.d > trayD) {
+      rest.push(m);
+      continue;
+    }
+    let placed = false;
+    for (let t = 0; t < 2 && !placed; t++) {
+      const c = cur[t];
+      const g = gapFor(a.w);
+      if (c.x + a.w + g > trayW) {
+        c.z += c.row + g;
+        c.x = 0;
+        c.row = 0;
+      }
+      if (c.z + a.d + g > trayD) continue;
+      trays[t].push({ m, x: -trayW / 2 + c.x + g + a.w / 2, z: -trayD / 2 + c.z + g + a.d / 2, rot: a.rot });
+      c.x += a.w + g;
+      c.row = Math.max(c.row, a.d);
+      placed = true;
+    }
+    if (!placed) rest.push(m);
+  }
+  const used = trays.flat().map((t) => t.m);
+  return {
+    rest,
+    unit: {
+      type: 'drawers', place: 'floor', w: W + 1.0, d: D + pull + 1.4, h: H, items: used,
+      focus: new THREE.Vector3(0, H - 0.1, 0.3), glow: W * 0.6,
+      build(c, f) {
+        const lv = c.lv;
+        const o = f.sub(0, -0.3);
+        const wood = mat('#5b4433', { rough: 0.6 });
+        lv.bx(wood, W, H, D, 0, 0, 0, o);
+        lv.bx(c.m.fixture, W - 0.04, 0.06, D - 0.04, 0, 0, 0, o);
+        // closed drawers: fronts, pulls, label cards
+        const dh = (H - 0.1) / 5;
+        for (let row = 1; row < 5; row++) for (const sx of [-1, 1]) {
+          const y = 0.08 + (row - 1) * dh;
+          lv.bx(mat('#6b5140', { rough: 0.55 }), W / 2 - 0.03, dh - 0.02, 0.02, (sx * W) / 4, y, D / 2, o);
+          lv.bx(c.m.brass, 0.1, 0.02, 0.025, (sx * W) / 4, y + dh / 2 - 0.01, D / 2 + 0.02, o);
+          lv.bx(mat('#efe6d2'), 0.07, 0.035, 0.005, (sx * W) / 4, y + dh / 2 + 0.03, D / 2 + 0.012, o);
+        }
+        // the top drawers, pulled out, glazed
+        const y0 = H - dh + 0.01;
+        for (const [t, sx] of [[0, -1], [1, 1]] as const) {
+          const tz = D / 2 - trayD / 2 + pull;
+          const tx = (sx * W) / 4;
+          lv.bx(wood, trayW + 0.04, 0.06, trayD + 0.04, tx, y0, tz, o);
+          lv.bx(mat('#e9e2d2', { rough: 0.9 }), trayW, 0.005, trayD, tx, y0 + 0.06, tz, o);
+          lv.bx(c.m.glass, trayW + 0.04, 0.08, trayD + 0.04, tx, y0 + 0.06, tz, o);
+          for (const it of trays[t]) lv.exhibit(it.m, o, tx + it.x, y0 + 0.066, tz + it.z, it.rot, { prio: c.prio() });
+        }
+        lv.col(o, 0, pull / 2, W + 0.1, D + pull + 0.1);
+        magnifier(c, o.sub(-W / 4, D / 2 - trayD / 2 + pull), used, y0 + 0.14, trayW, trayD);
+        const p = labelPanel(c, used, 0.6, false, groupTitle(used));
+        put(c, p, f, W / 2 + 0.25, 1.0, D / 2 + pull - 0.1, 0, 0.5);
+        lv.bx(c.m.fixture, 0.04, 0.9, 0.04, W / 2 + 0.25, 0, D / 2 + pull - 0.25, f);
       },
     },
   };
@@ -534,15 +682,12 @@ export function wallCase(items: Measured[], len0: number, storage: boolean): { u
           if (y > base + 0.06) {
             lv.bx(c.m.shelf, len - 0.08, 0.012, depth - 0.06, 0, y - 0.012, zc, f);
           }
-          let x = -len / 2 + (len - s.used) / 2 + (storage ? 0.05 : 0.1);
-          for (const it of s.items) {
-            lv.exhibit(it.m, f, x + it.w / 2, y, zc, it.rot, { prio: c.prio() });
-            x += it.w + (storage ? 0.05 : 0.1);
-          }
+          if (s.twoDeep) lv.bx(c.m.shelf, len - 0.08, 0.05, (depth - 0.06) / 2, 0, y, zc - depth / 4, f);
+          for (const it of s.items) lv.exhibit(it.m, f, it.x, y + it.dy, zc + it.z, it.rot, { prio: c.prio() });
           y += s.h;
         }
         lv.col(f, 0, zc, len, depth + 0.1);
-        const p = labelPanel(c, used, Math.min(1.2, len - 0.2));
+        const p = labelPanel(c, used, Math.min(1.2, len - 0.2), false, groupTitle(used));
         const ph = (p.geometry as THREE.PlaneGeometry).parameters.height;
         put(c, p, f, 0, Math.max(0.12 + ph / 2, base - 0.08 - ph / 2), depth + 0.004);
         // the case throws a little light on the floor in front
