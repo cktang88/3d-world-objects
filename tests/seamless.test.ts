@@ -8,6 +8,7 @@ import { InteriorLevel } from '../src/interior';
 import { Vertical } from '../src/vertical';
 import { Player } from '../src/player';
 import { Lazy, registerContainer } from '../src/lazy';
+import { detectDrawers, frontMaterial } from '../src/lazy-furniture';
 import { realScale } from '../src/realscale';
 import type { Level, LevelDesc, Portal } from '../src/level';
 
@@ -245,7 +246,8 @@ test('library dressers and nightstands: drawers open on E, slide within their ru
     lv.group.updateMatrixWorld(true);
     lazy.update(0.1, cam, lv);
     expect(!c.drawer!.visible, `${c.kind}: its drawer is drawn while shut (the model has its own fronts)`);
-    expect(c.obj.children.length === 1, `${c.kind}: contents exist before anyone opened it`);
+    expect(c.obj.children.every((o) => o === c.drawer || o === (c as { slot?: THREE.Object3D }).slot), `${c.kind}: contents exist before anyone opened it`);
+    expect(!(c as { slot?: THREE.Object3D }).slot?.visible, `${c.kind}: the empty slot shows while shut`);
     // open it the way E does
     const lc = lazy.aim(new THREE.Ray(c.obj.localToWorld(new THREE.Vector3(0, c.size.y / 2, 1.2)), c.obj.getWorldDirection(new THREE.Vector3()).negate()), 2.4, lv);
     expect(lc, `${c.kind}: not aimable from 1.2 m in front`);
@@ -254,6 +256,7 @@ test('library dressers and nightstands: drawers open on E, slide within their ru
     const travel = c.drawer!.position.z;
     between(travel, 0.5 * c.size.z, c.size.z, `${c.kind}: drawer travel ${fmt(travel)} m for a ${fmt(c.size.z)} m deep drawer`);
     expect(c.drawer!.visible, `${c.kind}: the open drawer is not drawn`);
+    expect((c as { slot?: THREE.Object3D }).slot?.visible, `${c.kind}: no empty slot over the model's own front while the drawer is out`);
     const contents = lc!.c.contents;
     expect(contents && contents.children.length, `${c.kind}: opening generated nothing`);
     // contents inside the drawer box (obj-local: x within the width, y within the height, z within the pulled-out depth)
@@ -265,10 +268,46 @@ test('library dressers and nightstands: drawers open on E, slide within their ru
     // and shut again
     lazy.toggle(lc!.c);
     for (let i = 0; i < 30; i++) lazy.update(1 / 30, cam, lv);
-    expect(c.drawer!.position.z < 1e-3 && !c.drawer!.visible, `${c.kind}: did not close`);
+    expect(c.drawer!.position.z < 1e-3 && !c.drawer!.visible && !(c as { slot?: THREE.Object3D }).slot?.visible, `${c.kind}: did not close`);
   }
   // evicting the room drops the contents
   for (const { lv } of found) lv.dispose();
   lazy.update(0.1, cam, found[0].lv);
   expect(found.every(({ c }) => c.obj.userData.disposed), 'containers not marked disposed with their level');
+});
+
+test('detectDrawers reads the drawer layout off a model front (rows from horizontal seams, a split top row), else null', () => {
+  // a 1.0 x 0.9 x 0.45 m dresser: carcass, and drawer fronts proud of it with 1 cm gaps: 2 small on top, 2 wide below
+  const W = 1.0, H = 0.9, D = 0.45;
+  const model = new THREE.Group();
+  const add = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d, Math.ceil(w / 0.02), Math.ceil(h / 0.02), 1), new THREE.MeshStandardMaterial({ color: '#f0ece4' }));
+    m.position.set(x, y + h / 2, z);
+    model.add(m);
+  };
+  add(W, H, D - 0.02, 0, 0, -0.01);
+  const rows: [number, number, number][] = [[0.08, 0.25, 0], [0.34, 0.25, 0], [0.6, 0.25, 2]];
+  for (const [y, h, n] of rows) {
+    if (n === 2) for (const sx of [-1, 1]) add(W / 2 - 0.05, h, 0.02, sx * (W / 4 - 0.005), y, D / 2 - 0.01);
+    else add(W - 0.08, h, 0.02, 0, y, D / 2 - 0.01);
+  }
+  const holder = new THREE.Group();
+  holder.add(model);
+  const bands = detectDrawers(model, holder, [W, H, D], 'dresser');
+  expect(bands, 'no layout found on a clear three-row dresser');
+  const tops = bands!.filter((b) => b.y > 0.55), lows = bands!.filter((b) => b.y < 0.55);
+  console.log(`   bands: ${bands!.map((b) => `${fmt(b.x)},${fmt(b.y)} ${fmt(b.w)}x${fmt(b.h)}`).join(' | ')}`);
+  expect(tops.length === 2, `top row should be two drawers side by side, got ${tops.length}`);
+  expect(lows.length === 2 && lows.every((b) => b.w > 0.8), `two full-width rows below, got ${lows.length}`);
+  for (const b of bands!) between(b.h, 0.15, 0.3, `drawer height ${fmt(b.h)}`);
+  // a plain box (no seams) gives no layout: the even rows stay
+  const plain = new THREE.Group();
+  plain.add(new THREE.Mesh(new THREE.BoxGeometry(W, H, D, 50, 45, 1), new THREE.MeshStandardMaterial()));
+  const ph = new THREE.Group();
+  ph.add(plain);
+  plain.position.y = H / 2;
+  expect(detectDrawers(plain, ph, [W, H, D], 'dresser') === null, 'found drawers on a plain box');
+  // the drawer front takes the model's colour
+  const fm = frontMaterial(model);
+  expect(fm && fm.color.getHexString() === new THREE.Color('#f0ece4').getHexString(), `front colour ${fm?.color.getHexString()}`);
 });

@@ -13,6 +13,8 @@ import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
+import { detectDrawers, frontMaterial, slotMesh } from './lazy-furniture';
+import { adoptContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
 /**
@@ -88,6 +90,8 @@ export interface Container {
   open?: (t: number) => void;
   /** the moving part is only drawn while open (drawers added to a library model that has its own fronts) */
   hideClosed?: boolean;
+  /** the dark empty slot shown over the model's own front while the drawer is out */
+  slot?: THREE.Object3D;
 }
 interface Frame {
   x: number;
@@ -1102,7 +1106,7 @@ export class InteriorLevel implements Level {
     const fk = new Kit();
     const out = fallback(fk);
     fk.finish(holder);
-    void fillHolder(holder, id);
+    this.lastLib = { holder, loaded: fillHolder(holder, id) };
     const s = LIB[id];
     this.libPortal(id, f, s, y);
     return out;
@@ -1182,8 +1186,52 @@ export class InteriorLevel implements Level {
    * Drawers and cabinet doors as separate meshes registered as containers (lazy.ts): a drawer slides
    * out with its contents, a door swings on its hinge; contents are generated only when opened.
    */
-  private movingParts(f: Frame, parts: F.Part[] | undefined, hideClosed = false) {
-    if (!parts) return;
+  /** the last library piece placed by libPiece() and its model load (libDrawerSet refits drawers to it) */
+  private lastLib: { holder: THREE.Object3D; loaded: Promise<THREE.Object3D | null> } | null = null;
+
+  /**
+   * Drawers for a library dresser / nightstand (lazy-furniture.ts): even rows at once; when the model
+   * has loaded, refitted to the drawer fronts read from its front face, and given its colour.
+   */
+  private libDrawerSet(f: Frame, kind: 'dresser' | 'nightstand', size: readonly number[], rows: number) {
+    let entries = this.movingParts(f, libDrawers(kind, size, rows, this.pal.wood), true);
+    const lib = this.lastLib, cur = this.cur, wood = this.pal.wood;
+    if (!lib) return;
+    lib.loaded.then((model) => {
+      if (!model || lib.holder.userData.disposed || this.group.userData.disposed) return;
+      const bands = detectDrawers(model, lib.holder, size, kind);
+      if (bands) {
+        for (const e of entries) {
+          e.obj.removeFromParent();
+          e.obj.traverse((o) => (o.userData.disposed = true));
+          const i = this.containers.indexOf(e);
+          if (i >= 0) this.containers.splice(i, 1);
+        }
+        const prev = this.cur;
+        this.cur = cur;
+        const d = Math.max(0.15, size[2] - 0.1);
+        entries = this.movingParts(f, bands.map((b) => ({ move: 'drawer' as const, kind, x: b.x, y: b.y, z: size[2] / 2 + 0.004, w: b.w, h: b.h, d, mat: wood })), true);
+        this.cur = prev;
+        if (this.group.userData.containersAdopted) {
+          for (const e of entries) {
+            this.containers.splice(this.containers.indexOf(e), 1);
+            adoptContainer(e);
+          }
+        }
+      }
+      // each drawer front in the paint of the model's own front at that drawer
+      for (const e of entries) {
+        // (off-centre and low: not on the knob or pull in the middle)
+        const lp = lib.holder.worldToLocal(e.obj.localToWorld(new THREE.Vector3(e.size.x * 0.3, e.size.y * 0.25, 0)));
+        const mat = frontMaterial(model, { holder: lib.holder, size, x: lp.x, y: lp.y });
+        if (mat) e.drawer?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
+      }
+    });
+  }
+
+  private movingParts(f: Frame, parts: F.Part[] | undefined, hideClosed = false): Container[] {
+    const made: Container[] = [];
+    if (!parts) return made;
     const c = Math.cos(f.rot), s = Math.sin(f.rot);
     for (const pt of parts) {
       const obj = new THREE.Group();
@@ -1228,9 +1276,15 @@ export class InteriorLevel implements Level {
       if (hideClosed) {
         entry.hideClosed = true;
         mover.visible = false;
+        // the model's own closed front stays behind a pulled-out drawer: cover it with an empty slot
+        entry.slot = slotMesh(pt.w, pt.h);
+        entry.slot.position.z = -0.003;
+        obj.add(entry.slot);
       }
       this.containers.push(entry);
+      made.push(entry);
     }
+    return made;
   }
 
   /** a small library object (no stand-in) */
@@ -1461,7 +1515,7 @@ export class InteriorLevel implements Level {
       const nsId = r.chance(0.5) ? pickLib('nightstand', r) : null;
       const p = this.libPiece(f, nsId, (kk) => F.nightstand(kk, this.pal.wood)) as F.Piece;
       if (nsId) p.h = LIB[nsId][1];
-      if (nsId) this.movingParts(f, libDrawers('nightstand', LIB[nsId], 1, this.pal.wood), true);
+      if (nsId) this.libDrawerSet(f, 'nightstand', LIB[nsId], 1);
       else this.movingParts(f, p.parts);
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -0.08, p.h, -0.04);
@@ -1489,7 +1543,7 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, drId, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const dtop = drId ? { x: 0, z: 0, y: ds[1], w: ds[0] - 0.1, d: ds[2] - 0.12 } : p.tops[0];
-      if (drId) this.movingParts(f, libDrawers('dresser', ds, ds[1] > 1.1 ? 4 : 3, this.pal.wood), true);
+      if (drId) this.libDrawerSet(f, 'dresser', ds, ds[1] > 1.1 ? 4 : 3);
       else this.movingParts(f, p.parts);
       this.decorateTop(r, f, { ...dtop, x: -dtop.w / 4, w: dtop.w / 2 }, ['lamp', 'tableware', 'toy', 'plant', 'electronics'], [1, 1], 0.45);
       this.libTop(r, f, { ...dtop, x: dtop.w / 4, w: dtop.w / 2 }, 'table', 2, 0.45);
@@ -2058,7 +2112,7 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, id, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const top = id ? { x: 0, z: 0, y: s[1], w: s[0] - 0.12, d: s[2] - 0.12 } : p.tops[0];
-      if (id) this.movingParts(f, libDrawers('dresser', s, 3, this.pal.wood), true);
+      if (id) this.libDrawerSet(f, 'dresser', s, 3);
       else this.movingParts(f, p.parts);
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -top.w / 2 + 0.18, top.y, 0);

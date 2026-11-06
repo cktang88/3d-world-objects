@@ -45,6 +45,8 @@ export interface ContainerSpec {
   drawer?: THREE.Object3D;
   /** draw the door/drawer only while it is open (it is added to a model that has its own fronts) */
   hideClosed?: boolean;
+  /** shown only while open: e.g. the dark empty slot over the model's own closed front */
+  slot?: THREE.Object3D;
   /** contents can't be seen while shut (default true). False (glass coolers, display cases): generated when near and facing */
   closedOpaque?: boolean;
 }
@@ -115,6 +117,7 @@ export class LazyContainer {
     else if (this.spec.door) this.spec.door.rotation.y = -1.85 * e;
     else if (this.spec.drawer) this.spec.drawer.position.z = e * DRAWER_TRAVEL * (this.spec.size?.z ?? 0.4);
     if (this.spec.hideClosed) for (const m of [this.spec.door, this.spec.drawer]) if (m) m.visible = t > 0.001;
+    if (this.spec.slot) this.spec.slot.visible = t > 0.001;
     if (this.contents) {
       // no moving part we know of: present the contents by sliding them out of the front
       if (!this.spec.open && !this.spec.door) this.contents.position.z = (this.contents.userData.restZ as number) + e * DRAWER_TRAVEL * (this.spec.size?.z ?? 0.4);
@@ -169,8 +172,15 @@ function under(o: THREE.Object3D, root: THREE.Object3D) {
   return false;
 }
 
+/** register an InteriorLevel-style container ({ kind, obj, size, generate, ... }) */
+export function adoptContainer(c: ContainerLike) {
+  // only containers with an anchor object (ShopLevel's glass coolers stock themselves in update())
+  if (!(c.obj as THREE.Object3D | undefined)?.isObject3D) return null;
+  return registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed, slot: c.slot });
+}
+
 /** InteriorLevel-style containers ({ kind, obj, size, generate }) adopted automatically */
-interface ContainerLike {
+export interface ContainerLike {
   kind: string;
   obj: THREE.Group;
   size: THREE.Vector3;
@@ -180,6 +190,7 @@ interface ContainerLike {
   open?: (t: number) => void;
   closedOpaque?: boolean;
   hideClosed?: boolean;
+  slot?: THREE.Object3D;
   label?: string;
 }
 const NAMES: Record<string, string> = { dresser: 'dresser', nightstand: 'nightstand drawer', cabinet: 'cabinet', upper: 'cupboard', fridge: 'fridge', closet: 'closet', cooler: 'cooler', freezer: 'freezer' };
@@ -329,11 +340,9 @@ export class Lazy {
     if (!this.adopted.has(level)) {
       this.adopted.add(level);
       const list = (level as unknown as { containers?: ContainerLike[] }).containers;
-      for (const c of list ?? []) {
-        // only containers with an anchor object (ShopLevel's glass coolers stock themselves in update())
-        if (!(c.obj as THREE.Object3D | undefined)?.isObject3D) continue;
-        registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed });
-      }
+      // a level adding containers later (a library model's drawers refitted once it loads) registers them itself
+      level.group.userData.containersAdopted = true;
+      for (const c of list ?? []) adoptContainer(c);
     }
     const t0 = performance.now();
     const fwd = camera.getWorldDirection(V());
