@@ -125,3 +125,23 @@ Poly Haven (CC0) has `fire_hydrant`, `street_lamp_01/02`, `metal_trash_can`, `tr
 Victorian lanterns, galvanised dustbins) and the trees are 1–5 M triangles each, so the frequent
 props are modelled procedurally to the dimensions above instead, and the trees use a small
 procedural generator with painted leaf-card atlases (no external textures).
+
+## Round 2 additions
+
+- Species mix: NYC 2015 street-tree census (NYC Parks / NYC Open Data, "2015 Street Tree Census"):
+  London planetree 12.9%, honeylocust 9.9%, Callery pear 9.0%, pin oak 7.6%, Norway maple 5.3%,
+  littleleaf linden, cherry, Japanese zelkova, ginkgo 3.7%. The generator models the five named in
+  the brief and weights each block's dominant species by these shares (~70% dominant, rest mixed).
+  - Pin oak: strong central leader, many short horizontal limbs, lower ones drooping (pyramidal);
+    smooth grey bark on young trees; deeply lobed, bristle-tipped leaves 8–15 cm.
+  - Ginkgo: narrow, irregular, sparsely branched upright crown; fan-shaped notched leaves 5–8 cm,
+    bright green; grey-brown furrowed bark.
+- Pedestrian countdown signals: hand / walking person on the left, two orange seven-segment digits
+  on the right (https://commons.wikimedia.org/wiki/File:Pedestrian_signal_New_York_City.JPG).
+- Bollards: black-painted steel pipe bollards (~0.9 m, Ø ~0.22 m, domed cap, reflective band) at
+  corners/ramps; stainless security bollards (~1 m, Ø ~0.28 m) in front of offices and
+  institutions (https://commons.wikimedia.org/wiki/File:Bollard,_bucket,_fire_hydrant,_trash_bin_at_the_northwest_end_of_Dyckman_Street_in_Inwood,_NYC.jpg).
+- Sidewalk standpipes ("Siamese" connections): a pipe rising ~0.6 m beside a building with a
+  Y-head and two capped 2½" inlets, chrome/brass or red.
+- Subway stairs: 7" (18 cm) risers, 11" (28 cm) treads, yellow nosing strips, cream tile walls,
+  handrails both sides; ~14 risers to the mezzanine landing.
