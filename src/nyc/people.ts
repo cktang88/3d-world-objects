@@ -412,6 +412,31 @@ function coatSkirtGeo(g: Gender, len: number) {
   skirtGeos.set(k, geo);
   return geo;
 }
+/** screen-door crossfade: discard where the 4x4 Bayer threshold is above the fade value (the
+ *  far crowd keeps exactly the complementary pixels) */
+export const BAYER_GLSL = /* glsl */ `
+float pedBayer(vec2 p) {
+  ivec2 q = ivec2(mod(p, 4.0));
+  int i = q.x + q.y * 4;
+  int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  return (float(m[i]) + 0.5) / 16.0;
+}`;
+const dithered = new WeakSet<THREE.Material>();
+function addDither(mat: THREE.Material, fade: { value: number }) {
+  if (dithered.has(mat) || !(mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) return;
+  dithered.add(mat);
+  const prev = mat.onBeforeCompile.bind(mat);
+  const prevKey = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (s, r) => {
+    prev(s, r);
+    s.uniforms.uPedFade = fade;
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uPedFade;\n${BAYER_GLSL}`)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (uPedFade < 1.0 && pedBayer(gl_FragCoord.xy) > uPedFade) discard;');
+  };
+  mat.customProgramCacheKey = () => prevKey() + '|pedfade';
+  mat.needsUpdate = true;
+}
 interface RigidPart {
   geo: THREE.BufferGeometry;
   bone: string;
@@ -710,6 +735,7 @@ export class Person {
       if (self.frozen) return;
       baseUpdate.call(this, force);
     };
+    addDither(bm, this.fadeU);
     const skels = new Set<THREE.Skeleton>();
     this.root.traverse((o) => {
       if ((o as THREE.SkinnedMesh).isSkinnedMesh) skels.add((o as THREE.SkinnedMesh).skeleton);
@@ -754,6 +780,33 @@ export class Person {
   }
   get scaleH() {
     return this.model().scale.x;
+  }
+  /** the crossfade uniform shared by this person's (dithered) materials */
+  private fadeU = { value: 1 };
+  private fadeReady = false;
+  /** 1 = solid; below 1 the near person dithers out (crossfade with the far crowd) */
+  get fade() {
+    return this.fadeU.value;
+  }
+  set fade(v: number) {
+    if (v < 1 && !this.fadeReady) {
+      // first crossfade: give this person its own dithered copies of the shared materials
+      this.fadeReady = true;
+      const copies = new Map<THREE.Material, THREE.Material>();
+      this.root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || Array.isArray(m.material)) return;
+        if (dithered.has(m.material)) return;
+        let c = copies.get(m.material);
+        if (!c) {
+          c = m.material.clone();
+          addDither(c, this.fadeU);
+          copies.set(m.material, c);
+        }
+        m.material = c;
+      });
+    }
+    this.fadeU.value = v;
   }
   /** wears a hood (raised in the rain) */
   hood = false;
@@ -1119,24 +1172,30 @@ export class Pedestrians {
       _sphere.center.set(pd.pos.x, pd.pos.y + 0.9, pd.pos.z).applyMatrix4(this.group.matrixWorld);
       _sphere.radius = pd.p.noPhone ? 2.2 : 1.4;
       const seen = !FREEZE || d < 6 || !cam || this.frustum.intersectsSphere(_sphere);
-      // beyond ~30 m: one instance of the VAT far crowd instead of a skinned person
-      const wantFar = !!far && (pd.far ? d > FAR_OUT : d > FAR_IN);
-      if (wantFar) {
-        if (!pd.far) {
-          pd.far = true;
-          pd.p.syncToFar();
-        }
-        r.visible = false;
-        pd.p.frozen = true;
-        pd.p.farStep(dt);
+      // beyond ~30 m: one instance of the VAT far crowd instead of a skinned person. Between
+      // FAR_OUT and FAR_IN both are drawn with complementary screen-door dither patterns.
+      const fadeNear = far ? 1 - THREE.MathUtils.smoothstep(d, FAR_OUT, FAR_IN) : 1;
+      if (fadeNear < 1) {
+        const farOnly = fadeNear <= 0;
+        if (farOnly) {
+          if (!pd.far) {
+            pd.far = true;
+            pd.p.syncToFar();
+          }
+          r.visible = false;
+          pd.p.frozen = true;
+          pd.p.farStep(dt);
+        } else if (!pd.far) pd.p.syncToFar(); // in the band the near person leads the phase
+        else pd.p.farStep(dt);
         if (seen) {
           const f = pd.p.far;
           _q.setFromAxisAngle(_up, pd.rot);
           _s.setScalar(pd.p.scaleH);
-          far.add(pd.p.gender === 'female', { matrix: _m4.compose(pd.pos, _q, _s), clip: pd.p.vatClip, phase: pd.p.vatPhase, top: f.top, bottom: f.bottom, shoe: f.shoe, skin: f.skin, hair: f.hair, style: f.style, coat: f.coat });
+          far!.add(pd.p.gender === 'female', { matrix: _m4.compose(pd.pos, _q, _s), clip: pd.p.vatClip, phase: pd.p.vatPhase, fade: fadeNear, top: f.top, bottom: f.bottom, shoe: f.shoe, skin: f.skin, hair: f.hair, style: f.style, coat: f.coat });
         }
-        continue;
+        if (farOnly) continue;
       }
+      pd.p.fade = fadeNear;
       if (pd.far) {
         pd.far = false;
         pd.p.syncFromFar();

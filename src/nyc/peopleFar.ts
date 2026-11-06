@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { BAYER_GLSL } from './people';
 
 /**
  * The far crowd: pedestrians beyond ~30 m drawn as one InstancedMesh per gender with a
@@ -27,6 +28,8 @@ export interface FarInstance {
   clip: number;
   /** 0..1 through the clip */
   phase: number;
+  /** the near person's fade (1 = far instance hidden, 0 = solid) */
+  fade: number;
   top: THREE.Color; bottom: THREE.Color; shoe: THREE.Color; skin: THREE.Color; hair: THREE.Color;
   /** top style (0 tee .. 4 hoodie), sleeve end |x|, trouser hem y, hair style (0 none/short, 1 long, 2 buns/bob) */
   style: THREE.Vector4;
@@ -211,6 +214,7 @@ export class FarCrowd {
           varying vec3 vBody, vTop, vBottom, vShoe, vSkin, vHair;
           varying vec4 vStyle;
           varying float vCoat;
+          varying float vFade;
           vec2 vatRow(float clip, float phase) {
             float start = clip < 0.5 ? uClip.x : uClip.z, n = clip < 0.5 ? uClip.y : uClip.w;
             float fr = fract(phase) * n;
@@ -231,7 +235,7 @@ export class FarCrowd {
         .replace(
           '#include <begin_vertex>',
           `vec3 transformed = mix(texture2D(uPos, vec2(cx, (rr.x + 0.5) / uVat.y)).xyz, texture2D(uPos, vec2(cx, (rr.y + 0.5) / uVat.y)).xyz, ft);
-          vBody = position; vTop = i_top; vBottom = i_bottom; vShoe = i_shoe; vSkin = i_skin; vHair = i_hair; vStyle = i_style; vCoat = i_coat;`,
+          vBody = position; vTop = i_top; vBottom = i_bottom; vShoe = i_shoe; vSkin = i_skin; vHair = i_hair; vStyle = i_style; vCoat = i_coat; vFade = i_anim.z;`,
         );
       s.fragmentShader = s.fragmentShader
         .replace(
@@ -240,8 +244,11 @@ export class FarCrowd {
           uniform vec4 uB0, uB1;
           varying vec3 vBody, vTop, vBottom, vShoe, vSkin, vHair;
           varying vec4 vStyle;
-          varying float vCoat;`,
+          varying float vCoat;
+          varying float vFade;
+          ${BAYER_GLSL}`,
         )
+        .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vFade > 0.0 && pedBayer(gl_FragCoord.xy) <= vFade) discard;')
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
@@ -268,7 +275,7 @@ export class FarCrowd {
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'ped-far-vat-v1';
+    mat.customProgramCacheKey = () => 'ped-far-vat-v2';
     const mesh = new THREE.InstancedMesh(geo, mat, capacity);
     mesh.count = 0;
     mesh.frustumCulled = false;
@@ -287,7 +294,7 @@ export class FarCrowd {
     this.counts[gi]++;
     mesh.setMatrixAt(i, inst.matrix);
     const a = this.attrs[gi];
-    a.anim.setXYZW(i, inst.clip, inst.phase, 0, 0);
+    a.anim.setXYZW(i, inst.clip, inst.phase, inst.fade, 0);
     a.top.setXYZ(i, inst.top.r, inst.top.g, inst.top.b);
     a.bottom.setXYZ(i, inst.bottom.r, inst.bottom.g, inst.bottom.b);
     a.shoe.setXYZ(i, inst.shoe.r, inst.shoe.g, inst.shoe.b);
