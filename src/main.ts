@@ -1,5 +1,6 @@
 // ?fast=1 / ?notex=1 / ?post=0 / ?shadows=0 (src/flags.ts): first, so modules that read location.search see them
 import './flags';
+import { mark, timed } from './boot'; // boot stage marks (scripts/boot.mjs)
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import './style.css';
@@ -738,7 +739,8 @@ function frame() {
 // ---------------------------------------------------------------- start
 
 const params = new URLSearchParams(location.search);
-const ready = Promise.all([loadManifest(), loadMuseum(), loadPbr(renderer), loadRebuiltIndex()]);
+mark('modules loaded');
+const ready = timed('ready', Promise.all([timed('manifest', loadManifest()), timed('museum data', loadMuseum()), timed('pbr', loadPbr(renderer)), timed('rebuilt index', loadRebuiltIndex())]));
 
 async function startMode(m: Mode) {
   mode = m;
@@ -759,7 +761,9 @@ async function startMode(m: Mode) {
   }
   if (level) scene.remove(level.group);
   seam.clear();
+  mark('level build start');
   setLevel(seam.take(currentDesc));
+  mark('level built');
   started = true;
   hud.start.classList.add('hidden');
   hud.start.classList.remove('paused');
@@ -794,7 +798,9 @@ async function startLab(name: string) {
       if (u.cam && !params.has('cam')) camera.position.copy(u.cam);
       if (u.look && !params.has('look')) controls.target.copy(u.look);
     })
+    .then(() => mark('lab built'))
     .then(() => lighting.ready)
+    .then(() => mark('lighting ready'))
     .then(() => new Promise((r) => setTimeout(r, Number(params.get('settle') ?? 1500))));
   (window as unknown as { __labReady: Promise<unknown> }).__labReady = done;
 }

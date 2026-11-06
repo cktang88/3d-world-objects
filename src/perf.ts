@@ -19,6 +19,7 @@
  * Installed from a tiny delimited hook at the end of main.ts. Costs a few closures per frame.
  */
 import * as THREE from 'three';
+import { mark } from './boot';
 import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import type { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 
@@ -135,6 +136,7 @@ export function installPerf(ctx: PerfCtx): PerfApi {
       programs: info.programs?.length ?? 0, geometries: info.memory.geometries, textures: info.memory.textures,
       perPass, frameMs: +frameMs.toFixed(2), frameMsAvg: +frameAvg.toFixed(2), cpuMs: +(now - tStart).toFixed(2), gpuMs, frame: ++frameNo,
     };
+    if (frameNo === 1) mark(`first frame (${last.programs} programs, ${last.calls} calls, ${(now - tStart).toFixed(0)} ms)`);
   };
 
   // one frame = one composer.render(), or a top-level renderer.render(scene, camera) (quality=low)
