@@ -285,6 +285,47 @@ function barkCanvas(kind: Spec['bark']) {
   return c;
 }
 
+// ---------------------------------------------------------------- wind
+
+/** shared wind clock for every tree material (advanced from onBeforeRender, so it costs nothing when no tree is drawn) */
+export const windTime = { value: 0 };
+export const wind = { strength: 1 };
+const windStrength = { value: 1 };
+export function tickWind() {
+  windTime.value = performance.now() * 0.001;
+  windStrength.value = wind.strength;
+}
+/**
+ * Vertex sway: the whole crown leans with a slow two-frequency gust whose phase comes from the
+ * instance's world position (neighbouring trees move out of step); weight grows with height above
+ * the trunk so the trunk stays still and twigs move most. Leaves add a fast per-card flutter.
+ */
+function windShader(sh: THREE.WebGLProgramParametersWithUniforms, leaves: boolean) {
+  sh.uniforms.uWindTime = windTime;
+  sh.uniforms.uWind = windStrength;
+  sh.vertexShader = 'uniform float uWindTime;\nuniform float uWind;\n' + sh.vertexShader.replace(
+    '#include <begin_vertex>',
+    `#include <begin_vertex>
+    {
+      #ifdef USE_INSTANCING
+        vec2 ip = instanceMatrix[3].xz;
+      #else
+        vec2 ip = vec2(0.0);
+      #endif
+      float ph = dot(ip, vec2(0.21, 0.37));
+      float h = max(transformed.y - 2.4, 0.0);
+      float w = h * h * 0.0011 * uWind;
+      float t = uWindTime;
+      float gust = 0.6 + 0.4 * sin(t * 0.23 + ph * 0.5);
+      vec2 sway = vec2(sin(t * 1.1 + ph) + 0.35 * sin(t * 2.7 + ph * 1.9), 0.6 * sin(t * 0.83 + ph * 1.3) + 0.3 * sin(t * 2.2 + ph)) * w * gust;
+      transformed.xz += sway;
+      transformed.y -= dot(sway, sway) * 0.5;
+      ${leaves ? `float fl = sin(t * 7.3 + dot(transformed, vec3(2.3, 1.7, 3.1)) + ph) * min(h, 4.0) * 0.012 * uWind * gust;
+      transformed += objectNormal * fl;` : ''}
+    }`,
+  );
+}
+
 const barkMats = new Map<string, THREE.MeshStandardMaterial>();
 function barkMat(kind: Spec['bark']) {
   let m = barkMats.get(kind);
@@ -298,6 +339,8 @@ function barkMat(kind: Spec['bark']) {
     nor.wrapS = nor.wrapT = THREE.RepeatWrapping;
     m = new THREE.MeshStandardMaterial({ map, normalMap: nor, roughness: 0.92, metalness: 0 });
     m.normalScale.setScalar(kind === 'plane' ? 0.6 : 1.2);
+    m.onBeforeCompile = (sh) => windShader(sh, false);
+    m.customProgramCacheKey = () => 'nyc-bark';
     barkMats.set(kind, m);
   }
   return m;
@@ -310,6 +353,7 @@ export function leafMat(kind: Spec['leaf']) {
     m = new THREE.MeshStandardMaterial({ map: leafAtlas(kind), alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.78, metalness: 0 });
     // the cards carry crown-shaped normals: keep them on the back faces too (soft, volumetric shading)
     m.onBeforeCompile = (sh) => {
+      windShader(sh, true);
       sh.fragmentShader = sh.fragmentShader.replace('normal *= faceDirection;', '');
       // a little transmitted light: lift the shadowed side
       sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.06;');
@@ -544,6 +588,7 @@ export function treeMesh(species: Species, variant: number, lod: 'hi' | 'lo' = '
   const b = new THREE.Mesh(m[lod].bark, m.bark);
   const l = new THREE.Mesh(m[lod].leaves, m.leaf);
   b.castShadow = l.castShadow = true;
+  b.onBeforeRender = l.onBeforeRender = tickWind;
   b.receiveShadow = l.receiveShadow = true;
   g.add(b, l);
   return g;
@@ -569,6 +614,7 @@ function makeBatch(model: TreeModel, cap: number, lod: THREE.LOD): Batch {
     im.count = 0;
     im.castShadow = true;
     im.receiveShadow = true;
+    im.onBeforeRender = tickWind;
     if (colors) im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
     level.add(im);
     return im;
