@@ -5,9 +5,9 @@ import { museum, themeMembers, type Theme } from '../museumData';
 import { Rng, hashN } from '../rng';
 import { MuseumBase, shade } from './base';
 import { makeMats, type Ctx, type Unit } from './displays';
-import { assemble, planRoom, type Plan } from './plan';
+import { assemble, partitionRooms, planRoom, type Plan } from './plan';
 import { buildShell, doorPortal, doorSign } from './shell';
-import { measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
+import { loadSizeShard, measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
 import { pageSize, styleFor, STYLES, type Style } from './style';
 import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smithsonian';
 
@@ -40,7 +40,6 @@ export class GalleryLevel extends MuseumBase {
     const t = (this.theme = si ? siTheme(desc.theme) : m.themes[desc.theme]);
     const st = (this.style = si ? STYLES[SI_ROOMS[desc.theme - SI_BASE].arch] : styleFor(t.collection));
     const per = si ? SI_PAGE : pageSize(t.collection);
-    const pages = Math.max(1, Math.ceil(t.size / per));
     this.name = `${t.name}${desc.page ? ` · ${roman(desc.page + 1)}` : ''}`;
     this.r = new Rng(hashN(desc.theme, desc.page, 11));
     this.setEnv(st);
@@ -51,7 +50,13 @@ export class GalleryLevel extends MuseumBase {
       return;
     }
 
-    // exits: the next room of this theme (if any), then the most similar themes
+    this.ready = this.start(per);
+  }
+
+  /** doorways: the next room of this theme (if any), then the most similar themes */
+  private exits(pages: number): Exit[] {
+    const m = museum();
+    const t = this.theme, desc = this.desc;
     const exits: Exit[] = [];
     if (desc.page + 1 < pages) exits.push({ top: 'continue', label: `${t.name} ${roman(desc.page + 2)}`, target: { kind: 'gallery', theme: t.id, page: desc.page + 1, wing: desc.wing } });
     for (const n of t.neighbors) {
@@ -69,7 +74,7 @@ export class GalleryLevel extends MuseumBase {
     const sk = SI_ROOMS.findIndex((x) => x.related === t.collection);
     if (sk >= 0 && er.chance(0.5)) exits[exits.length - 1] = { top: 'Smithsonian · real museum scans', label: SI_ROOMS[sk].name, target: { kind: 'gallery', theme: SI_BASE + sk, page: 0, wing: desc.wing } };
     er.shuffle(exits);
-    this.ready = this.start(per, pages, exits);
+    return exits;
   }
 
   private setEnv(st: Style) {
@@ -98,8 +103,9 @@ export class GalleryLevel extends MuseumBase {
     const all = await siEntries(d.theme);
     if (!this.alive) return;
     (this as { theme: Theme }).theme = siTheme(d.theme, all.length);
-    const pages = Math.max(1, Math.ceil(all.length / SI_PAGE));
-    const items = all.slice(d.page * SI_PAGE, d.page * SI_PAGE + SI_PAGE);
+    const rooms = partitionRooms(all, (e) => new THREE.Vector3(...e.size!), SI_PAGE);
+    const pages = rooms.length;
+    const items = rooms[d.page] ?? [];
     const exits: Exit[] = [];
     if (d.page + 1 < pages) exits.push({ top: 'continue', label: `${room.name} ${roman(d.page + 2)}`, target: { kind: 'gallery', theme: d.theme, page: d.page + 1, wing: d.wing } });
     const next = (k + 1) % SI_ROOMS.length;
@@ -117,11 +123,15 @@ export class GalleryLevel extends MuseumBase {
     await this.settle();
   }
 
-  private async start(per: number, pages: number, exits: Exit[]) {
+  private async start(per: number) {
     const t = this.theme;
-    const all = await themeMembers(t.id);
+    const [all] = await Promise.all([themeMembers(t.id), loadSizeShard(t.shard)]);
     if (!this.alive) return;
-    const items = all.slice(this.desc.page * per, this.desc.page * per + per);
+    // rooms are cut from the theme by what fits (size-capped halls, at most two colossal things each)
+    const rooms = partitionRooms(all, (e) => measuredFromCache(e)?.real ?? null, per);
+    const pages = rooms.length;
+    const exits = this.exits(pages);
+    const items = rooms[this.desc.page] ?? [];
     const key = `${t.id}:${this.desc.page}`;
     const ids = roomMembers.get(key);
     let measured: Measured[] | null = null;
@@ -145,8 +155,7 @@ export class GalleryLevel extends MuseumBase {
         if (ex.target.kind !== 'gallery' || isSi(ex.target.theme)) return;
         const tt = museum().themes[ex.target.theme];
         const pp = pageSize(tt.collection);
-        const page = ex.target.page;
-        themeMembers(tt.id).then((mm) => this.alive && prefetchSizes(mm.slice(page * pp, page * pp + pp), 1000 + i * 100));
+        Promise.all([themeMembers(tt.id), loadSizeShard(tt.shard)]).then(([mm]) => this.alive && prefetchSizes(mm.slice(0, pp * 2), 1000 + i * 100));
       });
     });
     await this.settle();

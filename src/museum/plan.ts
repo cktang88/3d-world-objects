@@ -130,6 +130,39 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
   return units;
 }
 
+// ---------------------------------------------------------------- rooms of a theme
+
+/** floor area budget per room (m2 of displays incl. their clearance): halls stay within ~60 x 120 m */
+const ROOM_AREA = 4200;
+
+/**
+ * Cut a theme's objects into rooms by what fits: at most `maxN` objects, a floor-area budget, and
+ * at most two colossal (> 25 m) objects per hall. Unknown sizes count as small things.
+ */
+export function partitionRooms<T>(items: T[], size: (t: T) => THREE.Vector3 | null, maxN: number): T[][] {
+  const rooms: T[][] = [];
+  let cur: T[] = [];
+  let area = 0, colossal = 0;
+  for (const it of items) {
+    const v = size(it);
+    const L = v ? Math.max(v.x, v.z) : 0.3, S = v ? Math.min(v.x, v.z) : 0.3, y = v ? v.y : 0.3;
+    const big = L > 1.9 || y > 2;
+    const a = big ? (L + 2.5) * (S + 3.5) : L > 0.75 ? 4 : 1;
+    const col = L > 25;
+    if (cur.length && (cur.length >= maxN || area + a > ROOM_AREA || (col && colossal >= 2))) {
+      rooms.push(cur);
+      cur = [];
+      area = 0;
+      colossal = 0;
+    }
+    cur.push(it);
+    area += a;
+    if (col) colossal++;
+  }
+  if (cur.length || !rooms.length) rooms.push(cur);
+  return rooms;
+}
+
 // ---------------------------------------------------------------- planning
 
 export type Wall = 'N' | 'S' | 'E' | 'W';
@@ -255,7 +288,8 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   const aspect = colossal ? r.range(0.7, 1.1) : r.range(st.aspect[0], st.aspect[1]);
   const maxW = Math.max(0, ...floorU.map((u) => u.w));
   const hangS = Math.max(0, ...hangU.map((u) => u.w));
-  let Wf = Math.max(maxW, Math.sqrt(area / aspect), hangS + 2 - 2 * inset, 6.5);
+  // the floor stays within ~60 m wide unless one object is wider than that
+  let Wf = Math.max(maxW, Math.min(Math.sqrt(area / aspect), 60 - 2 * inset), hangS + 2 - 2 * inset, 6.5);
   // narrow galleries for wall-case rooms
   if (!floorU.length) Wf = Math.max(4.5, Wf);
   const sorted = [...others].sort((a, b) => b.d - a.d);

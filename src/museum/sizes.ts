@@ -39,8 +39,28 @@ function save() {
 
 export function knownRaw(id: string): THREE.Vector3 | null {
   boot();
-  const v = mem.get(id);
+  const v = offline.get(id) ?? mem.get(id);
   return v ? new THREE.Vector3(v[0], v[1], v[2]) : null;
+}
+
+/**
+ * Sizes measured offline for every object (scripts/build_sizes.py -> public/museum/s/<shard>.json).
+ * With these a room is planned at once; runtime measuring is only the fallback.
+ */
+const offline = new Map<string, [number, number, number]>();
+const shardLoads = new Map<number, Promise<void>>();
+export function loadSizeShard(shard: number): Promise<void> {
+  let p = shardLoads.get(shard);
+  if (!p) {
+    p = fetch(`${import.meta.env.BASE_URL}museum/s/${shard}.json`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((m: Record<string, [number, number, number]>) => {
+        for (const [k, v] of Object.entries(m)) offline.set(k, v);
+      })
+      .catch(() => {});
+    shardLoads.set(shard, p);
+  }
+  return p;
 }
 
 export function remember(id: string, raw: THREE.Vector3) {
