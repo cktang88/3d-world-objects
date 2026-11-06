@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { mat } from '../build';
 import { loadCatalog, type LibraryEntry } from '../libraries';
-import { museum } from '../museumData';
+import { museum, themeMembers } from '../museumData';
 import { Rng } from '../rng';
 import { Frame, MuseumBase, shade, WORLD } from './base';
 import { bench, cluster, labelPanel, makeMats, platform, plinth, type Ctx, type Unit } from './displays';
 import type { Door, Plan } from './plan';
 import { buildShell, doorPortal, doorSign } from './shell';
-import { measure, type Measured } from './sizes';
+import { loadThemeSizes, measure, measuredFromCache, type Measured } from './sizes';
 import { siEntries, siMeasured, SI_BASE, SI_ROOMS } from './smithsonian';
 import { STYLES, type Style } from './style';
 import { textPlane, SANS, SERIF } from './text';
@@ -91,12 +91,17 @@ export class AtriumLevel extends MuseumBase {
       this.banner(d, w.name, `Wing ${i + 1}`, colors[i]);
       this.wallText(d, i, w.name, w.blurb, theme.size, colors[i]);
       loads.push(
-        Promise.allSettled(w.preview.slice(0, 4).map((e, k) => measure(e, k))).then((res) => {
-          if (!this.alive) return;
-          const ms = res.filter((x): x is PromiseFulfilledResult<Measured> => x.status === 'fulfilled').map((x) => x.value);
-          this.wingPreview(ctx, d, previewAt[i], ms);
-          this.flush();
-        }),
+        // the wing's first room, with its offline sizes: pick what shows it best
+        themeMembers(w.theme)
+          .then((all) => loadThemeSizes(theme.shard, theme.id, all).then(() => all))
+          .then(async (all) => {
+            if (!this.alive) return;
+            let ms = all.slice(0, 40).map(measuredFromCache).filter((x): x is Measured => !!x);
+            if (!ms.length) ms = (await Promise.allSettled(w.preview.map((e, k) => measure(e, k)))).filter((x): x is PromiseFulfilledResult<Measured> => x.status === 'fulfilled').map((x) => x.value);
+            if (!this.alive) return;
+            this.wingPreview(ctx, d, previewAt[i], ms);
+            this.flush();
+          }),
       );
     });
     // the two Smithsonian doorways frame one of their objects too
@@ -271,13 +276,15 @@ export class AtriumLevel extends MuseumBase {
 
   /** a wing's previews: its best object framed in the vestibule, the rest on plinths by the door */
   private wingPreview(ctx: Ctx, d: Door, f: Frame, ms: Measured[]) {
-    const fitsVest = (x: Measured) => Math.max(x.real.x, x.real.z) <= d.w + 1.4 && x.real.y <= d.h + 0.2 && Math.max(x.real.x, x.real.y, x.real.z) >= 0.35;
-    const byVol = [...ms].sort((a, b) => b.real.x * b.real.y * b.real.z - a.real.x * a.real.y * a.real.z);
+    // the showpiece by the door: the biggest thing that fits a platform there; the vestibule frames the next biggest
+    const vol = (x: Measured) => x.real.x * x.real.y * x.real.z;
+    const byVol = [...ms].filter((x) => Math.max(x.real.x, x.real.y, x.real.z) >= 0.25).sort((a, b) => vol(b) - vol(a));
+    const big = byVol.find((x) => Math.max(x.real.x, x.real.z) > 1.2 && Math.max(x.real.x, x.real.z) <= 4.2 && x.real.y <= 5);
+    const fitsVest = (x: Measured) => x !== big && Math.max(x.real.x, x.real.z) <= d.w + 1.4 && x.real.y <= d.h + 0.2 && Math.max(x.real.x, x.real.y, x.real.z) >= 0.35;
     const best = byVol.find(fitsVest);
     if (best) this.framed(ctx, d, best);
-    const rest = byVol.filter((x) => x !== best);
-    const big = rest.find((x) => Math.max(x.real.x, x.real.z) > 1.9 && Math.max(x.real.x, x.real.z) <= 4.2 && x.real.y <= 5);
-    const medium = rest.filter((x) => Math.max(x.real.x, x.real.z) <= 1.9 && x.real.y <= 2.2);
+    const rest = byVol.filter((x) => x !== best && x !== big);
+    const medium = rest.filter((x) => Math.max(x.real.x, x.real.z) <= 1.9 && x.real.y <= 2.2 && Math.max(x.real.x, x.real.y, x.real.z) >= 0.3);
     let u: Unit | null = null;
     if (big) u = platform({ st: ctx.st, r: ctx.r }, big, false, 'rope');
     else if (medium.length >= 2) u = cluster(medium.slice(0, 3), ctx.r, medium.slice(0, 3).every((x) => Math.max(x.real.x, x.real.z) < 0.6));
