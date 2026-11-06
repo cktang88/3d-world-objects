@@ -326,9 +326,8 @@ export class Seamless {
       built.then(() => {
         s.waiting = false;
         s.tris = countTris(s.level.group);
-        if (s.byDoor && !s.entered) this.precompile(s);
       });
-    } else if (s.byDoor) this.precompile(s);
+    }
     s.tris = countTris(s.level.group);
     this.stats.lastBuildMs = s.ms;
     this.log(`built ${s.key.slice(0, 90)} in ${s.ms.toFixed(1)} ms`);
@@ -500,7 +499,7 @@ export class Seamless {
     inside: { range: 4.5, dot: 0.85, near: 0, dwell: 0.4, max: 1 },
     // museum halls are big and their doorways show the next room: look further, three at a time;
     // a doorway you approach (within `close` m, facing it at all) always builds and shows first
-    museum: { range: 34, dot: 0.6, near: 4, dwell: 0, max: 3, close: 20, closeDot: -0.2 },
+    museum: { range: 34, dot: 0.6, near: 4, dwell: 0, max: 2, close: 8, closeDot: 0.25 },
   } as Record<'street' | 'inside' | 'museum', { range: number; dot: number; near: number; dwell: number; max: number; close?: number; closeDot?: number }>;
   private dwell = new Map<string, number>();
   /** door prebuilds wait until you move 1.5 m or this many seconds after a new game */
@@ -555,6 +554,10 @@ export class Seamless {
     const order = cands.slice(0, pol.max).map((c) => descKey(c.p.target as LevelDesc));
     this.top = order[0] ?? null;
     if (this.queue.length > 1) this.queue.sort((a, b) => (order.indexOf(a.key) + 1 || 99) - (order.indexOf(b.key) + 1 || 99));
+    // and the top door's shaders compile as soon as it is built (one compile at a time), so its
+    // room can show the moment you look through the opening instead of after a compile then
+    const ts = this.top ? this.slots.get(this.top) : undefined;
+    if (ts?.ready && !ts.waiting && ts.compiled === 'no' && ts.byDoor) this.precompile(ts);
     // ---- vertical.ts hook: levels may ask for others (the floors above/below near a stair, a lift's destination)
     for (const desc of level.prefetch?.(player) ?? []) {
       this.wanted.add(descKey(desc));
