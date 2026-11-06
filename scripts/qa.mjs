@@ -43,6 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
+  meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],
   museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
 /** changed file -> areas (first match wins; '*' = every test file). Add a line when you add a test file. */
@@ -53,6 +54,7 @@ const SRC_MAP = [
   [/^src\/nyc\/ground/, ['ground']],
   [/^src\/rooms\/vertical/, ['vertical']],
   [/^src\/nyc\/vehicle/, ['vehicles']],
+  [/^src\/(meshlod|meshlod-core)\.ts$|^src\/vendor\/meshopt|^scripts\/(build_vehicles\.mjs|lib\/simplify-doc\.mjs)$|^public\/assets\/vehicles\//, ['meshlod', 'vehicles']],
   [/^src\/nyc\/district/, ['districts']],
   [/^src\/nyc\/common\.ts$/, ['nyc', 'people', 'vehicles', 'districts']],
   [/^src\/nyc\/buildings-shop\.ts$/, ['nyc', 'buildings', 'shop']],

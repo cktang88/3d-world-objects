@@ -12,7 +12,7 @@
  * Run node scripts with plain `node` (>=22.18 strips the TypeScript types).
  */
 import { weld } from '@gltf-transform/functions';
-import { simplifierReady, simplifyMesh, compact, remapAttribute } from '../../src/meshlod-core.ts';
+import { simplifierReady, simplifyMesh, simplifySloppyMesh, compact, remapAttribute, usedBox } from '../../src/meshlod-core.ts';
 
 function worldScale(node) {
   const m = node.getWorldMatrix();
@@ -78,12 +78,15 @@ const count = (list, idx) => list.reduce((n, _, i) => n + idx[i].length / 3, 0);
  *       (e.g. 0.3 for wheels/rims/grilles: thin relief whose loss shows far more than its metric error), uvWeight (auto), colorWeight (1), permissive (false),
  *       normals: 'keep' (default) | 'rebuild' (drop normals+untextured uvs, weld, drop twin triangles,
  *       simplify, crease normals at creaseDeg=35 — the right mode for hard-edged exports), dropUv (rebuild:
- *       drop every uv, e.g. a vertex-coloured far LOD), prune (true), minError/maxError (metres, 1e-5 / 0.2), iterations (16), compact (true)
+ *       drop every uv, e.g. a vertex-coloured far LOD), sloppyFallback (cluster what edge collapse
+ *       cannot reach: far LODs only), snap (rebuild: weld grid in metres, 1e-4), prune (true), minError/maxError (metres, 1e-5 / 0.2), iterations (16), compact (true)
  * Returns { tris, before, error } (error in metres).
  */
 export async function simplifyDocument(doc, opts) {
   await simplifierReady;
   const rebuild = opts.normals === 'rebuild';
+  const scaleOf = new Map();
+  for (const node of doc.getRoot().listNodes()) for (const p of node.getMesh()?.listPrimitives() ?? []) if (!scaleOf.has(p)) scaleOf.set(p, worldScale(node));
   if (rebuild) {
     // hard-edged (faceted) exports split every vertex by normal: the simplifier then cannot move along any
     // edge. Drop normals (and uvs of untextured parts), weld by what is left, simplify the connected
@@ -91,6 +94,9 @@ export async function simplifyDocument(doc, opts) {
     for (const mesh of doc.getRoot().listMeshes())
       for (const p of mesh.listPrimitives()) {
         p.setAttribute('NORMAL', null).setAttribute('TANGENT', null);
+        // snap positions to a grid (default 0.1 mm world) so near-coincident vertices weld: exports often
+        // leave cracks of 1e-6..1e-5 between faces, which reads as thousands of open borders
+        if (opts.snap !== 0) snapPositions(doc, p, (opts.snap ?? 1e-4) / (scaleOf.get(p) ?? 1));
         const mat = p.getMaterial();
         if (opts.dropUv || !(mat && (mat.getBaseColorTexture() || mat.getNormalTexture()))) for (const sem of p.listSemantics()) if (sem.startsWith('TEXCOORD')) p.setAttribute(sem, null);
       }
@@ -109,7 +115,7 @@ export async function simplifyDocument(doc, opts) {
         uvWeight: opts.uvWeight,
         colorWeight: opts.colorWeight ?? 1,
         permissive: opts.permissive ?? false,
-        prune: opts.prune ?? true,
+        prune: opts.prune ?? process.env.SIMPLIFY_PRUNE !== '0',
       }).index,
     );
   let lo = opts.minError ?? 1e-5, hi = opts.maxError ?? 0.2;
@@ -130,10 +136,40 @@ export async function simplifyDocument(doc, opts) {
     best = run(hi);
     bestE = hi;
   }
+  let sloppy = false;
+  const now = count(list, best);
+  if (opts.sloppyFallback && now > opts.targetTris * 1.15) {
+    // edge collapse saturated (open patches, locked borders): cluster the rest, every part by the same ratio
+    const k = opts.targetTris / now;
+    best = list.map((x, i) => {
+      const r = simplifySloppyMesh({ ...x.arrays, index: best[i] }, (best[i].length / 3) * k);
+      return r.index.length ? r.index : best[i];
+    });
+    sloppy = true;
+  }
+  if (process.env.SIMPLIFY_TRACE)
+    for (const x of list) {
+      if (x.p.getMaterial()?.getName() !== process.env.SIMPLIFY_TRACE) continue;
+      const a = usedBox(x.arrays.position, x.arrays.index);
+      console.log('trace', process.env.SIMPLIFY_TRACE, 'box', a.map((v) => (v * x.scale).toFixed(3)).join(','), 'verts', x.arrays.position.length / 3, 'uv', !!x.arrays.uv);
+      for (const e of [1e-3, 1e-2, 0.05, 0.2, 0.5]) {
+        for (const pr of [true, false]) {
+          const r = simplifyMesh(x.arrays, { error: e / x.scale, absolute: true, prune: pr, uvWeight: 0 });
+          const b = usedBox(x.arrays.position, r.index);
+          console.log('  e', e, 'prune', pr, r.index.length / 3, 'box', b.map((v) => (v * x.scale).toFixed(3)).join(','));
+        }
+      }
+    }
+  if (process.env.SIMPLIFY_DEBUG)
+    list.forEach((x, i) => {
+      const a = usedBox(x.arrays.position, x.arrays.index), b = best[i].length ? usedBox(x.arrays.position, best[i]) : a.map(() => 0);
+      const d = Math.max(...a.map((v, k) => Math.abs(v - b[k]))) * x.scale;
+      if (d > 0.03) console.log('  bbox moved', (d * 1000).toFixed(0), 'mm', x.p.getMaterial()?.getName(), x.arrays.index.length / 3, '->', best[i].length / 3, 'scale', x.scale.toFixed(3));
+    });
   list.forEach((x, i) => apply(doc, x.p, best[i], opts.compact !== false));
   for (const m of doc.getRoot().listMeshes()) if (!m.listPrimitives().length) m.dispose();
   if (rebuild) for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) creaseNormals(doc, p, opts.creaseDeg ?? 35);
-  return { before, tris: count(list, best), error: bestE };
+  return { before, tris: count(list, best), error: bestE, sloppy };
 }
 
 /** write a new index (and compacted vertex attributes) into a primitive */
@@ -308,4 +344,11 @@ export function dropTwinTriangles(doc, byPosition = false) {
       p.getMaterial()?.setDoubleSided(true);
     }
   return dropped;
+}
+
+function snapPositions(doc, p, q) {
+  const a = p.getAttribute('POSITION');
+  const P = floats(a).slice();
+  for (let i = 0; i < P.length; i++) P[i] = Math.round(P[i] / q) * q;
+  p.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(P));
 }

@@ -108,8 +108,9 @@ async function main() {
       const tris = count(root);
       if (NEAR === 'attr' || (NEAR === 'none' && lod > 0)) {
         // every LOD at one shared world-space error (bisected to the budget), normals rebuilt with 35° creases
-        const r = await simplifyDocument(doc, { targetTris: lod === 0 ? (cfg.near ?? NEAR_TRIS) : target, normals: 'rebuild', creaseDeg: 35, dropUv: lod === 2 });
-        console.log(cfg.id, 'lod', lod, 'shared error', (r.error * 1000).toFixed(2), 'mm');
+        // error caps (m): the near LOD may stay over budget rather than visibly melt (accord19's 400k source stops at ~24k)
+        const r = await simplifyDocument(doc, { targetTris: lod === 0 ? (cfg.near ?? NEAR_TRIS) : target, normals: 'rebuild', creaseDeg: 35, dropUv: lod === 2, maxError: [0.03, 0.15, 0.5][lod], sloppyFallback: lod > 0 });
+        console.log(cfg.id, 'lod', lod, 'shared error', (r.error * 1000).toFixed(2), 'mm', r.sloppy ? '+ sloppy fallback' : '');
       } else if (NEAR !== 'none') {
         const ratio = Math.min(1, target / count(root));
         if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? (cfg.err0 ?? 0.005) : 0.02, lockBorder: false }));

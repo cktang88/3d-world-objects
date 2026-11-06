@@ -144,6 +144,17 @@ export function simplifyMesh(m: MeshArrays, o: SimplifyOptions = {}): SimplifyRe
   return { index, error: e };
 }
 
+/**
+ * Topology-free simplification (vertex clustering-like): merges spatially close but disconnected parts and
+ * ignores seams/borders. Worse quality than simplifyMesh; use as a fallback for far LODs of meshes built
+ * from many open patches, where edge collapse saturates (accord19: stuck at ~24k from 0.01 to 0.2 m error).
+ */
+export function simplifySloppyMesh(m: MeshArrays, targetTris: number, errorAbs = Infinity): SimplifyResult {
+  const ext = extent(m.position) || 1;
+  const [index, e] = MeshoptSimplifier.simplifySloppy(m.index, m.position, 3, null, Math.max(0, Math.floor(targetTris)) * 3, Math.min(1, errorAbs / ext));
+  return { index, error: e * ext };
+}
+
 export interface LodLevel {
   index: Uint32Array;
   /** accumulated absolute error (mesh units) of this level vs the original */
