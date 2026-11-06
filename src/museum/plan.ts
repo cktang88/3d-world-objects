@@ -251,7 +251,9 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
 
   // floor rows
   const area = others.reduce((s, u) => s + (u.w + gapX) * (u.d + aisle), 0) + (heroU ? (heroU.w + 3) * (heroU.d + 3) : 0);
-  const aspect = r.range(st.aspect[0], st.aspect[1]);
+  // colossal things (ships, rockets) go in square halls, several to a row (Udvar-Hazy is 300 x 75 m)
+  const colossal = Math.max(0, ...floorU.map((u) => u.w)) > 25;
+  const aspect = colossal ? r.range(0.7, 1.1) : r.range(st.aspect[0], st.aspect[1]);
   const maxW = Math.max(0, ...floorU.map((u) => u.w));
   const hangS = Math.max(0, ...hangU.map((u) => u.w));
   let Wf = Math.max(maxW, Math.sqrt(area / aspect), hangS + 2 - 2 * inset, 5);
