@@ -20,6 +20,7 @@ Never iterate in the full world. Make a lab scene showing just your thing:
 - Open `/?lab=<name>&cam=x,y,z&look=x,y,z&env=studio|nyc|museum|night`. `?lab=index` lists all scenes.
 - Screenshot it: `node scripts/shot.mjs --port <port> --url "/?lab=<name>" --out /tmp/…/x.png --w 960 --h 540`. Then look at the PNG.
 - Software rendering is slow: use `--quality high` (default) or `low`. Avoid `ultra` in screenshots.
+- **Full-world runs (`?mode=world`, `?mode=museum`) use ~2 GB RAM each and the machine has 16 GB shared by many agents.** Run them one at a time across all agents: `flock /tmp/claude-0/world-shot.lock node scripts/shot.mjs ...`. Lab scenes don't need the lock.
 - `--eval "<js>"` runs code first. `window.__world` exposes the renderer, player and level (in the full game).
 
 ## References first, always
