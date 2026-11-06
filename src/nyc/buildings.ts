@@ -702,6 +702,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       if (style === 'panel') ww = L / n - 0.6;
     }
     const centres = bays(L, n, type === 'castiron' ? 0.2 : 0.35);
+    const flowers = rng.chance(0.4);
     // floors with balconettes on pre-war fronts
     const balcony = new Set<number>(type === 'prewar' && isFront ? [1, levels.length - 3].filter(() => rng.chance(0.6)) : []);
     // ---- upper floor windows
@@ -716,6 +717,11 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
         // brownstone parlour door bay
         if (type === 'brownstone' && i === 0 && isFront && c === centres[0]) continue;
         F.window(c - ww / 2, wy, ww, whh, { ...winOpts, trim: type === 'prewar' && top ? 'arch' : winOpts.trim });
+        // flower boxes on brownstone parlour sills
+        if (type === 'brownstone' && i === 0 && isFront && flowers) {
+          B(F.g, mat(rng.pick(['#2a2a2a', '#5a3a22', '#1d3b2e']), { rough: 0.8 }), ww + 0.05, 0.25, 0.22, c, wy - 0.02, 0.22);
+          for (let k = 0; k < 5; k++) B(F.f, mat(rng.pick(['#4f7a34', '#5f8a3c', '#c4304a', '#e8d24a', '#d86aa0']), { rough: 0.9 }), 0.22, rng.range(0.15, 0.3), 0.2, c - ww / 2 + 0.12 + (k * (ww - 0.2)) / 4, wy + 0.2, 0.22, false);
+        }
         // pre-war balconettes: a stone shelf on brackets with an iron railing
         if (balcony.has(i)) {
           const bw = ww + 0.5;
@@ -776,11 +782,19 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       }
       portalDoor(ctx, F, du, 1.1 + Math.round(parlor / 0.19) * 0.3 + 0.5, alongX, addr, floors, 'brownstone', 'house');
     } else if (isFront) {
+      const grilles = type !== 'prewar' && rng.chance(0.6);
       // residential entrance on the ground floor, windows either side
       const du = type === 'tenement' ? centres[Math.floor(n / 2)] : 0;
       for (const c of centres) {
         if (Math.abs(c - du) < 1.0) continue;
-        F.window(c - ww / 2, 0.9, ww, Math.min(1.9, ground - 1.4), { ...winOpts, ac: 0 });
+        const gh = Math.min(1.9, ground - 1.4);
+        F.window(c - ww / 2, 0.9, ww, gh, { ...winOpts, ac: 0 });
+        // iron security grille over ground-floor windows
+        if (grilles) {
+          const iron = M.iron();
+          for (let k = 0; k <= 5; k++) B(F.f, iron, 0.022, gh + 0.1, 0.022, c - ww / 2 + 0.04 + (k * (ww - 0.08)) / 5, 0.85, 0.12, false);
+          for (const yy of [0.88, 0.9 + gh / 2, 0.92 + gh]) B(F.f, iron, ww + 0.1, 0.03, 0.03, c, yy, 0.12, false);
+        }
       }
       const surround = type === 'prewar' ? 'brass' : type === 'midrise' ? 'plain' : rng.pick(['stone', 'plain'] as const);
       B(F.g, mat('#8f8b84', { rough: 0.9 }), 1.9, 0.16, 0.45, du, 0, 0.22);
