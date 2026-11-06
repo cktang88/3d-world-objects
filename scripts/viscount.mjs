@@ -56,6 +56,7 @@ try {
       return `${c} ${r[c]}${d !== null && d !== 0 ? ` (${d > 0 ? '+' : ''}${d})` : ''}`;
     });
     console.log(`${name.padEnd(20)} ${parts.join('  ')}`);
+    if (args.debug && r.vis) console.log(`  ${r.vis}`);
   }
   if (args.out) writeFileSync(args.out, JSON.stringify(res, null, 1));
 } finally {

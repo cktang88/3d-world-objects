@@ -30,11 +30,11 @@ export interface VisCount {
   sprites: number;
 }
 
-export function countVisible(root: THREE.Object3D, cam: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer): VisCount {
+export function countVisible(root: THREE.Object3D, cam: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer | null): VisCount {
   cam.updateMatrixWorld();
   root.updateMatrixWorld(true);
   // run the draw-less per-frame hooks (tree LOD drivers) for this camera, as the renderer would
-  root.traverseVisible((o) => {
+  if (renderer) root.traverseVisible((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh && m.geometry.drawRange.count === 0) m.onBeforeRender(renderer, null as unknown as THREE.Scene, cam, m.geometry, m.material as THREE.Material, null as unknown as THREE.Group);
   });
@@ -95,7 +95,7 @@ const scene: LabScene = {
   ground: false,
   async build({ params, renderer }) {
     const want = params.get('poses')?.split(',');
-    const out: Record<string, VisCount & { buildMs: number }> = {};
+    const out: Record<string, VisCount & { buildMs: number; vis: string }> = {};
     const level = new NycLevel({ kind: 'nyc', seed: Number(params.get('seed') ?? 20261105), name: 'viscount' });
     const cam = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 1000);
     const steps = Number(params.get('steps') ?? 60);
@@ -111,7 +111,7 @@ const scene: LabScene = {
       countVisible(level.group, cam, renderer);
       await new Promise((r) => setTimeout(r, 300));
       level.update(1 / 60, p, steps / 60);
-      out[pose.name] = { ...countVisible(level.group, cam, renderer), buildMs };
+      out[pose.name] = { ...countVisible(level.group, cam, renderer), buildMs, vis: level.vis.debug() };
     }
     (window as unknown as { __viscount: unknown }).__viscount = out;
     level.dispose();

@@ -5,6 +5,7 @@ import { getNight, onTimeChange } from './lighting';
 import { groundBase, groundDetails, GM } from './nyc/ground';
 import { carMesh, Traffic } from './nyc/vehicles';
 import { Pedestrians } from './nyc/people';
+import { CityVis } from './nyc/occlusion'; // [vis] chunk visibility / occlusion / HLOD (WP2)
 export { avenueName, streetName };
 export { SHOPS } from './nyc/buildings';
 export { setNight } from './nyc/buildings';
@@ -45,6 +46,8 @@ export class NycLevel implements Level {
   private traffic: Traffic;
   private peds: Pedestrians;
   private steam: THREE.Sprite[] = [];
+  /** [vis] which chunks draw real geometry, an HLOD proxy, or only a shadow proxy */
+  readonly vis = new CityVis();
 
   constructor(desc: Extract<LevelDesc, { kind: 'nyc' }>) {
     this.seed = desc.seed;
@@ -56,6 +59,7 @@ export class NycLevel implements Level {
       ambient: 0.05, envIntensity: 0.55, exposure: 0.62, physicalSky: true,
     };
     void b;
+    this.vis.attach(this.group); // [vis]
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.ensure(dx, dz);
     this.refresh(0, 0);
     this.traffic = new Traffic(this.group, this.seed);
@@ -88,6 +92,7 @@ export class NycLevel implements Level {
     for (const [k, ch] of this.chunks) {
       const [x, z] = k.split(',').map(Number);
       if (Math.abs(x - cx) > RX + 1 || Math.abs(z - cz) > RZ + 1) {
+        this.vis.remove(x, z); // [vis]
         this.group.remove(ch.group);
         disposeTree(ch.group);
         this.chunks.delete(k);
@@ -98,6 +103,7 @@ export class NycLevel implements Level {
       const [x, z] = k.split(',').map(Number);
       setBlockDetail(ch.group, Math.abs(x - cx) <= 1 && Math.abs(z - cz) <= 1);
     }
+    this.vis.update(new THREE.Vector3(p.x, p.y + 1.6, p.z), cx, cz, RX, RZ); // [vis]
     const key = `${cx},${cz},${this.chunks.size}`;
     if (key !== this.lastKey) this.refresh(cx, cz);
     this.lastKey = key;
@@ -151,6 +157,7 @@ export class NycLevel implements Level {
     }
     this.group.add(ch.group);
     this.chunks.set(k, ch);
+    this.vis.add(cx, cz, ch.group); // [vis]
     return true;
   }
 
