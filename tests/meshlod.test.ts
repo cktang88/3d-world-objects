@@ -83,7 +83,7 @@ async function glb(file: string) {
   return { pos: new Float32Array(P), idx: new Uint32Array(I), tris: I.length / 3, prims };
 }
 
-test('vehicle LODs: near <=16k tris (accord19 <=32k), mid/far ratios, shape kept vs near, normals + uvs present', async () => {
+test('vehicle LODs: near <=22.5k tris (accord19 <=32k), mid ~7k, far <=3k, shape kept vs near, normals + uvs present', async () => {
   await MeshoptDecoder.ready;
   for (const id of Object.keys(FLEET)) {
     let near;
@@ -93,12 +93,12 @@ test('vehicle LODs: near <=16k tris (accord19 <=32k), mid/far ratios, shape kept
       continue; // models without files (buses/trucks are procedural)
     }
     const mid = await glb(`${id}_lod1.glb`), far = await glb(`${id}_lod2.glb`);
-    expect(near.tris <= (id === 'accord19' ? 32000 : 16000), `${id} near LOD ${near.tris} tris`);
-    expect(mid.tris <= near.tris * 0.5 && mid.tris <= 6000, `${id} mid LOD ${mid.tris} tris (near ${near.tris})`);
-    expect(far.tris <= mid.tris && far.tris <= 2600, `${id} far LOD ${far.tris} tris (mid ${mid.tris})`);
-    // measured: mid silhouette 0.5-7 %, far 1-15 % against the near LOD (the old LODs reached 21 %)
+    expect(near.tris <= (id === 'accord19' ? 32000 : 22500), `${id} near LOD ${near.tris} tris`);
+    expect(mid.tris <= near.tris * 0.55 && mid.tris <= 7500, `${id} mid LOD ${mid.tris} tris (near ${near.tris})`);
+    expect(far.tris <= mid.tris * 0.5 && far.tris <= 3000, `${id} far LOD ${far.tris} tris (mid ${mid.tris})`);
+    // measured vs the unsimplified source: mid silhouette 0.2-3.3 % (old LODs 1.7-5.1 %), far 0.9-15 % (old up to 21 %)
     const vm = viewError(near.pos, near.idx, mid.pos, mid.idx, 128), vf = viewError(near.pos, near.idx, far.pos, far.idx, 128);
-    expect(vm.silhouette < 0.09, `${id} mid silhouette mismatch ${fmt(vm.silhouette)}`);
+    expect(vm.silhouette < 0.05, `${id} mid silhouette mismatch ${fmt(vm.silhouette)}`);
     expect(vf.silhouette < 0.18, `${id} far silhouette mismatch ${fmt(vf.silhouette)}`);
     // shading needs normals in the near LOD; textured parts keep their uvs
     for (const p of near.prims) {

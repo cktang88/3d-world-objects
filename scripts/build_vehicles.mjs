@@ -27,10 +27,10 @@ import { simplifyDocument } from './lib/simplify-doc.mjs';
 export const FLEET = [
   { id: 'taxi_cv', uid: '2429a825ff1646568e8e6e1453f9c501', len: 5.38, yaw: Math.PI, paint: null, glass: /^glass/, drop: /interior/, tris: 30000, lod1: 5000 },
   { id: 'prius', uid: 'aa599d492d3d4618a1bf5f3786e1bbd9', len: 4.54, yaw: Math.PI, paint: /^dbl_boot_ok_002_ncl1_1$|^dbl_bonnet_ok_002$/, glass: /^material_0$/, drop: /interior|Belt/, tris: 40000, lod1: 6000 },
-  { id: 'accord', uid: '1e3be91c28104f6489b42248884327fe', len: 4.93, yaw: Math.PI, paint: /^Body_Color$|^0136_Charcoal$/, glass: /Glass/, drop: /Leather|Interior|Carpet|Sophie|LCD|Wood/, tris: 40000, lod1: 6000 },
-  { id: 'charger', uid: '2f69495ce4e040878237eb7f46e7029e', len: 5.08, yaw: Math.PI, paint: /^material$/, glass: null, drop: /^material_65$/, tris: 40000, lod1: 6000 },
+  { id: 'accord', uid: '1e3be91c28104f6489b42248884327fe', len: 4.93, yaw: Math.PI, paint: /^Body_Color$|^0136_Charcoal$/, glass: /Glass/, drop: /Leather|Interior|Carpet|Sophie|LCD|Wood/, tris: 40000, lod1: 6000, near: 22000 },
+  { id: 'charger', uid: '2f69495ce4e040878237eb7f46e7029e', len: 5.08, yaw: Math.PI, paint: /^material$/, glass: null, drop: /^material_65$/, tris: 40000, lod1: 6000, near: 18000, far: 3000 },
   // no window glass in this model: { id: 'tahoe', uid: '8b1db1daad3f4c1fafd41f9a36511855', len: 5.13, yaw: 0, paint: /^Paint_/, glass: /Glass/i, drop: /^Interior/, tris: 40000, lod1: 6000 },
-  { id: 'suburban', uid: 'b01950cf99aa48c1ba2ebd0addc8a9d4', len: 5.7, yaw: Math.PI, paint: /^default$/, glass: /^blackplast1$/, drop: /^tree$|^inter01$|^stuf$/, tris: 40000, lod1: 6000 },
+  { id: 'suburban', uid: 'b01950cf99aa48c1ba2ebd0addc8a9d4', len: 5.7, yaw: Math.PI, paint: /^default$/, glass: /^blackplast1$/, drop: /^tree$|^inter01$|^stuf$/, tris: 40000, lod1: 6000, near: 20000 },
   { id: 'escalade', uid: '7c5516c76bd441d998af76e2240a2b8d', len: 5.14, yaw: Math.PI, paint: null, glass: /Platinum23Mtl$/, drop: null, tris: 40000, lod1: 6000 },
   { id: 'explorer', uid: 'a47d2d8c83b44d348329dba8f92d1adc', len: 5.05, yaw: Math.PI, paint: /wire_187200200|Exterior_01/, glass: /Glass/, drop: null, tris: 40000, lod1: 6000 },
   { id: 'accord19', uid: 'aad70ad7eae3467e99c71ef0c7150138', len: 4.88, yaw: Math.PI, paint: /^Platinum_White_Metallic$/, glass: /Glass/, drop: /^edge_color|^BlackTrim$/, tris: 45000, lod1: 6000, err0: 0.02, weld0: true },
@@ -46,6 +46,7 @@ const OUT = process.env.OUT ?? path.join(path.dirname(new URL(import.meta.url).p
 // 'legacy' = per-primitive ratio simplify (near LODs stuck at 25-61k on seams); 'none' = unsimplified near LOD (comparison source)
 const NEAR = process.env.NEAR ?? 'attr';
 const NEAR_TRIS = Number(process.env.NEAR_TRIS ?? 14000);
+// per-car overrides (attr mode): near / mid / far triangle targets (FLEET entries: near, mid, far)
 
 async function main() {
   const dir = process.argv[2];
@@ -109,7 +110,7 @@ async function main() {
       if (NEAR === 'attr' || (NEAR === 'none' && lod > 0)) {
         // every LOD at one shared world-space error (bisected to the budget), normals rebuilt with 35° creases
         // error caps (m): the near LOD may stay over budget rather than visibly melt (accord19's 400k source stops at ~24k)
-        const r = await simplifyDocument(doc, { targetTris: lod === 0 ? (cfg.near ?? NEAR_TRIS) : target, normals: 'rebuild', creaseDeg: 35, dropUv: lod === 2, maxError: [0.03, 0.15, 0.5][lod], sloppyFallback: lod > 0 });
+        const r = await simplifyDocument(doc, { targetTris: [cfg.near ?? NEAR_TRIS, cfg.mid ?? Number(process.env.MID_TRIS ?? 7000), cfg.far ?? target][lod], normals: 'rebuild', creaseDeg: 35, dropUv: lod === 2, maxError: [0.03, 0.15, 0.5][lod], sloppyFallback: lod > 0 });
         console.log(cfg.id, 'lod', lod, 'shared error', (r.error * 1000).toFixed(2), 'mm', r.sloppy ? '+ sloppy fallback' : '');
       } else if (NEAR !== 'none') {
         const ratio = Math.min(1, target / count(root));

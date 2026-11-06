@@ -28,26 +28,52 @@ description: Detail-preserving polygon reduction and LOD chains for this three.j
 
 | Asset | Technique | Settings that worked |
 |---|---|---|
-| **Hard-surface exports** (cars, Sketchfab/Objaverse props: faceted, many materials, double shells) | `simplifyDocument(doc, { targetTris, normals: 'rebuild' })`:<br>1. drop normals and the uvs of untextured parts<br>2. snap to a 0.1 mm grid and weld<br>3. drop twin triangles<br>4. bisect ONE world-space error shared by every primitive<br>5. rebuild 35° crease normals | near ~14k: `maxError 0.03`<br>mid 4.5k: `0.15` + `sloppyFallback`<br>far 2k: `0.5` + `dropUv` + `sloppyFallback` |
+| **Hard-surface exports** (cars, Sketchfab/Objaverse props: faceted, many materials, double shells) | `simplifyDocument(doc, { targetTris, normals: 'rebuild' })`:<br>1. drop normals and the uvs of untextured parts<br>2. snap to a 0.1 mm grid and weld<br>3. drop twin triangles<br>4. bisect ONE world-space error shared by every primitive<br>5. rebuild 35° crease normals | near ~14k (cars with fine relief 18–22k): `maxError 0.03`<br>mid 7k: `0.15` + `sloppyFallback`<br>far 2k: `0.5` + `dropUv` + `sloppyFallback` |
 | **Scans / organic, connected, textured** (Smithsonian, GSO, Objaverse scans) | `lodChain(m, [0.25, 0.06], { normalWeight: 0.5 })`: attribute-aware, auto uv weight, uv seams kept. The model's own colour and normal maps still fit. | Errors here are tiny: a 1M-tri bumpy sphere gives 0.8 mm at 25 % and 3.1 mm at 6 %. A 1M-tri chain takes 1.8 s in wasm, so build it in the worker. |
 | **Organic with lost relief** (a low LOD of a sculpt) | Simplify, then bake a tangent-space normal map from high to low (`bake_normals.py`). | A 204k → 3k blob got its ridges back. Size 1024, `--extrusion 0.02 --ray 0.05`, Smart UV Project at 66°. |
 | **Far, tiny on screen** | `simplifySloppyMesh`, or an impostor/billboard (see `src/nyc/streettrees.ts`). | Use it only where edge collapse saturates. |
 
 Why one shared error and not one ratio per primitive: gltf-transform's `simplify({ratio})` cuts every part by the same fraction. Seams then stop it early: the old near LODs stayed at 25–61k. With a shared error, flat panels lose the most and wheels and grilles keep their triangles. This is a uniform screen-space error.
 
-## Results here (measured; `node scripts/lod_compare.mjs`, "seen" = 14-view depth error vs the unsimplified source)
+## Results here
 
-| Car | Near tris old → new | Visible depth mean old → new | Mid LOD depth mean old → new |
+Measured with `node scripts/lod_compare.mjs`. Each LOD is compared with the unsimplified source; "seen" is the 14-view result, given as outline (silhouette) mismatch and visible depth error.
+
+**Near LOD** (shown within 12 m; default budget 14k, per-car `near` budgets for accord, suburban and charger):
+
+| Car | Tris old → new | Visible depth mean old → new | Outline mismatch old → new |
 |---|---|---|---|
-| accord | 57,357 → 13,468 | 6.3 → 10.4 mm | 100.7 → 66.9 mm |
-| prius | 29,166 → 13,879 | 6.7 → 4.4 mm | 39.4 → 15.6 mm |
-| escalade | 28,027 → 13,860 | 16.2 → 6.2 mm | 80.1 → 25.0 mm |
-| explorer | 44,596 → 12,456 | 13.9 → 9.5 mm | 114.4 → 94.0 mm |
-| charger | 61,125 → 13,828 | 11.4 → 11.0 mm | 46.1 → 39.1 mm |
-| accord19 (400k source) | 24,415 → 30,961 | 34.8 → 18.5 mm | 171.9 → 113.1 mm |
+| accord | 57,357 → 21,522 | 6.3 → 4.1 mm | 0.31 → 0.34 % |
+| suburban | 32,922 → 19,571 | 11.3 → 7.5 mm | 0.65 → 0.46 % |
+| charger | 61,125 → 18,120 | 11.4 → 5.8 mm | 0.54 → 0.49 % |
+| prius | 29,166 → 13,879 | 6.7 → 4.4 mm | — |
+| escalade | 28,027 → 13,860 | 16.2 → 6.2 mm | — |
+| explorer | 44,596 → 14,116 | 13.9 → 8.2 mm | — |
+| taxi_cv | 24,994 → 14,043 | 0.1 → 1.0 mm | — |
+| sprinter | 24,991 → 14,007 | 0.2 → 1.5 mm | — |
+| accord19 (400k source) | 24,415 → 30,961 | 34.8 → 18.5 mm | — |
 
-- **Vehicles lab line-up:** 367k → 160k triangles on screen. All vehicle GLBs: 6.8 → 5.5 MB.
-- **Runtime scan:** a 150k Smithsonian horn at 1.5 / 6 / 24 m draws 55.5k instead of 450k triangles and looks the same.
+- **taxi_cv and sprinter:** their errors stay under 1 px at 1 m.
+- **accord19:** it stays over budget because the error cap is hit.
+
+**Mid LOD, 7k budget** (was 4.5k; at 4.5k the 150 mm error cap made the outline worse than the old LODs):
+
+- Every car is better than before. Outline mismatch is 0.2–3.3 % (old: 1.7–5.1 %), and visible depth error is 4–86 mm (old: 26–172 mm).
+
+**Far LOD, 2k budget** (3k for charger):
+
+- Outline mismatch is 0.9–15 % (old: up to 21 %). Charger: 7.05 → 5.39 %.
+
+**Totals:**
+
+- Lab line-up: 367k → 160k triangles on screen.
+- Vehicle GLBs: 6.8 → 6.3 MB.
+
+**Runtime LODs:**
+
+- **Smithsonian scan:** a 150k-tri scan shown at 1.5 / 6 / 24 m draws 55.5k instead of 450k triangles and looks the same.
+- **Objaverse original:** member 1:4 of museum theme 1 (a 38 MB GLB with 1.07M tris) was fitted to 1 m and placed at 1.5 / 6 / 24 m. Its meshes that got LODs draw 201k / 71k / 38k instead of 840k each.
+- **px=0 (originals forced):** the same scene is about 3.2M tris per frame, and the software renderer timed out taking the screenshot.
 
 ## Recipes
 
@@ -133,6 +159,10 @@ One bake takes 1–3 s here.
    - read positions with `getElement` (dequantised) and apply the node matrix;
    - `MeshoptSimplifier.getScale` asserts on non-Float32 input.
 10. **Texture LOD** is separate from geometry: use mipmaps (automatic), KTX2/webp, and `textureCompress` resize per LOD. The vehicles use 1024/256/64 px. The `shrinkTextures` cap in detail.ts is 2048.
+11. **Bisection early exit.**
+   - **Symptom:** prius mid fell to 952 tris.
+   - **Cause:** a hit 3 % *over* the target was not accepted as the result. The loop then fell through to `maxError` and melted the LOD.
+   - **Fix:** the loop now accepts a close hit from either side. Always compare the final triangle count with the target in the build log.
 
 ## Verify cheaply (no full world)
 

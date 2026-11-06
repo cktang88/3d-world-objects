@@ -124,13 +124,19 @@ export async function simplifyDocument(doc, opts) {
     const e = Math.sqrt(lo * hi);
     const idx = run(e);
     const n = count(list, idx);
+    if (process.env.SIMPLIFY_DEBUG) console.log('  bisect', (e * 1000).toFixed(2), 'mm ->', n);
     if (n > opts.targetTris) lo = e;
     else {
       hi = e;
       best = idx;
       bestE = e;
     }
-    if (Math.abs(n - opts.targetTris) < opts.targetTris * 0.03) break;
+    if (Math.abs(n - opts.targetTris) < opts.targetTris * 0.03) {
+      // close enough (also from above: without this a 3 %-over hit fell through to maxError and melted the LOD)
+      best = idx;
+      bestE = e;
+      break;
+    }
   }
   if (!best) {
     best = run(hi);
