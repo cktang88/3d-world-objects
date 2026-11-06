@@ -38,6 +38,7 @@ const scene: LabScene = {
       p.root.rotation.y = face === 'back' ? Math.PI : face === 'side' ? Math.PI / 2 : 0;
       p.setActivity(act, i * 0.37);
       p.setShadows(true);
+      if (params.get('lod')) p.setLod(Number(params.get('lod')));
       group.add(p.root);
       people.push(p);
     }

@@ -231,7 +231,7 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
         const m = o as THREE.SkinnedMesh;
         if (!m.isSkinnedMesh) return;
         const mat = m.material as THREE.MeshStandardMaterial;
-        if (/Superhero/i.test(mat.name)) skinned = m;
+        if (/Superhero/i.test(mat.name) && !/Body_LOD/.test(m.name)) skinned = m;
         if (/Hair/i.test(mat.name)) hairBase = mat;
       });
       const sk = skinned as unknown as THREE.SkinnedMesh;
@@ -319,6 +319,18 @@ export class Person {
   meshes: THREE.Mesh[] = [];
   activity: Activity = 'walk';
   private phone: THREE.Object3D | null = null;
+  private lodMesh: THREE.Mesh | null = null;
+  private fullMesh: THREE.Mesh | null = null;
+  private faceMeshes: THREE.Mesh[] = [];
+  private lod = 0;
+  /** 0: full body; 1: ~2.5k-triangle body, no eyes/brows */
+  setLod(l: number) {
+    if (l === this.lod || !this.lodMesh || !this.fullMesh) return;
+    this.lod = l;
+    this.lodMesh.visible = l === 1;
+    this.fullMesh.visible = l === 0;
+    for (const m of this.faceMeshes) m.visible = l === 0;
+  }
   constructor(public assets: PeopleAssets, r: Rng, public gender: Gender = r.chance(0.5) ? 'male' : 'female') {
     const A = assets.body[gender];
     const model = skeletonClone(A.scene);
@@ -326,13 +338,19 @@ export class Person {
     this.root.add(model);
     const o = pickOutfit(r, gender);
     const hm = hairMat(A.hairBase, o.hair);
+    const bm = bodyMaterial(A.base, o, gender, A.geo, A.geoScale, r);
     model.traverse((x) => {
       if ((x as THREE.Bone).isBone) this.bones.set(x.name, x as THREE.Bone);
       const m = x as THREE.SkinnedMesh;
       if (!m.isSkinnedMesh) return;
       const name = (m.material as THREE.Material).name;
-      if (/Superhero/i.test(name)) m.material = bodyMaterial(A.base, o, gender, A.geo, A.geoScale, r);
+      if (/Superhero/i.test(name)) m.material = bm;
       else if (/Hair/i.test(name)) m.material = hm;
+      if (/Body_LOD/.test(m.name)) {
+        this.lodMesh = m;
+        m.visible = false;
+      } else if (/Superhero/i.test(name)) this.fullMesh = m;
+      else this.faceMeshes.push(m);
       // a fixed, generous bounds: the lazily computed skinned bounds can be taken mid-update
       m.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.3);
       this.meshes.push(m);
@@ -471,7 +489,7 @@ interface Ped {
   tick: number;
   acc: number;
 }
-const COUNT = 60;
+const COUNT = 84;
 
 export class Pedestrians {
   peds: Ped[] = [];
@@ -568,7 +586,8 @@ export class Pedestrians {
         pd.p.update(pd.acc);
         pd.acc = 0;
       }
-      pd.p.setShadows(d < 40);
+      pd.p.setShadows(d < 30);
+      pd.p.setLod(d < 22 ? 0 : 1);
     }
   }
 }

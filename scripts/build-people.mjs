@@ -14,7 +14,7 @@
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mergeDocuments, unpartition, prune, dedup, textureCompress, meshopt, resample, clearNodeTransform, clearNodeParent } from '@gltf-transform/functions';
-import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
+import { MeshoptEncoder, MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
@@ -24,6 +24,7 @@ if (!ubc || !ual) throw new Error('usage: build-people.mjs <ubc dir> <ual dir>')
 const OUT = path.resolve('public/assets/people');
 fs.mkdirSync(OUT, { recursive: true });
 await MeshoptEncoder.ready;
+await MeshoptSimplifier.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
 
 const finish = async (doc, file, size = 1024) => {
@@ -50,6 +51,18 @@ for (const [g, light] of [['Male', 'T_Superhero_Male_Ligh.png'], ['Female', 'T_S
   for (const m of root.listMaterials()) {
     if (/Superhero/.test(m.getName())) m.getBaseColorTexture().setImage(fs.readFileSync(path.join(tex, light))).setMimeType('image/png');
   }
+  // a low-poly LOD of the body (same skin, ~20 % of the triangles) for people far away
+  const bodyNode = root.listNodes().find((n) => n.getMesh()?.listPrimitives().some((p) => /Superhero/.test(p.getMaterial()?.getName() ?? '')));
+  const prim = bodyNode.getMesh().listPrimitives()[0];
+  const lp = prim.clone();
+  for (const sem of lp.listSemantics()) lp.setAttribute(sem, lp.getAttribute(sem).clone());
+  const pos = lp.getAttribute('POSITION').getArray();
+  const idx = new Uint32Array(lp.getIndices().getArray());
+  const [lod] = MeshoptSimplifier.simplify(idx, new Float32Array(pos), 3, Math.floor(idx.length * 0.2 / 3) * 3, 0.02, ['LockBorder']);
+  lp.setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(lod)));
+  const lodNode = doc.createNode('Body_LOD').setMesh(doc.createMesh('Body_LOD').addPrimitive(lp)).setSkin(bodyNode.getSkin());
+  (bodyNode.getParentNode() ?? root.listScenes()[0]).addChild(lodNode);
+  console.log(g, 'LOD tris', lod.length / 3, 'of', idx.length / 3);
   await finish(doc, `${g.toLowerCase()}.glb`);
 }
 
