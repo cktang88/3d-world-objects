@@ -49,23 +49,47 @@ const sstep = (e0: number, e1: number, x: number) => {
 };
 
 /** the near shader's bind-space slimming, at average settings (see bodyMaterial in people.ts) */
-function slim(p: THREE.Vector3, b: FarBody, female: boolean) {
-  const armF = female ? 0.75 : 0.81, legF = 0.88, pull = female ? 0.006 : 0.025, depth = 0.88;
-  const ax = Math.abs(p.x);
-  const wa = sstep(b.shoulderX - 0.02, b.shoulderX + 0.09, ax) * sstep(b.waist + 0.15, b.waist + 0.25, p.y);
-  const f = 1 + (armF - 1) * wa;
-  p.y = b.armY + (p.y - b.armY) * f;
-  p.z = b.armZ + (p.z - b.armZ) * f;
-  p.x -= Math.sign(p.x) * pull * sstep(0.04, b.shoulderX + 0.04, ax) * sstep(b.waist + 0.05, b.waist + 0.2, p.y);
-  const wl = (1 - sstep(b.waist - 0.14, b.waist - 0.02, p.y)) * sstep(0, 0.05, ax) * (p.y > b.ankle ? 1 : 0);
-  const lx = Math.sign(p.x) * b.legX, lf = 1 + (legF - 1) * wl;
-  p.x = lx + (p.x - lx) * lf;
-  p.z = b.legZ + (p.z - b.legZ) * lf;
-  const wt = sstep(b.waist - 0.12, b.waist, p.y) * (1 - wa) * (1 - sstep(b.neck - 0.06, b.neck + 0.02, p.y));
-  p.z = p.z + (-0.03 + (p.z + 0.03) * depth - p.z) * wt;
+/** the near shader's reshaping (tubes for limbs, an ellipse for the torso; see bodyMaterial in
+ *  people.ts) at average proportions; updates the position and normal, returns clothing bulk */
+function slim(p: THREE.Vector3, n: THREE.Vector3, b: FarBody, female: boolean) {
+  const [armR, thighR, hipRx, chestRx, hipRz, chestRz] = female ? [0.044, 0.086, 0.178, 0.148, 0.112, 0.122] : [0.05, 0.083, 0.165, 0.168, 0.108, 0.118];
+  const ax = Math.abs(p.x), waist = b.waist, neck = b.neck;
+  const lerp = THREE.MathUtils.lerp;
+  const wa = sstep(b.shoulderX - 0.03, b.shoulderX + 0.06, ax) * sstep(waist + 0.15, waist + 0.25, p.y);
+  const wl = (1 - sstep(waist - 0.16, waist - 0.04, p.y)) * (p.y > b.ankle + 0.01 ? 1 : 0);
+  const top = lerp(neck - 0.01, neck + 0.05, sstep(0.06, 0.11, ax));
+  const wt = (1 - wa) * (1 - wl) * sstep(waist - 0.22, waist - 0.06, p.y) * (1 - sstep(top - 0.07, top, p.y));
+  {
+    const rt = lerp(armR, armR * 0.62, sstep(b.shoulderX, b.wristX, ax));
+    const dy = p.y - b.armY, dz = p.z - b.armZ, l = Math.hypot(dy, dz) || 1;
+    const k = wa * (1 - sstep(b.wristX - 0.05, b.wristX - 0.01, ax));
+    p.y = lerp(p.y, b.armY + (dy / l) * rt, k);
+    p.z = lerp(p.z, b.armZ + (dz / l) * rt, k);
+    n.lerp(_t.set(0, dy / l, dz / l), k).normalize();
+  }
+  {
+    const lx = Math.sign(p.x) * b.legX;
+    const rt = lerp(thighR, thighR * 0.55, sstep(waist - 0.1, b.ankle + 0.05, p.y));
+    const dx = p.x - lx, dz = p.z - b.legZ, l = Math.hypot(dx, dz) || 1;
+    const k = wl * sstep(0, 0.05, ax);
+    p.x = lerp(p.x, lx + (dx / l) * rt, k);
+    p.z = lerp(p.z, b.legZ + (dz / l) * rt, k);
+    n.lerp(_t.set(dx / l, 0, dz / l), k).normalize();
+  }
+  {
+    const h = sstep(waist - 0.1, waist + 0.3, p.y);
+    const rx = lerp(hipRx, chestRx, h) * (1 - 0.3 * sstep(neck - 0.12, neck + 0.04, p.y));
+    const rz = lerp(hipRz, chestRz, h) * (1 - 0.25 * sstep(neck - 0.1, neck + 0.04, p.y));
+    const ex = p.x / rx, ez = (p.z + 0.02) / rz, l = Math.hypot(ex, ez) || 1;
+    p.x = lerp(p.x, (ex / l) * rx, wt);
+    p.z = lerp(p.z, -0.02 + (ez / l) * rz, wt);
+    n.lerp(_t.set(ex / l / rx, 0, ez / l / rz).normalize(), wt).normalize();
+  }
+  p.x -= Math.sign(p.x) * (female ? 0.006 : 0.04) * sstep(0.04, b.shoulderX + 0.04, ax) * sstep(waist + 0.05, waist + 0.2, p.y);
   // clothing layer: a little bulk on the torso, arms and legs
-  return ax < b.wristX - 0.03 && p.y < b.neck - 0.02 ? 0.014 : p.y < b.ankle ? 0.012 : 0;
+  return ax < b.wristX - 0.03 && p.y < neck - 0.02 ? 0.014 : p.y < b.ankle ? 0.012 : 0;
 }
+const _t = new THREE.Vector3();
 
 export class FarCrowd {
   meshes: THREE.InstancedMesh[] = [];
@@ -135,7 +159,7 @@ export class FarCrowd {
       col[c] = c;
       _n.fromBufferAttribute(nrm, v).applyMatrix3(nGeo).normalize();
       const p = _v.clone();
-      const infl = slim(p, b, female);
+      const infl = slim(p, _n, b, female);
       p.addScaledVector(_n, infl);
       skinIn.push(p.applyMatrix4(geoInv));
       skinN.push(_n.clone().applyMatrix3(nGeoInv).normalize());
