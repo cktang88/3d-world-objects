@@ -548,3 +548,13 @@ Street cars, via the [Objaverse](https://huggingface.co/datasets/allenai/objaver
 - **escalade** — "2009 Cadillac Escalade" by nekkantisrikar2007, https://sketchfab.com/3d-models/7c5516c76bd441d998af76e2240a2b8d, CC-BY-4.0 (CC Attribution)
 - **explorer** — "Ford Explorer ST" by David_Holiday, https://sketchfab.com/3d-models/a47d2d8c83b44d348329dba8f92d1adc, CC-BY-4.0 (CC Attribution)
 - **sprinter** — "Mercedes Benz Sprinter 2006" by Max-7215, https://sketchfab.com/3d-models/f69de1315bb049c8946d57f6006acd73, CC-BY-4.0 (CC Attribution)
+
+## Third-party model libraries (streamed at runtime, src/libraries.ts)
+
+Not stored in this repository: catalogs in public/libraries/ point at each source's CDN. Per-model
+credit lines come from `attribution(entry)` / `obj.userData.attribution`.
+
+- **Poly Haven models**: https://polyhaven.com/models, CC0 1.0 (credit appreciated: Poly Haven and each model's author).
+- **Google Scanned Objects**: Google Research, https://research.google/blog/scanned-objects-by-google-research-a-dataset-of-3d-scanned-common-household-items/ , CC BY 4.0 (Copyright 2020 Google LLC); GLB conversion https://huggingface.co/datasets/codepawl/scanned-objects-glb (CC BY 4.0). Product brands belong to their owners.
+- **Smithsonian 3D**: Smithsonian Institution Open Access, https://3d.si.edu/ , CC0 1.0.
+- **Khronos glTF Sample Assets**: https://github.com/KhronosGroup/glTF-Sample-Assets , CC0 1.0 or CC BY 4.0 per model (artists in public/libraries/khronos.json `by`).
