@@ -44,7 +44,8 @@ export class AtriumLevel extends MuseumBase {
     this.env.hemi.intensity = 1.05;
     this.spawn.pos.set(0, 0, -3.5);
     this.spawn.yaw = 0;
-    const r = new Rng(Date.now() >>> 0);
+    // deterministic: the same atrium (and centrepiece) on every visit
+    const r = new Rng(20261106);
     const mats = makeMats(st, r);
     let prio = 0;
     const ctx: Ctx = { lv: this, st, r, m: mats, prio: () => prio++, labelBg: '#f1ebdf', labelInk: '#1f1b16', labelSub: '#5d5446' };
