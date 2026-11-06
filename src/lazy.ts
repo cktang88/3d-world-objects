@@ -47,6 +47,11 @@ export interface ContainerSpec {
   hideClosed?: boolean;
   /** shown only while open: e.g. the dark empty slot over the model's own closed front */
   slot?: THREE.Object3D;
+  /**
+   * the contents sit behind a front the furniture model still draws (a cupboard door added to a
+   * library model): draw them through it, clipped to the compartment (needs renderer.localClippingEnabled)
+   */
+  seeThrough?: boolean;
   /** contents can't be seen while shut (default true). False (glass coolers, display cases): generated when near and facing */
   closedOpaque?: boolean;
 }
@@ -108,6 +113,7 @@ export class LazyContainer {
     this.contents = o;
     this.obj.add(o);
     o.userData.restZ = o.position.z;
+    if (this.spec.seeThrough && this.spec.size) seeThrough(o, this.obj, this.spec.size);
     this.pose();
   }
   pose() {
@@ -130,6 +136,35 @@ export class LazyContainer {
     disposeTree(this.contents);
     this.contents = null;
   }
+}
+
+/**
+ * Contents drawn through the model's front: own material copies that ignore depth (after the dark
+ * slot, before the door leaf) and are clipped to the compartment box, so they only show inside it.
+ */
+function seeThrough(o: THREE.Object3D, frame: THREE.Object3D, size: THREE.Vector3) {
+  frame.updateMatrixWorld(true);
+  const m = frame.matrixWorld;
+  const P = (nx: number, ny: number, nz: number, px: number, py: number, pz: number) =>
+    new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(nx, ny, nz), new THREE.Vector3(px, py, pz)).applyMatrix4(m);
+  const planes = [P(1, 0, 0, -size.x / 2, 0, 0), P(-1, 0, 0, size.x / 2, 0, 0), P(0, 1, 0, 0, 0, 0), P(0, -1, 0, 0, size.y, 0), P(0, 0, 1, 0, 0, -size.z), P(0, 0, -1, 0, 0, 0.002)];
+  const copies = new Map<THREE.Material, THREE.Material>();
+  o.traverse((c) => {
+    const mesh = c as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const src = mesh.material as THREE.Material;
+    let cm = copies.get(src);
+    if (!cm) {
+      cm = src.clone();
+      cm.depthTest = false;
+      cm.depthWrite = false;
+      cm.clippingPlanes = planes;
+      cm.userData.ownedCopy = true;
+      copies.set(src, cm);
+    }
+    mesh.material = cm;
+    mesh.renderOrder = 2;
+  });
 }
 
 /** a sand3d object's revolute/prismatic joints as an open(t) pose (remote.ts Animator) */
@@ -176,7 +211,7 @@ function under(o: THREE.Object3D, root: THREE.Object3D) {
 export function adoptContainer(c: ContainerLike) {
   // only containers with an anchor object (ShopLevel's glass coolers stock themselves in update())
   if (!(c.obj as THREE.Object3D | undefined)?.isObject3D) return null;
-  return registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed, slot: c.slot });
+  return registerContainer(c.obj, { label: c.label ?? NAMES[c.kind] ?? c.kind, size: c.size, generate: c.generate, door: c.door, drawer: c.drawer, open: c.open, closedOpaque: c.closedOpaque, hideClosed: c.hideClosed, slot: c.slot, seeThrough: c.seeThrough });
 }
 
 /** InteriorLevel-style containers ({ kind, obj, size, generate }) adopted automatically */
@@ -191,6 +226,7 @@ export interface ContainerLike {
   closedOpaque?: boolean;
   hideClosed?: boolean;
   slot?: THREE.Object3D;
+  seeThrough?: boolean;
   label?: string;
 }
 const NAMES: Record<string, string> = { dresser: 'dresser', nightstand: 'nightstand drawer', cabinet: 'cabinet', upper: 'cupboard', fridge: 'fridge', closet: 'closet', cooler: 'cooler', freezer: 'freezer' };

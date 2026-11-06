@@ -13,7 +13,7 @@ import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
-import { detectDrawers, frontMaterial, slotMesh } from './lazy-furniture';
+import { detectDrawersSteps, runIdle, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
 import { adoptContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
@@ -92,6 +92,8 @@ export interface Container {
   hideClosed?: boolean;
   /** the dark empty slot shown over the model's own front while the drawer is out */
   slot?: THREE.Object3D;
+  /** contents behind a door added to a library model: drawn through the model's front (lazy.ts) */
+  seeThrough?: boolean;
 }
 interface Frame {
   x: number;
@@ -1193,13 +1195,29 @@ export class InteriorLevel implements Level {
    * Drawers for a library dresser / nightstand (lazy-furniture.ts): even rows at once; when the model
    * has loaded, refitted to the drawer fronts read from its front face, and given its colour.
    */
+  /** library drawers and cupboards hold what the room would keep in them (lazy-furniture.ts fillCompartment) */
+  private libFill(entries: Container[], roomType: string) {
+    for (const e of entries) {
+      const door = !e.drawer;
+      const seed = hashN(this.desc.seed, Math.round(e.obj.position.x * 100), Math.round(e.obj.position.z * 100), Math.round(e.obj.position.y * 100));
+      const { x: w, y: h, z: d } = e.size;
+      e.generate = () => fillCompartment(seed, w - 0.04, h - 0.02, d - 0.02, themeOf(roomType, door));
+    }
+  }
+
   private libDrawerSet(f: Frame, kind: 'dresser' | 'nightstand', size: readonly number[], rows: number) {
     let entries = this.movingParts(f, libDrawers(kind, size, rows, this.pal.wood), true);
+    this.libFill(entries, this.cur.room.type);
     const lib = this.lastLib, cur = this.cur, wood = this.pal.wood;
     if (!lib) return;
-    lib.loaded.then((model) => {
+    // reading the layout costs ~100 ms of rays on a real model: in idle time, 2 ms at a time
+    const st = { ms: 0, slices: 0, maxSlice: 0 };
+    lib.loaded.then(async (model) => {
       if (!model || lib.holder.userData.disposed || this.group.userData.disposed) return;
-      const bands = detectDrawers(model, lib.holder, size, kind);
+      const bands = await runIdle(detectDrawersSteps(model, lib.holder, size, kind), 2, st);
+      if (lib.holder.userData.disposed || this.group.userData.disposed) return;
+      // (for the lab and perf notes: what reading the layout took)
+      ((globalThis as unknown as { __drawerProbe?: unknown[] }).__drawerProbe ??= []).push({ ms: +st.ms.toFixed(1), slices: st.slices, maxSlice: +st.maxSlice.toFixed(2) });
       if (bands) {
         for (const e of entries) {
           e.obj.removeFromParent();
@@ -1210,7 +1228,14 @@ export class InteriorLevel implements Level {
         const prev = this.cur;
         this.cur = cur;
         const d = Math.max(0.15, size[2] - 0.1);
-        entries = this.movingParts(f, bands.map((b) => ({ move: 'drawer' as const, kind, x: b.x, y: b.y, z: size[2] / 2 + 0.004, w: b.w, h: b.h, d, mat: wood })), true);
+        entries = this.movingParts(
+          f,
+          bands.map((b) => (b.move === 'door'
+            ? { move: 'door' as const, kind: 'cabinet' as const, hinge: b.hinge, x: b.x, y: b.y, z: size[2] / 2 + 0.004, w: b.w, h: b.h, d, mat: wood }
+            : { move: 'drawer' as const, kind, x: b.x, y: b.y, z: size[2] / 2 + 0.004, w: b.w, h: b.h, d, mat: wood })),
+          true,
+        );
+        this.libFill(entries, cur.room.type);
         this.cur = prev;
         if (this.group.userData.containersAdopted) {
           for (const e of entries) {
@@ -1219,12 +1244,12 @@ export class InteriorLevel implements Level {
           }
         }
       }
-      // each drawer front in the paint of the model's own front at that drawer
+      // each drawer front and door in the paint of the model's own front there
       for (const e of entries) {
         // (off-centre and low: not on the knob or pull in the middle)
         const lp = lib.holder.worldToLocal(e.obj.localToWorld(new THREE.Vector3(e.size.x * 0.3, e.size.y * 0.25, 0)));
         const mat = frontMaterial(model, { holder: lib.holder, size, x: lp.x, y: lp.y });
-        if (mat) e.drawer?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
+        if (mat) (e.drawer ?? e.door)?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
       }
     });
   }
@@ -1276,6 +1301,13 @@ export class InteriorLevel implements Level {
       if (hideClosed) {
         entry.hideClosed = true;
         mover.visible = false;
+        // a door: lazy.ts shows/hides `door`, our open() swings it; the cupboard's inside is drawn
+        // through the model's own (closed) front, after the slot and before the door leaf
+        if (pt.move === 'door') {
+          entry.door = mover;
+          entry.seeThrough = true;
+          mover.traverse((o) => (o.renderOrder = 3));
+        }
         // the model's own closed front stays behind a pulled-out drawer: cover it with an empty slot
         entry.slot = slotMesh(pt.w, pt.h);
         entry.slot.position.z = -0.003;

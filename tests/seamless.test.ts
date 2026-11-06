@@ -8,7 +8,7 @@ import { InteriorLevel } from '../src/interior';
 import { Vertical } from '../src/vertical';
 import { Player } from '../src/player';
 import { Lazy, registerContainer } from '../src/lazy';
-import { detectDrawers, frontMaterial } from '../src/lazy-furniture';
+import { detectDrawers, frontMaterial, fillCompartment, themeOf } from '../src/lazy-furniture';
 import { realScale } from '../src/realscale';
 import type { Level, LevelDesc, Portal } from '../src/level';
 
@@ -310,4 +310,41 @@ test('detectDrawers reads the drawer layout off a model front (rows from horizon
   // the drawer front takes the model's colour
   const fm = frontMaterial(model);
   expect(fm && fm.color.getHexString() === new THREE.Color('#f0ece4').getHexString(), `front colour ${fm?.color.getHexString()}`);
+});
+
+test('library cupboards: doors read off the model with the hinge away from the knob; contents of every theme fit their compartment', () => {
+  // a 0.9 x 1.0 x 0.45 m cupboard: two drawers over a pair of doors with knobs near the middle
+  const W = 0.9, H = 1.0, D = 0.45;
+  const model = new THREE.Group();
+  const add = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: '#f0ece4' }));
+    m.position.set(x, y + h / 2, z);
+    model.add(m);
+  };
+  add(W, H, D - 0.02, 0, 0, -0.01);
+  for (const sx of [-1, 1]) {
+    add(W / 2 - 0.05, 0.2, 0.02, sx * (W / 4 - 0.005), 0.72, D / 2 - 0.01); // drawers
+    add(W / 2 - 0.05, 0.6, 0.02, sx * (W / 4 - 0.005), 0.08, D / 2 - 0.01); // doors
+    add(0.03, 0.03, 0.03, sx * 0.07, 0.38, D / 2 + 0.015); // knobs near the middle
+  }
+  const holder = new THREE.Group();
+  holder.add(model);
+  const bands = detectDrawers(model, holder, [W, H, D], 'dresser');
+  expect(bands, 'no layout');
+  const doors = bands!.filter((b) => b.move === 'door'), drawers = bands!.filter((b) => b.move !== 'door');
+  console.log(`   ${drawers.length} drawers, doors: ${doors.map((b) => `${fmt(b.x)} hinge ${b.hinge}`).join(', ')}`);
+  expect(drawers.length === 2 && doors.length === 2, `2 drawers and 2 doors, got ${drawers.length} + ${doors.length}`);
+  const left = doors.find((b) => b.x < 0)!, right = doors.find((b) => b.x > 0)!;
+  expect(left.hinge === 'left' && right.hinge === 'right', `hinges ${left.hinge}/${right.hinge}: should be on the outer sides (knobs in the middle)`);
+  // contents stay inside their compartment, for drawers and tall cupboards, every theme
+  for (const theme of ['clothes', 'linens', 'dishes', 'boxes'] as const) {
+    for (const [w, h, d] of [[0.4, 0.18, 0.36], [0.8, 0.6, 0.4], [0.35, 0.8, 0.5]]) {
+      const g = fillCompartment(7, w, h, d, theme);
+      const b = new THREE.Box3().setFromObject(g);
+      expect(g.children.length > 0, `${theme} ${w}x${h}x${d}: empty`);
+      const room = new THREE.Box3(new THREE.Vector3(-w / 2 - 0.005, -0.005, -d - 0.005), new THREE.Vector3(w / 2 + 0.005, h + 0.005, 0.005));
+      expect(room.containsBox(b), `${theme} in ${w}x${h}x${d}: ${b.min.toArray().map(fmt)}..${b.max.toArray().map(fmt)}`);
+    }
+  }
+  expect(themeOf('kitchen', true) === 'dishes' && themeOf('bedroom', false) === 'clothes', 'room themes');
 });

@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { InteriorLevel } from '../interior';
-import { Lazy } from '../lazy';
+import { Lazy, type LazyContainer } from '../lazy';
 
 /**
  * ?lab=drawers — an apartment's library dresser (or nightstand) with a drawer pulled out and its
- * contents generated on opening (lazy.ts). &kind=dresser|nightstand &seed= start seed, &n= which drawer (0..), &all=1 opens the piece's others too.
+ * contents generated on opening (lazy.ts). &kind=dresser|nightstand &seed= start seed, &n= which piece's drawer (0..),
+ * &all=1 opens the piece's other drawers too, &open=doors|drawers|all opens the refitted ones.
  */
 type C = { kind: string; obj: THREE.Group; size: THREE.Vector3; drawer?: THREE.Object3D; hideClosed?: boolean };
 
@@ -46,12 +47,33 @@ const scene: LabScene = {
       const lazy = new Lazy();
       const cam = new THREE.PerspectiveCamera();
       lazy.update(0.1, cam, level);
+      const opened: LazyContainer[] = [];
+      // after the refit: aim at the piece's own (refitted) drawers and doors; &open=doors|drawers|all
+      const which = params.get('open');
+      if (which) {
+        rays.length = 0;
+        for (const c of (level as unknown as { containers: (C & { door?: THREE.Object3D })[] }).containers) {
+          if (!c.hideClosed || !c.obj.parent || c.obj.position.distanceTo(p0.obj.position) > 1.5) continue;
+          if ((which === 'doors' && !c.door) || (which === 'drawers' && !c.drawer)) continue;
+          rays.push(new THREE.Ray(c.obj.localToWorld(new THREE.Vector3(c.size.x * 0.25, c.size.y / 2, 1.0)), c.obj.getWorldDirection(new THREE.Vector3()).negate()));
+        }
+      }
       for (const ray of rays) {
         const hit = lazy.aim(ray, 2.4, level);
-        if (hit) lazy.toggle(hit.c);
+        if (hit && !opened.includes(hit.c)) {
+          lazy.toggle(hit.c);
+          opened.push(hit.c);
+        }
       }
       for (let i = 0; i < 40; i++) lazy.update(1 / 30, cam, level);
       finish(level, p0);
+      // what is in the open ones (window.__drawers.opened): meshes, and their box in the container's frame
+      (window as unknown as { __drawers: { opened?: unknown } }).__drawers.opened = opened.map((c) => {
+        let meshes = 0;
+        c.contents?.traverse((o) => ((o as THREE.Mesh).isMesh ? meshes++ : 0));
+        const b = c.contents ? new THREE.Box3().setFromObject(c.contents).applyMatrix4(c.obj.matrixWorld.clone().invert()) : null;
+        return { label: c.label, t: +c.t.toFixed(2), meshes, visible: c.contents?.visible, box: b && [b.min.toArray(), b.max.toArray()].map((v) => v.map((x) => +x.toFixed(2))) };
+      });
     });
   },
 };

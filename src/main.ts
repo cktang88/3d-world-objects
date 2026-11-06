@@ -217,6 +217,7 @@ seam.enabled = params0.get('seamless') !== '0';
 const seamFeet = new THREE.Vector3();
 /** lazy.ts: room cells drawn only when visible, container contents generated only when opened */
 const lazy = new Lazy();
+renderer.localClippingEnabled = true; // lazy.ts: cupboard contents clipped to their compartment
 let aimedBox: LazyContainer | null = null;
 /** switch to an already built level without fading; pos/yaw in its frame */
 function seamSwitch(s: Slot, pos: THREE.Vector3 | undefined, yaw: number | undefined) {
