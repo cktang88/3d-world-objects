@@ -266,7 +266,13 @@ function flipped(g: THREE.BufferGeometry) {
   for (let i = 0; i < nor.count; i++) nor.setXYZ(i, -nor.getX(i), -nor.getY(i), -nor.getZ(i));
   return o;
 }
-/** horizontal cylinder along +x from the origin */
+/** a cylinder between two points */
+function rod(k: KitBuilder, a: THREE.Vector3, b: THREE.Vector3, r: number, m: THREE.Material, seg = 6) {
+  const d = b.clone().sub(a);
+  const g = new THREE.CylinderGeometry(r, r, d.length(), seg);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
+  k.addM(g, m, new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), q, new THREE.Vector3(1, 1, 1)));
+}
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 function plane(w: number, h: number, r?: Rect) {
   const g = new THREE.PlaneGeometry(w, h);
@@ -356,11 +362,8 @@ export function signalPole(parent: THREE.Object3D, x: number, z: number, sx: num
     a.rotateZ(-Math.PI / 2);
     a.translate(armLen / 2, 0, 0);
     k.add(a, G, 0, 5.6, 0, 0, 0, 0.02);
-    // tie rod
-    const tie = new THREE.CylinderGeometry(0.012, 0.012, armLen * 0.7, 6);
-    const ang = Math.atan2(0.9, armLen * 0.68);
-    tie.rotateZ(-(Math.PI / 2 - ang));
-    k.add(tie, G, armLen * 0.34, 6.05, 0);
+    // tie rod from the pole top to the outer third of the arm
+    rod(k, V(0.05, 6.15, 0), V(armLen * 0.68, 5.62, 0), 0.014, G);
     k.add(new THREE.BoxGeometry(0.28, 0.3, 0.3), G, 0.1, 5.6, 0);
     // span hanger at the head
     k.add(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6), G, armLen - 0.4, 5.45, 0);
