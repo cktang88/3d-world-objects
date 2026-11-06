@@ -59,8 +59,8 @@ const P: Record<WeatherState, Params> = {
   overcast: { cloud: 0.97, dark: 0.3, rain: 0, snow: 0, ground: 0.0004, haze: 1.6, base: 420, inCloud: 0.012, fogSky: 0.1, wind: 3 },
   lightrain: { cloud: 1, dark: 0.55, rain: 0.3, snow: 0, ground: 0.001, haze: 2.2, base: 260, inCloud: 0.02, fogSky: 0.25, wind: 3 },
   rain: { cloud: 1, dark: 0.85, rain: 1, snow: 0, ground: 0.0025, haze: 3, base: 170, inCloud: 0.03, fogSky: 0.45, wind: 5 },
-  fog: { cloud: 1, dark: 0.25, rain: 0, snow: 0, ground: 0.011, haze: 2.5, base: 75, inCloud: 0.045, fogSky: 1, wind: 1 },
-  snow: { cloud: 1, dark: 0.45, rain: 0, snow: 1, ground: 0.004, haze: 3, base: 220, inCloud: 0.028, fogSky: 0.6, wind: 2 },
+  fog: { cloud: 1, dark: 0.25, rain: 0, snow: 0, ground: 0.011, haze: 2.5, base: 75, inCloud: 0.07, fogSky: 1, wind: 1 },
+  snow: { cloud: 1, dark: 0.45, rain: 0, snow: 1, ground: 0.009, haze: 3.5, base: 220, inCloud: 0.028, fogSky: 0.6, wind: 2 },
 };
 
 /** random walk: where each state tends to go next (weights) and how long it lasts (minutes) */
@@ -379,8 +379,9 @@ float cdens(float n, float cov) {
   float th = mix(0.74, 0.2, cov);
   return max(smoothstep(th, th + 0.16, n), smoothstep(0.8, 1.0, cov) * 0.9);
 }
-// premultiplied cloud radiance + coverage for a view direction (world space)
-vec4 clouds(vec3 dir) {
+// cloud radiance (not premultiplied) + coverage for a view direction (world space); hz = how much
+// of the result is haze (uHaze), mixed in by the caller like three's fog (after tone mapping on screen)
+vec4 clouds(vec3 dir, out float hz) {
   float cov = uCloud.x, dark = uCloud.y;
   float dy = max(dir.y, 0.035);
   vec2 wp = uCloud2.xy + dir.xz * (${CLOUD_H.toFixed(1)} / dy);
@@ -400,14 +401,14 @@ vec4 clouds(vec3 dir) {
   col += uGlow * (0.6 + 0.4 * thick);
   // towards the horizon the deck thins into haze
   float h = smoothstep(0.0, 0.3, dir.y);
-  col = mix(uHaze, col, 0.35 + 0.65 * h);
   float a = d * smoothstep(-0.01, 0.06, dir.y);
+  hz = 0.65 * (1.0 - h);
   // overcast / fog: also fill below the horizon so the HDRI's own skyline fades into the grey
-  a = max(a, uCloud2.w * smoothstep(-0.25, 0.0, dir.y));
-  col = mix(col, uHaze, 1.0 - smoothstep(-0.02, 0.08, dir.y));
-  col = mix(col, uHaze, uCloud2.z);
-  a = max(a, uCloud2.z);
-  return vec4(col * a, a);
+  float A = max(max(a, uCloud2.w * smoothstep(-0.25, 0.0, dir.y)), uCloud2.z);
+  hz = max(hz, 1.0 - smoothstep(-0.02, 0.08, dir.y));
+  hz = max(hz, uCloud2.z);
+  hz = max(hz, 1.0 - a / max(A, 1e-4));
+  return vec4(col, A);
 }
 `;
 
@@ -586,13 +587,17 @@ void main() {
 `;
 const DOME_F = /* glsl */ `
 varying vec3 vDir;
+uniform vec3 uHazeOut;
 ${CLOUD_GLSL}
 void main() {
-  vec4 c = clouds(normalize(vDir));
+  float hz;
+  vec4 c = clouds(normalize(vDir), hz);
   if (c.a < 0.002) discard;
-  gl_FragColor = vec4(c.rgb / c.a, c.a);
+  gl_FragColor = c;
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+  // haze is mixed in exactly like three's fog_fragment (after tone mapping when drawing to screen)
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHazeOut, hz);
 }
 `;
 
@@ -606,9 +611,10 @@ void main() {
   float phi = (vUv.x - 0.5) * 6.2831853;
   float el = (vUv.y - 0.5) * 3.14159265;
   vec3 d = vec3(cos(el) * cos(phi), sin(el), cos(el) * sin(phi));
-  vec4 c = clouds(normalize(uRot * d));
+  float hz;
+  vec4 c = clouds(normalize(uRot * d), hz);
   vec3 base = texture2D(tBase, vUv).rgb;
-  gl_FragColor = vec4(base * (1.0 - c.a) + c.rgb * uInvScale, 1.0);
+  gl_FragColor = vec4(base * (1.0 - c.a) + mix(c.rgb, uHaze, hz) * c.a * uInvScale, 1.0);
 }
 `;
 
@@ -706,11 +712,15 @@ export class Weather {
       uGlow: { value: new THREE.Color() },
     };
     // opacity < 0.6 + transparent: main.ts keeps these out of GTAO's depth/normal pass
-    const dm = new THREE.ShaderMaterial({ uniforms: this.cloudU, vertexShader: DOME_V, fragmentShader: DOME_F, side: THREE.BackSide, transparent: true, depthWrite: false, opacity: 0.5 });
+    const dm = new THREE.ShaderMaterial({ uniforms: { ...this.cloudU, uHazeOut: { value: new THREE.Color() } }, vertexShader: DOME_V, fragmentShader: DOME_F, side: THREE.BackSide, transparent: true, depthWrite: false, opacity: 0.5 });
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), dm);
     this.dome.frustumCulled = false;
     this.dome.renderOrder = -10;
-    this.dome.onBeforeRender = (_r, _s, cam) => {
+    this.dome.onBeforeRender = (r, _s, cam) => {
+      // the fog colour as three hands it to fog_fragment (display space when drawing straight to screen)
+      const out = dm.uniforms.uHazeOut.value as THREE.Color;
+      out.copy(this.cloudU.uHaze.value as THREE.Color);
+      if (r.getRenderTarget() === null && r.outputColorSpace === THREE.SRGBColorSpace) out.convertLinearToSRGB();
       this.dome.position.copy(cam.position);
       this.dome.updateMatrixWorld();
     };
@@ -744,7 +754,6 @@ export class Weather {
     this.group.add(this.dome, this.precip, this.splash);
     this.group.name = 'weather';
     this.group.userData.noOcclude = true;
-    scene.add(this.group);
 
     this.compMat = new THREE.ShaderMaterial({
       uniforms: { ...this.cloudU, tBase: { value: null }, uRot: { value: new THREE.Matrix3() }, uInvScale: { value: 1 } },
@@ -755,6 +764,18 @@ export class Weather {
     q.frustumCulled = false;
     this.compScene.add(q);
 
+    // compile the particle / dome / composite shaders up front: weather changes never compile anything
+    try {
+      const tmp = new THREE.Scene();
+      const vis = [this.dome, this.precip, this.splash].map((o) => o.visible);
+      tmp.add(this.group, q.clone());
+      renderer.compile(tmp, camera);
+      scene.add(this.group);
+      [this.dome, this.precip, this.splash].forEach((o, i) => (o.visible = vis[i]));
+    } catch (e) {
+      console.warn('weather: precompile failed', e);
+      scene.add(this.group);
+    }
     this.occCam.up.set(0, 0, -1);
     this.setQuality(lighting.quality);
 
@@ -892,7 +913,7 @@ export class Weather {
     FOG_A.z = 0;
     FOG_B.x = c.base;
     FOG_B.y = c.inCloud;
-    FOG_B.z = 80;
+    FOG_B.z = 50;
 
     this.updateFar();
     this.updateOcclusion(dt, focus);
