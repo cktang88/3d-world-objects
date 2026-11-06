@@ -678,6 +678,10 @@ export function nearObject(p: Prepared, paint: THREE.Material) {
 
 /** distances (m): near LOD inside NEAR, instanced mid LOD to MID (with shadows), instanced far LOD beyond */
 export const FLEET_LOD = { NEAR: 12, MID: 40, SHADOW: 25 };
+/** which representation a car (whose model has loaded) uses at distance d; 'near' only once its near file is in */
+export function fleetLevel(d: number, nearLoaded: boolean): 'near' | 'mid' | 'far' {
+  return d < FLEET_LOD.NEAR && nearLoaded ? 'near' : d < FLEET_LOD.MID ? 'mid' : 'far';
+}
 
 const MID_PAINT = new THREE.MeshPhysicalMaterial({ color: '#fff', metalness: 0.45, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.08, side: THREE.DoubleSide, name: 'car-mid-paint' });
 const MID_REST = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, side: THREE.DoubleSide, name: 'car-mid' });
@@ -803,7 +807,8 @@ export class FleetInstances {
       e.obj.updateWorldMatrix(true, false);
       pos.setFromMatrixPosition(e.obj.matrixWorld);
       const d = pos.distanceTo(eye);
-      const isNear = d < FLEET_LOD.NEAR && !!e.near;
+      const level = fleetLevel(d, !!e.near);
+      const isNear = level === 'near';
       if (e.near) e.near.visible = isNear;
       if (isNear && e.near) {
         const spin = !!e.obj.userData.spin;
@@ -823,7 +828,7 @@ export class FleetInstances {
         c.near++;
         continue;
       }
-      if (d < FLEET_LOD.MID) {
+      if (level === 'mid') {
         b.midP?.push(e.obj.matrixWorld, e.color);
         b.midR?.push(e.obj.matrixWorld, e.color);
         c.mid++;

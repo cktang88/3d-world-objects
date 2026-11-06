@@ -4,7 +4,7 @@ import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST, CYCLE, SIGNAL } from './common';
 import { laneOpen } from './districts'; // [districts]
-import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
+import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, loadFleet, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
 import { truckMesh } from './vehicleTruck';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
@@ -39,9 +39,20 @@ const waiting: { obj: THREE.Group; id: string; paint: THREE.Material; cab: boole
 function startLoading() {
   if (started) return;
   started = true;
-  preloadFleet().then(() => {
-    for (const w of waiting.splice(0)) dress(w.obj, w.id, w.paint, w.cab);
-  });
+  // request every far LOD, then every mid LOD; each model's cars swap their stand-in as soon as that
+  // model is in (not when the whole fleet is: the spawn view showed boxes for seconds)
+  void preloadFleet();
+  for (const id of Object.keys(FLEET))
+    loadFleet(id).then((p) => {
+      if (!p) return;
+      ready.set(id, p);
+      for (let i = waiting.length - 1; i >= 0; i--) {
+        const w = waiting[i];
+        if (w.id !== id) continue;
+        waiting.splice(i, 1);
+        dress(w.obj, w.id, w.paint, w.cab);
+      }
+    });
 }
 
 /**
@@ -258,9 +269,23 @@ function roofSign(): THREE.Object3D {
   return g;
 }
 
-/** a low-detail stand-in shown until the models are loaded */
+/**
+ * A low-detail stand-in shown until the model is loaded (the first seconds after spawn): a car silhouette,
+ * not a box. Side profile (nose toward -z) extruded across the width: a lower body with a sloped hood and
+ * boot, a narrower glass cabin with raked windshield and rear window, a roof in the paint colour, wheels.
+ */
 const standinCache = new Map<string, THREE.Group>();
-function standin(color: string, len: number, wid: number, tall: boolean): THREE.Group {
+function profile(pts: [number, number][], width: number) {
+  const sh = new THREE.Shape();
+  pts.forEach(([z, y], i) => (i ? sh.lineTo(z, y) : sh.moveTo(z, y)));
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: width, bevelEnabled: false });
+  // shape x = car z, extruded along +z = car x: turn it so the extrusion runs across the car, centred
+  g.rotateY(-Math.PI / 2);
+  g.translate(width / 2, 0, 0);
+  return g;
+}
+export function standin(color: string, len: number, wid: number, tall: boolean): THREE.Group {
   const key = `${color}|${len}|${wid}|${tall}`;
   let s = standinCache.get(key);
   if (!s) {
@@ -269,10 +294,19 @@ function standin(color: string, len: number, wid: number, tall: boolean): THREE.
     const body = mat(color, { rough: 0.5, metal: 0.3 });
     const black = mat('#111', { rough: 0.5, metal: 0.3 });
     const h = tall ? 1.85 : 1.45;
-    B(g, body, wid, h * 0.45, len, 0, 0.3, 0);
-    B(g, M2.glass, wid * 0.92, h * 0.4, len * 0.55, 0, 0.3 + h * 0.45, tall ? 0.2 : 0.1);
+    const L = len / 2, y0 = 0.3, yb = y0 + h * (tall ? 0.42 : 0.38), yr = h;
+    // lower body: rounded-off nose and tail, the hood and boot falling slightly to the ends
+    const lower = new THREE.Mesh(profile([[-L, y0 + 0.08], [-L + 0.06, y0], [L - 0.06, y0], [L, y0 + 0.08], [L, yb - 0.06], [L - 0.2, yb], [-L + 0.3, yb], [-L, yb - 0.1]], wid), body);
+    g.add(lower);
+    // cabin: raked windshield and rear glass (SUVs and vans: upright, roof to the tail)
+    const wf = tall ? -L + len * 0.3 : -L + len * 0.3, rf = tall ? -L + len * 0.42 : -L + len * 0.47;
+    const rr = tall ? L - 0.12 : L - len * 0.24, wr = tall ? L - 0.06 : L - len * 0.1;
+    g.add(new THREE.Mesh(profile([[wf, yb], [wr, yb], [rr, yr - 0.06], [rf, yr - 0.06]], wid * 0.9), M2.glass));
+    g.add(new THREE.Mesh(profile([[rf - 0.03, yr - 0.07], [rr + 0.03, yr - 0.07], [rr - 0.02, yr], [rf + 0.02, yr]], wid * 0.86), body));
+    // pillars between windows, in the paint colour
+    for (const z of [rf + (rr - rf) * 0.5]) B(g, body, wid * 0.91, yr - yb - 0.06, 0.08, 0, yb, z);
     for (const z of [-len * 0.31, len * 0.31])
-      for (const x of [-wid / 2 + 0.15, wid / 2 - 0.15]) {
+      for (const x of [-wid / 2 + 0.12, wid / 2 - 0.12]) {
         const t = C(g, black, 0.34, 0.24, x, 0, z, false);
         t.rotation.z = Math.PI / 2;
         t.position.y = 0.34;
