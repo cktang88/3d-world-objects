@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { mat } from '../build';
-import { rugTex } from '../textures';
 import { Rng } from '../rng';
 import { Kit, M, glass, lit, printed, surfMat, type Seg } from './kit';
-import { cigRack, lottoTickets, menuBoard, pegboard, priceStrip, slatwall, textTex, troffer, screenTex, bookSpines, layoutTex } from './tex';
+import { rugTex, cigRack, lottoTickets, menuBoard, pegboard, priceStrip, slatwall, textTex, troffer, screenTex, bookSpines, layoutTex } from './tex';
 
 /**
  * Store fixtures, each built at the kit's current frame (kit.at(x, z, rot) first):
@@ -264,7 +263,7 @@ export function binCabinet(k: Kit, cols: number, rows: number, o: { cell?: numbe
 }
 
 /** A display table (optionally with a lower shelf), products piled / arranged on top. */
-export function table(k: Kit, w: number, d: number, h: number, o: { color?: string; legs?: string; lower?: boolean; messy?: number; mode?: 'pile' | 'shelf' | 'single'; want?: RegExp; big?: boolean; cloth?: string } = {}) {
+export function table(k: Kit, w: number, d: number, h: number, o: { color?: string; legs?: string; lower?: boolean; messy?: number; mode?: 'pile' | 'shelf' | 'single'; want?: RegExp; big?: boolean; cloth?: string; pitch?: number } = {}) {
   const top = mat(o.color ?? '#8a6a4a', { rough: 0.6 });
   const leg = mat(o.legs ?? '#2a2a2a', { rough: 0.5, metal: 0.4 });
   k.box(top, w, 0.04, d, 0, h - 0.04, 0);
@@ -272,9 +271,9 @@ export function table(k: Kit, w: number, d: number, h: number, o: { color?: stri
   else for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) k.box(leg, 0.04, h - 0.04, 0.04, x * (w / 2 - 0.05), 0, z * (d / 2 - 0.05));
   if (o.lower && !o.cloth) {
     k.box(top, w - 0.06, 0.03, d - 0.06, 0, 0.18, 0);
-    k.seg(o.mode === 'single' ? 'pile' : (o.mode ?? 'pile'), 0, 0.21, d / 2 - 0.05, w - 0.15, d - 0.15, h - 0.3, { messy: o.messy ?? 0.5 });
+    k.seg(o.mode === 'single' ? 'pile' : (o.mode ?? 'pile'), 0, 0.21, d / 2 - 0.05, w - 0.15, d - 0.15, h - 0.3, { messy: o.messy ?? 0.5, pitch: o.pitch });
   }
-  k.seg(o.mode ?? 'pile', 0, h, d / 2 - 0.04, w - 0.1, d - 0.08, 0.6, { messy: o.messy ?? 0.5, want: o.want, big: o.big });
+  k.seg(o.mode ?? 'pile', 0, h, d / 2 - 0.04, w - 0.1, d - 0.08, 0.6, { messy: o.messy ?? 0.5, want: o.want, big: o.big, pitch: o.pitch });
   k.col(0, 0, w + 0.05, d + 0.05);
 }
 
@@ -311,7 +310,7 @@ export function showcase(k: Kit, len: number, o: { frame?: string; h?: number } 
 }
 
 /** Tall glass curio cabinet (antiques, models). */
-export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number } = {}) {
+export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number; pitch?: number } = {}) {
   const H = 1.95, D = 0.45, n = o.shelves ?? 4;
   const wood = mat(o.wood ?? '#4a2e1a', { rough: 0.5 });
   k.box(wood, w, 0.12, D, 0, 0, -D / 2);
@@ -321,7 +320,7 @@ export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number } 
   for (let i = 0; i < n; i++) {
     const y = 0.12 + (i * (H - 0.25)) / n;
     if (i > 0) k.box(glass(), w - 0.06, 0.008, D - 0.04, 0, y, -D / 2);
-    k.seg('shelf', 0, y + 0.01, -0.04, w - 0.08, D - 0.08, (H - 0.25) / n - 0.04, { messy: 0.5, maxRows: 2 });
+    k.seg('shelf', 0, y + 0.01, -0.04, w - 0.08, D - 0.08, (H - 0.25) / n - 0.04, { messy: 0.5, maxRows: 2, pitch: o.pitch });
   }
   k.box(M.emit('#fff1d6', 1.5), w - 0.1, 0.01, 0.02, 0, H - 0.1, -0.08);
   k.face(glass(), w - 0.04, H - 0.2, 0, H / 2, 0.003, undefined, 0, true);
@@ -329,7 +328,7 @@ export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number } 
 }
 
 /** Floor-to-ceiling wall shelving with a rolling library ladder on a rail. */
-export function tallWall(k: Kit, len: number, H: number, o: { color?: string; shelves?: number; ladder?: boolean; books?: boolean } = {}) {
+export function tallWall(k: Kit, len: number, H: number, o: { color?: string; shelves?: number; ladder?: boolean; books?: boolean; pitch?: number } = {}) {
   const wood = mat(o.color ?? '#6a4a2a', { rough: 0.6 });
   const D = 0.42, n = o.shelves ?? 7;
   k.box(wood, len, H, 0.02, 0, 0, -D + 0.01);
@@ -344,7 +343,7 @@ export function tallWall(k: Kit, len: number, H: number, o: { color?: string; sh
     } else
       for (let i = 0; i < bays; i++) {
         const x = -len / 2 + (len * (i + 0.5)) / bays;
-        k.seg('shelf', x, y, -0.03, len / bays - 0.06, D - 0.06, (H - 0.2) / n - 0.06, { messy: 0.5, maxRows: 2 });
+        k.seg('shelf', x, y, -0.03, len / bays - 0.06, D - 0.06, (H - 0.2) / n - 0.06, { messy: 0.5, maxRows: 2, pitch: o.pitch });
       }
   }
   k.box(wood, len, 0.05, D, 0, H - 0.05, -D / 2);
@@ -406,7 +405,7 @@ export function guitarWall(k: Kit, len: number, o: { color?: string; want?: RegE
       const x = -len / 2 + (len * (i + 0.5 + row * 0.5)) / n;
       k.box(M.chrome(), 0.02, 0.02, 0.12, x, row ? 2.55 : 1.55, 0.07);
     }
-    k.seg('hang', 0, row ? 1.62 : 0.5, 0.02, len - 0.1, 0.25, 1.05, { want, big: true, messy: 0.1 });
+    k.seg('hang', 0, row ? 1.62 : 0.5, 0.02, len - 0.1, 0.25, 1.05, { want, big: true, messy: 0.1, pitch: 0.46 });
   }
 }
 
@@ -444,7 +443,7 @@ export function plinth(k: Kit, w: number, d: number, h: number, o: { color?: str
 }
 
 export function rug(k: Kit, w: number, d: number, seed: number) {
-  const m = new THREE.MeshStandardMaterial({ map: rugTex(seed), roughness: 1 });
+  const m = new THREE.MeshStandardMaterial({ map: rugTex(seed % 8), roughness: 1 });
   const q = k.face(m, w, d, 0, 0.006, 0);
   q.rotation.x = -Math.PI / 2;
 }

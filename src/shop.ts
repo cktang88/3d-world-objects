@@ -13,6 +13,7 @@ import { dropTile, tinTile, textTex } from './shopkit/tex';
 import { LAYOUTS, type Style } from './shopkit/layouts';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
 import { DRINK } from './shopkit/fixtures';
+import { searchLibrary, loadLibraryModel, type LibraryEntry } from './libraries';
 
 /**
  * A shop interior, laid out per kind of shop after real NYC stores (docs/research/shops.md):
@@ -28,8 +29,14 @@ interface Slot {
   s: number;
 }
 interface Loaded {
-  e: RemoteEntry;
-  m: RemoteModel;
+  /** a sand3d object (inspectable, may have an Objaverse original) */
+  e?: RemoteEntry;
+  /** or a photo-scanned retail product from Google Scanned Objects */
+  lib?: LibraryEntry;
+  title: string;
+  obj: THREE.Object3D;
+  size: THREE.Vector3;
+  tris: number;
   /** scale to real size */
   k: number;
   /** real dimensions */
@@ -38,6 +45,19 @@ interface Loaded {
 }
 
 /** product triangle budget per shop (the lab lowers it for software rendering) */
+/** Google Scanned Objects categories each kind of shop stocks */
+const GSO_CATS: Record<string, string[]> = {
+  deli: ['food and drink', 'bottles and cups'],
+  pharmacy: ['health and beauty', 'household', 'baby gear'],
+  electronics: ['electronics', 'media'],
+  toys: ['toy', 'board game'],
+  kitchen: ['kitchen', 'bottles and cups'],
+  sports: ['shoe', 'bag'],
+  stationery: ['media', 'board game'],
+  music: ['media'],
+  hardware: ['household'],
+};
+
 export const SHOP_BUDGET = { tris: 2_500_000 };
 
 export class ShopLevel implements Level {
@@ -179,6 +199,8 @@ export class ShopLevel implements Level {
     // products rebuilt with UV maps first: they take real textures best
     stock.sort((a, b) => Number(isRebuilt(b.id)) - Number(isRebuilt(a.id)));
     const chunks = this.chunk(segs, r);
+    // photo-scanned real products (Google Scanned Objects, CC BY) for the kinds of shop that sell them
+    const scanned = this.scanned(type, seed);
     const nWant = Math.max(10, Math.min(44, Math.round(chunks.length / 2.2)));
     const picks = stock.slice(0, Math.min(stock.length, nWant));
     // load them all (each finishes in its own time), then lay the shop out at once
@@ -194,8 +216,10 @@ export class ShopLevel implements Level {
       this.models.push(m);
       const e = picks[i];
       const k = realScale(e.title, e.entry, e.family, Math.max(m.size.x, m.size.y, m.size.z), e.ds);
-      return [{ e, m, k, dim: m.size.clone().multiplyScalar(k), chunks: 0 }];
+      return [{ e, title: `${e.title} ${e.entry}`, obj: m.object, size: m.size, tris: m.tris, k, dim: m.size.clone().multiplyScalar(k), chunks: 0 }];
     });
+    if (!this.alive) return;
+    loaded.push(...(await scanned));
     if (!this.alive) return;
     const kinds = (SHOP_KINDS[type] ?? []).map((n) => KINDS[n]);
     const byProduct = this.assign(chunks, loaded, r, kinds.length > 0);
@@ -290,6 +314,28 @@ export class ShopLevel implements Level {
     }
   }
 
+  /** a handful of photo-scanned retail products for this kind of shop (cheap LOD, real size) */
+  private async scanned(type: string, seed: number): Promise<Loaded[]> {
+    const cats = GSO_CATS[type];
+    if (!cats) return [];
+    try {
+      const hits = await searchLibrary({ source: 'gso', category: cats, maxSize: 0.6, limit: 10, seed: hashN(seed, 77) });
+      const objs = await Promise.all(hits.map((h) => loadLibraryModel(h, { quality: 'low', shadows: false }).catch(() => null)));
+      return objs.flatMap((o, i): Loaded[] => {
+        if (!o) return [];
+        let tris = 0;
+        o.traverse((x) => {
+          const m = x as THREE.Mesh;
+          if (m.isMesh) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+        });
+        const size = (o.userData.size as THREE.Vector3).clone();
+        return [{ lib: hits[i], title: `${hits[i].title} ${hits[i].category} ${hits[i].tags.join(' ')}`, obj: o, size, tris, k: 1, dim: size.clone(), chunks: 0 }];
+      });
+    } catch {
+      return [];
+    }
+  }
+
   /** split long shelf / hook runs into product blocks */
   private chunk(segs: Seg[], r: Rng): Seg[] {
     const out: Seg[] = [];
@@ -340,7 +386,7 @@ export class ShopLevel implements Level {
           const fill = (p.dim.y * Math.min(1, f)) / s.h;
           score += Math.min(0.8, fill);
         }
-        if (s.want && s.want.test(`${p.e.title} ${p.e.entry}`)) score += 2.5;
+        if (s.want && s.want.test(p.title)) score += 2.5;
         if (p === prev && r.chance(0.35)) score += 1.2;
         score -= p.chunks * 0.12;
         score += r.next() * 0.6;
@@ -365,8 +411,8 @@ export class ShopLevel implements Level {
     const boxes: THREE.Box3[] = [];
     const cords: THREE.Vector3[][] = [];
     const rejected: Seg[] = [];
-    const sz = p.m.size;
-    const tri = Math.max(1, p.m.tris);
+    const sz = p.size;
+    const tri = Math.max(1, p.tris);
     const cap = Math.min(450_000, this.triBudget);
     for (const s of segs) {
       const cordsBefore = cords.length;
@@ -380,9 +426,9 @@ export class ShopLevel implements Level {
       const put = (pos: THREE.Vector3, rot: number) => slots.push({ p: pos, rot, s: sc });
       if (s.mode === 'shelf' || s.mode === 'stack') {
         const gap = 0.008 + messy * 0.01;
-        const cols = Math.max(1, Math.floor((s.len + gap) / (w + gap)));
+        const cols = Math.max(1, Math.floor((s.len + gap) / Math.max(w + gap, s.pitch ?? 0)));
         const step = s.len / cols;
-        const rows = Math.max(1, Math.min(Math.min(s.maxRows ?? 2, 3), Math.floor(s.depth / (d + 0.008))));
+        const rows = Math.max(1, Math.min(s.pitch ? 1 : Math.min(s.maxRows ?? 2, 3), Math.floor(s.depth / (d + 0.008))));
         const layers = s.mode === 'stack' ? Math.max(1, Math.min(5, Math.floor(s.h / h))) : h < s.h * 0.4 && h < 0.16 ? Math.min(3, Math.floor(s.h / (h + 0.004))) : 1;
         for (let i = 0; i < cols; i++)
           for (let j = 0; j < rows; j++)
@@ -397,9 +443,9 @@ export class ShopLevel implements Level {
               put(pos, s.rot + r.range(-1, 1) * (0.02 + messy * 0.18));
             }
       } else if (s.mode === 'hang') {
-        const cols = Math.max(1, Math.floor((s.len + 0.04) / (w + 0.05)));
+        const cols = Math.max(1, Math.floor((s.len + 0.04) / Math.max(w + 0.05, s.pitch ?? 0)));
         const rowsY = Math.max(1, Math.min(4, Math.floor((s.h + 0.06) / (h + 0.08))));
-        const deep = d < 0.06 ? 3 : d < 0.12 ? 2 : 1;
+        const deep = s.pitch ? 1 : d < 0.06 ? 3 : d < 0.12 ? 2 : 1;
         const stepX = s.len / cols, stepY = s.h / rowsY;
         for (let i = 0; i < cols; i++)
           for (let j = 0; j < rowsY; j++)
@@ -412,7 +458,7 @@ export class ShopLevel implements Level {
             }
       } else if (s.mode === 'pile') {
         const area = s.len * s.depth;
-        const count = Math.max(1, Math.min(36, Math.round((area / Math.max(w * d, 1e-4)) * 0.75)));
+        const count = Math.max(1, Math.min(36, Math.round((area / Math.max(w * d, s.pitch ? s.pitch * s.pitch : 0, 1e-4)) * 0.75)));
         const layers = h * 2.2 < s.h ? 2 : 1;
         for (let c = 0; c < count; c++)
           for (let l = 0; l < layers; l++) {
@@ -453,7 +499,7 @@ export class ShopLevel implements Level {
     this.stats.products++;
     this.stats.slots += use.length;
     this.stats.tris += tri * use.length;
-    const sand = this.instance(p.m.object, use);
+    const sand = this.instance(p.obj, use);
     for (const [a, b] of cords) {
       const len = a.y - b.y;
       const cm = new THREE.Mesh(new THREE.BoxGeometry(0.006, len, 0.006), M.black());
@@ -461,9 +507,15 @@ export class ShopLevel implements Level {
       cm.userData.owned = true;
       this.group.add(cm);
     }
-    for (const b of boxes) this.portalFor(p.e, b);
+    const e = p.e;
+    if (!e) {
+      // scanned product: no program to inspect, but its credit shows when you look at it
+      for (const b of boxes) this.ports.push({ box: b, label: p.lib!.title, sub: `Google Scanned Objects · ${p.lib!.licence}`, target: 'inspect' });
+      return rejected;
+    }
+    for (const b of boxes) this.portalFor(e, b);
     // then the original textured model, if this product has one and the budget allows
-    loadOriginal(p.e.id, p.e.og, p.m.size, { prio: 50 + prio, texMax: 512 }).then((orig) => {
+    loadOriginal(e.id, e.og, p.size, { prio: 50 + prio, texMax: 512 }).then((orig) => {
       if (!orig || !this.alive) return;
       // originals made of many separate meshes would multiply draw calls across every facing
       let meshes = 0, tris = 0;

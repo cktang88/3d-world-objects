@@ -473,3 +473,82 @@ export function layoutTex(): THREE.Texture {
     return tex(c, false);
   });
 }
+
+/** Oriental rug: borders of small motifs, a field of repeating guls, a central medallion, fringe. */
+export function rugTex(seed: number): THREE.Texture {
+  return cached(`rug:${seed}`, () => {
+    const W = 512, Hh = 384;
+    const [c, g] = canvas(W, Hh);
+    const rng = new Rng(seed * 31 + 7);
+    const pal = rng.pick([
+      ['#7a1e1e', '#1e2a4a', '#d8c08a', '#2a4a3a'],
+      ['#1e2a4a', '#8a2a1e', '#e0cfa0', '#5a3a1e'],
+      ['#5a1e2e', '#c8a060', '#1e3a3a', '#e8dcc0'],
+      ['#3a4a5a', '#b04a2a', '#e8d8b0', '#1e1e1e'],
+    ]);
+    const [field, border, light, accent] = pal;
+    g.fillStyle = border;
+    g.fillRect(0, 0, W, Hh);
+    g.fillStyle = '#efe6d0';
+    for (let x = 0; x < W; x += 4) {
+      g.fillRect(x, 0, 2, 10);
+      g.fillRect(x, Hh - 10, 2, 10);
+    }
+    const band = (inset: number, col: string, wdt: number) => {
+      g.strokeStyle = col;
+      g.lineWidth = wdt;
+      g.strokeRect(inset, inset + 10, W - inset * 2, Hh - inset * 2 - 20);
+    };
+    band(14, light, 4);
+    g.fillStyle = light;
+    const dot = (x: number, y: number) => {
+      g.beginPath();
+      g.arc(x, y, 5, 0, Math.PI * 2);
+      g.fill();
+    };
+    for (let x = 30; x < W - 20; x += 22) {
+      dot(x, 34);
+      dot(x, Hh - 34);
+    }
+    for (let y = 40; y < Hh - 30; y += 22) {
+      dot(24, y);
+      dot(W - 24, y);
+    }
+    band(44, accent, 6);
+    g.fillStyle = field;
+    g.fillRect(50, 60, W - 100, Hh - 120);
+    for (let x = 90; x < W - 60; x += 70)
+      for (let y = 100; y < Hh - 80; y += 60) {
+        g.save();
+        g.translate(x, y);
+        g.rotate(Math.PI / 4);
+        g.fillStyle = accent;
+        g.fillRect(-14, -14, 28, 28);
+        g.fillStyle = light;
+        g.fillRect(-7, -7, 14, 14);
+        g.restore();
+      }
+    g.save();
+    g.translate(W / 2, Hh / 2);
+    g.fillStyle = border;
+    g.beginPath();
+    g.ellipse(0, 0, 110, 70, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = light;
+    g.beginPath();
+    g.ellipse(0, 0, 80, 48, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = accent;
+    for (let i = 0; i < 8; i++) {
+      g.rotate(Math.PI / 4);
+      g.fillRect(-6, 20, 12, 28);
+    }
+    g.fillStyle = field;
+    g.beginPath();
+    g.arc(0, 0, 20, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    speckle(g, W, Hh, 26, rng);
+    return tex(c, false);
+  });
+}

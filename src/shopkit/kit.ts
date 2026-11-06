@@ -28,8 +28,8 @@ export interface Seg {
   /** 0..1: how untidy */
   messy?: number;
   maxRows?: number;
-  /** price tags under each facing */
-  tags?: boolean;
+  /** one of each, at least this far apart (antiques, guitars on hooks) */
+  pitch?: number;
 }
 
 /** a flat quad whose UVs repeat a texture every `tile` metres */

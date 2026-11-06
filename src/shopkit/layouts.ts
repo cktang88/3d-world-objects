@@ -563,7 +563,7 @@ const antiques: Layout = {
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     for (const s of [-1, 1]) {
       k.at(s * (xi - 0.02), -0.8, -s * Math.PI / 2);
-      F.tallWall(k, D - 5.5, 2.5, { shelves: 6, color: '#3a2414' });
+      F.tallWall(k, D - 5.5, 2.5, { shelves: 6, color: '#3a2414', pitch: 0.32 });
     }
     // crowded middle: curio cabinets, old tables heaped with things, rugs
     k.at(0, 0);
@@ -572,8 +572,8 @@ const antiques: Layout = {
     spots.forEach(([x, z], i) => {
       if (z > zf - 3.2) return;
       k.at(x, z, r.range(-0.15, 0.15) + (i % 3 === 2 ? Math.PI / 2 : 0));
-      if (i % 3 === 2) F.curio(k, 1.0);
-      else F.table(k, r.range(1.0, 1.6), r.range(0.7, 0.9), r.range(0.72, 0.8), { color: r.pick(['#4a2e1a', '#5a3a22', '#3a2414']), legs: '#3a2414', messy: 0.7, lower: r.chance(0.5) });
+      if (i % 3 === 2) F.curio(k, 1.0, { pitch: 0.25 });
+      else F.table(k, r.range(1.0, 1.6), r.range(0.7, 0.9), r.range(0.72, 0.8), { color: r.pick(['#4a2e1a', '#5a3a22', '#3a2414']), legs: '#3a2414', messy: 0.7, lower: r.chance(0.5), pitch: 0.3 });
     });
     // back: counter with an old brass register
     k.at(0.6, zb + 1.2);
