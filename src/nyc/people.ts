@@ -1031,7 +1031,14 @@ export class Pedestrians {
       const A = this.assets.body;
       this.farCrowd = new FarCrowd(this.group, { male: A.male, female: A.female }, BODY, COUNT);
     }
-    const far = this.farCrowd;
+    if (this.farCrowd && !this.farCrowd.ready) {
+      // bake the VAT a few ms per frame; until it is ready everyone stays a skinned person
+      const t0 = performance.now();
+      this.farCrowd.pump(4);
+      this.bakeMs += performance.now() - t0;
+      (globalThis as unknown as { __peopleBakeMs: number }).__peopleBakeMs = Math.round(this.bakeMs);
+    }
+    const far = this.farCrowd?.ready ? this.farCrowd : null;
     far?.begin();
     for (const pd of this.peds) {
       // LOD: animate near people every frame, far ones every 2nd / 4th frame, off-screen ones not
@@ -1100,6 +1107,16 @@ export class Pedestrians {
   }
   private order: Ped[] = [];
   private farCrowd: FarCrowd | null = null;
+  private bakeMs = 0;
+  /** finish any pending far-crowd bake now (lab / loading screens) */
+  warmUp() {
+    if (this.farCrowd && !this.farCrowd.ready) {
+      const t0 = performance.now();
+      this.farCrowd.pump(1e9);
+      this.bakeMs += performance.now() - t0;
+      (globalThis as unknown as { __peopleBakeMs: number }).__peopleBakeMs = Math.round(this.bakeMs);
+    }
+  }
   private frustum = new THREE.Frustum();
   private probeCam: THREE.Camera | null = null;
   private probe: THREE.Mesh | null = null;

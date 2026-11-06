@@ -63,6 +63,8 @@ const scene: LabScene = {
       await new Promise((r) => setTimeout(r, 50));
       crowd.update(0.016, origin, labTime, labCols);
       for (let i = 0; i < Math.max(12, Number(params.get('t') ?? 0) * 10); i++) crowd.update(0.1, origin, (labTime += 0.1), labCols);
+      crowd.warmUp();
+      crowd.update(0.016, origin, (labTime += 0.016), labCols);
       // perf readout for shot.mjs --eval "__peopleStats()": meshes and triangles of the crowd
       (window as unknown as { __peopleStats: () => string }).__peopleStats = () => {
         let meshes = 0, tris = 0, shadow = 0, farN = 0;
@@ -78,7 +80,7 @@ const scene: LabScene = {
           if (m.castShadow) shadow += t;
         });
         const vis = crowd!.peds.filter((d) => d.p.root.visible).length;
-        return `people=${crowd!.peds.length} visible=${vis} far=${farN} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)} skeletonUpdates/frame=${skelPerFrame.toFixed(1)}`;
+        return `people=${crowd!.peds.length} visible=${vis} far=${farN} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)} skeletonUpdates/frame=${skelPerFrame.toFixed(1)} vatBakeMs=${(globalThis as unknown as { __peopleBakeMs?: number }).__peopleBakeMs}`;
       };
       return;
     }

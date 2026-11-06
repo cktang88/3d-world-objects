@@ -68,15 +68,33 @@ export class FarCrowd {
   meshes: THREE.InstancedMesh[] = [];
   private attrs: { anim: THREE.InstancedBufferAttribute; top: THREE.InstancedBufferAttribute; bottom: THREE.InstancedBufferAttribute; shoe: THREE.InstancedBufferAttribute; skin: THREE.InstancedBufferAttribute; hair: THREE.InstancedBufferAttribute; style: THREE.InstancedBufferAttribute; coat: THREE.InstancedBufferAttribute }[] = [];
   private counts = [0, 0];
+  /** true once both genders are baked and added */
+  ready = false;
+  private job: Generator<void, void, void>;
   constructor(group: THREE.Group, src: Record<'male' | 'female', FarSource>, body: Record<'male' | 'female', FarBody>, capacity: number) {
-    (['male', 'female'] as const).forEach((g, gi) => {
-      const mesh = this.build(src[g], body[g], g === 'female', capacity);
-      mesh.name = `far-crowd-${g}`;
-      group.add(mesh);
-      this.meshes[gi] = mesh;
-    });
+    const self = this;
+    this.job = (function* () {
+      for (const [gi, g] of (['male', 'female'] as const).entries()) {
+        const it = self.build(src[g], body[g], g === 'female', capacity);
+        let r = it.next();
+        while (!r.done) {
+          yield;
+          r = it.next();
+        }
+        const mesh = r.value;
+        mesh.name = `far-crowd-${g}`;
+        group.add(mesh);
+        self.meshes[gi] = mesh;
+      }
+      self.ready = true;
+    })();
   }
-  private build(src: FarSource, b: FarBody, female: boolean, capacity: number) {
+  /** bake for up to `ms` milliseconds this frame (the bake is spread over frames to avoid a hitch) */
+  pump(ms = 4) {
+    const t0 = performance.now();
+    while (!this.ready && performance.now() - t0 < ms) this.job.next();
+  }
+  private *build(src: FarSource, b: FarBody, female: boolean, capacity: number): Generator<void, THREE.InstancedMesh, void> {
     const model = skeletonClone(src.scene);
     let lod: THREE.SkinnedMesh | null = null;
     model.traverse((o) => {
@@ -133,6 +151,7 @@ export class FarCrowd {
       act.reset().play();
       clipRows.push(row);
       for (let f = 0; f < c.frames; f++, row++) {
+        yield;
         mixer.setTime((f / c.frames) * clip.duration);
         model.updateMatrixWorld(true);
         sk.skeleton.update();
