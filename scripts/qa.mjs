@@ -43,6 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
+  zfight: ['zfight'], flicker: ['zfight'],
   meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],
   museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
@@ -54,6 +55,7 @@ const SRC_MAP = [
   [/^src\/nyc\/ground/, ['ground']],
   [/^src\/rooms\/vertical/, ['vertical']],
   [/^src\/nyc\/vehicle/, ['vehicles']],
+  [/^src\/zfix\.ts$/, ['zfight']],
   [/^src\/(meshlod|meshlod-core)\.ts$|^src\/vendor\/meshopt|^scripts\/(build_vehicles\.mjs|lib\/simplify-doc\.mjs)$|^public\/assets\/vehicles\//, ['meshlod', 'vehicles']],
   [/^src\/(minimap|nyc\/minimap-nyc)\.ts$/, ['minimap']],
   [/^src\/nyc\/district/, ['districts']],
