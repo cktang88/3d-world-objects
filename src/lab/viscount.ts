@@ -97,6 +97,7 @@ const scene: LabScene = {
     const want = params.get('poses')?.split(',');
     const out: Record<string, VisCount & { buildMs: number; vis: string }> = {};
     const level = new NycLevel({ kind: 'nyc', seed: Number(params.get('seed') ?? 20261105), name: 'viscount' });
+    level.vis.enabled = params.get('vis') !== '0'; // &vis=0: counts without chunk visibility
     const cam = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 1000);
     const steps = Number(params.get('steps') ?? 60);
     for (const pose of VIS_POSES) {

@@ -81,6 +81,7 @@ export class NycLevel implements Level {
 
   update(dt: number, p: THREE.Vector3, time: number) {
     const cx = Math.round(p.x / AX), cz = Math.round(p.z / SZ);
+    this.lastCenter = [cx, cz];
     // [vis] time-sliced streaming: the nearest missing chunk is built a few ms per frame (a
     // generator yielding between buildings), and at most one far chunk is unloaded per frame
     if (!this.pending) {
@@ -168,7 +169,13 @@ export class NycLevel implements Level {
   /** [vis] a chunk being built across frames (see update) */
   private pending: { cx: number; cz: number; it: Generator<void, Chunk> } | null = null;
   /** [vis] true while a chunk is being built across frames */
-  get streaming() { return this.pending !== null; }
+  get streaming() {
+    if (this.pending) return true;
+    const [cx, cz] = this.lastCenter;
+    for (let dz = -RZ; dz <= RZ; dz++) for (let dx = -RX; dx <= RX; dx++) if (!this.chunks.has(`${cx + dx},${cz + dz}`)) return true;
+    return false;
+  }
+  private lastCenter: [number, number] = [0, 0];
   /** [vis] per-frame budget for chunk building (ms) */
   static BUILD_BUDGET_MS = 4;
 

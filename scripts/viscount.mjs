@@ -40,6 +40,7 @@ const killer = setTimeout(() => {
 const q = new URLSearchParams({ lab: 'viscount', quality: 'low', post: '0', r: args.r ?? '1' });
 if (args.poses) q.set('poses', args.poses);
 if (args.seed) q.set('seed', args.seed);
+if (args.vis) q.set('vis', args.vis); // --vis 0: without chunk visibility (before/after)
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 try {
   const page = await browser.newPage({ viewport: { width: 160, height: 90 } });
