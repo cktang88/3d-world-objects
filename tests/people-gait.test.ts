@@ -117,4 +117,10 @@ test('a pushed stroller stands on the ground (its wheels were 8 cm in the air)',
   g.computeBoundingBox();
   // held at the handlebar 1.0 m up (people.ts), the wheels' bottom is at y = 1.0 + min.y
   between(1.0 + g.boundingBox!.min.y, -0.01, 0.01, 'stroller wheels above the ground (m)');
+  // a real city stroller: ~0.6 m wide, ~0.95 m long, handle at the top; and cheap
+  const sz = g.boundingBox!.getSize(new THREE.Vector3());
+  between(sz.x, 0.55, 0.68, 'stroller width');
+  between(sz.z, 0.85, 1.1, 'stroller length');
+  const tris = g.getAttribute('position').count / 3;
+  between(tris, 300, 1500, 'stroller triangles');
 });

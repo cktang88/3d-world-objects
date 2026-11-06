@@ -58,26 +58,61 @@ export function coffeeGeo() {
 /** a stroller, handlebar at the origin, pram ahead (+z) */
 export function strollerGeo(fabric: string) {
   return cached(`stroller|${fabric}`, () => {
+    // a city stroller with its bassinet (UPPAbaby Vista / Bugaboo Fox proportions): handlebar ~1.0 m up and
+    // 0.55 m wide; aluminium frame folding at the hinge hubs halfway down; rear wheels Ø 0.30 m on a 0.58 m
+    // track, front swivel wheels Ø 0.20 m; the bassinet 0.80 x 0.40 m with its hood over the baby's head
+    // (the parent's end), a blanket and a basket under the seat. Origin: the handlebar, held 1.0 m up
+    // (people.ts); +z forward, the ground at y = -1.0.
     const parts: THREE.BufferGeometry[] = [];
-    const frame = '#18181a';
-    const tube = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, r = 0.012) => {
-      const a = new THREE.Vector3(x0, y0, z0), b = new THREE.Vector3(x1, y1, z1);
-      const g = new THREE.CylinderGeometry(r, r, a.distanceTo(b), 6);
-      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize())));
-      g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-      parts.push(paint(g, frame));
+    const alu = '#b9bdc2', black = '#141416', foam = '#202022', rubber = '#0d0d0e', hub = '#8c9096';
+    const lining = '#ece6da', skin = '#e2b49a';
+    const tube = (a: THREE.Vector3Tuple, b: THREE.Vector3Tuple, r: number, c: string, seg = 6) => {
+      const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+      const g = new THREE.CylinderGeometry(r, r, A.distanceTo(B), seg, 1, true);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize())));
+      g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2);
+      parts.push(paint(g, c));
     };
-    // the handlebar is the origin, held 1.0 m up (people.ts): the wheels (r 0.085) stand on the ground at -1.0
-    tube(-0.24, 0, 0, 0.24, 0, 0, 0.016); // handlebar
+    const wheel = (x: number, y: number, z: number, R: number, w: number) => {
+      // tyre (a torus) round a hub disc
+      parts.push(paint(xf(new THREE.TorusGeometry(R - w * 0.35, w * 0.45, 4, 10), x, y, z, 0, Math.PI / 2, 0), rubber));
+      parts.push(paint(xf(new THREE.CylinderGeometry(R * 0.62, R * 0.62, w * 0.5, 8, 1, true), x, y, z, 0, 0, Math.PI / 2), hub));
+    };
+    // handlebar: a foam-covered bar with aluminium ends curving down into the frame
+    tube([-0.24, 0, 0], [0.24, 0, 0], 0.019, foam, 8);
     for (const s of [-1, 1]) {
-      tube(s * 0.22, 0, 0, s * 0.22, -0.9, 0.34); // rear legs
-      tube(s * 0.22, -0.48, 0.18, s * 0.2, -0.9, 0.8); // front legs
+      tube([s * 0.24, 0, 0], [s * 0.27, -0.06, 0.03], 0.013, alu);
+      // the rear leg: handlebar to the hinge hub, on to the rear axle
+      tube([s * 0.27, -0.06, 0.03], [s * 0.27, -0.46, 0.2], 0.013, alu);
+      tube([s * 0.27, -0.46, 0.2], [s * 0.27, -0.85, 0.3], 0.013, alu);
+      // the front leg: from the hinge hub down and forward to the swivel fork
+      tube([s * 0.27, -0.46, 0.2], [s * 0.22, -0.8, 0.86], 0.013, alu);
+      tube([s * 0.22, -0.8, 0.86], [s * 0.22, -0.9, 0.9], 0.011, black);
+      // fold joint: a black hub where the legs meet
+      parts.push(paint(xf(new THREE.CylinderGeometry(0.035, 0.035, 0.04, 8), s * 0.27, -0.46, 0.2, 0, 0, Math.PI / 2), black));
+      // bassinet adapters on the frame
+      parts.push(paint(xf(new THREE.BoxGeometry(0.03, 0.06, 0.05), s * 0.25, -0.43, 0.23), black));
+      wheel(s * 0.29, -0.85, 0.3, 0.15, 0.05);
+      wheel(s * 0.22, -0.9, 0.92, 0.1, 0.04);
     }
-    // seat bucket and hood
-    parts.push(paint(xf(new RoundedBoxGeometry(0.4, 0.26, 0.5, 2, 0.06), 0, -0.47, 0.5, -0.15), fabric));
-    parts.push(paint(xf(new THREE.SphereGeometry(0.22, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0, -0.38, 0.32, -0.6, 0, 0, 1, 0.9, 1.2), fabric));
-    for (const [x, z] of [[-0.22, 0.34], [0.22, 0.34], [-0.2, 0.8], [0.2, 0.8]])
-      parts.push(paint(xf(new THREE.CylinderGeometry(0.085, 0.085, 0.035, 14), x, -0.915, z, 0, 0, Math.PI / 2), '#101010'));
+    // rear axle and the basket under the seat (a dark mesh tub on a frame)
+    tube([-0.29, -0.85, 0.3], [0.29, -0.85, 0.3], 0.01, alu);
+    parts.push(paint(xf(new RoundedBoxGeometry(0.42, 0.16, 0.42, 1, 0.04), 0, -0.72, 0.52), '#2a2a2c'));
+    parts.push(paint(xf(new THREE.BoxGeometry(0.36, 0.02, 0.36), 0, -0.63, 0.52), '#1a1a1c'));
+    // the bassinet: a padded fabric tub, its rim, the lining and a blanket with the baby's head showing
+    const zb = 0.52, yb = -0.36;
+    parts.push(paint(xf(new RoundedBoxGeometry(0.42, 0.24, 0.8, 2, 0.09), 0, yb, zb), fabric));
+    parts.push(paint(xf(new THREE.BoxGeometry(0.36, 0.03, 0.72), 0, yb + 0.11, zb), lining));
+    parts.push(paint(xf(new RoundedBoxGeometry(0.32, 0.05, 0.42, 1, 0.02), 0, yb + 0.12, zb + 0.12), '#c9d8e6')); // blanket
+    parts.push(paint(xf(new THREE.SphereGeometry(0.06, 8, 6), 0, yb + 0.15, zb - 0.16), skin));
+    parts.push(paint(xf(new THREE.SphereGeometry(0.063, 8, 3, 0, Math.PI * 2, 0, Math.PI / 2), 0, yb + 0.15, zb - 0.17, -0.5), '#efe8dc')); // a knit cap
+    // the hood: a quarter shell of fabric over the head end, with a dark visor edge
+    parts.push(paint(xf(new THREE.SphereGeometry(0.22, 10, 5, 0, Math.PI, 0, Math.PI / 2), 0, yb + 0.1, zb - 0.22, 0, Math.PI, 0, 0.98, 1.0, 1.15), fabric));
+    tube([-0.2, yb + 0.1, zb - 0.22], [0.2, yb + 0.1, zb - 0.22], 0.01, black);
+    parts.push(paint(xf(new THREE.TorusGeometry(0.215, 0.012, 3, 10, Math.PI), 0, yb + 0.1, zb - 0.22, 0, 0, 0), black));
+    // the carry handle folded down along the side
+    tube([-0.21, yb + 0.12, zb - 0.1], [-0.21, yb + 0.12, zb + 0.25], 0.008, black);
+    tube([0.21, yb + 0.12, zb - 0.1], [0.21, yb + 0.12, zb + 0.25], 0.008, black);
     return mergeGeometries(parts)!;
   });
 }
