@@ -104,7 +104,7 @@ const deli: Layout = {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     // back: deli counter with the slicer and grill behind it, menu board above
-    k.at(0.5, zb + 0.02);
+    k.at(0.5, zb + 0.72);
     F.deliBack(k, W - 2.2);
     k.at(0.5, zb + 0.03);
     F.menu(k, Math.min(4.2, W - 2.4), r.int(0, 99), H - 0.75);
@@ -142,7 +142,7 @@ const deli: Layout = {
     const backZ0 = zf - 4.0, backZ1 = zf - 0.9;
     k.at(xi - 0.02, (gz0 - 0.4 + backZ0 - 0.3) / 2, -Math.PI / 2);
     F.gondola(k, backZ0 - 0.3 - gz0 + 0.4, { double: false, height: 2.1, shelves: 6, strip: '#c62828', messy: 0.4 });
-    k.at(xi - 0.02, (backZ0 + backZ1) / 2, -Math.PI / 2);
+    k.at(xi - 0.42, (backZ0 + backZ1) / 2, -Math.PI / 2);
     F.backBar(k, backZ1 - backZ0);
     // counter: customer side faces the aisle
     const cx = xi - 1.45;
@@ -192,7 +192,7 @@ const pharmacy: Layout = {
     k.at(-xi + 0.4 + (doors * 0.76) / 2, zb + 0.01);
     word(k, 'beverage', '#333333', 0, 0, 0, H - 0.35, 2.2);
     const px = xi - (W * 0.4) / 2 - 0.2;
-    k.at(px, zb + 0.02);
+    k.at(px, zb + 0.44);
     F.tallWall(k, W * 0.4, 2.2, { color: '#e8e8e6', shelves: 6 });
     k.at(px, zb + 1.7);
     F.table(k, W * 0.4, 0.7, 1.05, { color: '#f4f4f2', cloth: '#ffffff', mode: 'shelf' });
@@ -254,7 +254,7 @@ const hardware: Layout = {
     k.at(-xi + 0.01, (lz0 + lz1) / 2, Math.PI / 2);
     F.pegWall(k, lz1 - lz0, 1.05, 2.75, { color: r.pick(['#a87b4f', '#f0ede6']) });
     // right wall: floor-to-ceiling shelving with a rolling ladder
-    k.at(xi - 0.02, -0.5, -Math.PI / 2);
+    k.at(xi - 0.44, -0.5, -Math.PI / 2);
     F.tallWall(k, D - 5, H - 0.4, { shelves: 7, ladder: true });
     // centre: peg-backed gondolas with department headers
     const depts = ['PLUMBING', 'ELECTRICAL', 'PAINT', 'FASTENERS', 'TOOLS', 'HOUSEWARES', 'GARDEN'];
@@ -562,7 +562,7 @@ const antiques: Layout = {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     for (const s of [-1, 1]) {
-      k.at(s * (xi - 0.02), -0.8, -s * Math.PI / 2);
+      k.at(s * (xi - 0.44), -0.8, -s * Math.PI / 2);
       F.tallWall(k, D - 5.5, 2.5, { shelves: 6, color: '#3a2414', pitch: 0.32 });
     }
     // crowded middle: curio cabinets, old tables heaped with things, rugs
@@ -600,7 +600,7 @@ const stationery: Layout = {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     for (const s of [-1, 1]) {
-      k.at(s * (xi - 0.02), -0.6, -s * Math.PI / 2);
+      k.at(s * (xi - 0.44), -0.6, -s * Math.PI / 2);
       F.tallWall(k, D - 4.5, 2.6, { shelves: 7, color: '#5a3a22', books: true });
     }
     for (let j = 0; j < 3; j++) {
@@ -662,7 +662,7 @@ const models: Layout = {
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     for (const s of [-1, 1])
       for (let z = zb + 1.2; z < zf - 3.0; z += 1.25) {
-        k.at(s * (xi - 0.02), z, -s * Math.PI / 2);
+        k.at(s * (xi - 0.47), z, -s * Math.PI / 2);
         F.curio(k, 1.2, { wood: '#2a2a2a', shelves: 5 });
       }
     k.at(0, zb + 4.5);

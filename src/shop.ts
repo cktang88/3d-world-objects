@@ -571,7 +571,14 @@ export class ShopLevel implements Level {
     const sc = new THREE.Vector3();
     const out: THREE.InstancedMesh[] = [];
     for (const mesh of meshes) {
-      const im = new THREE.InstancedMesh(mesh.geometry, mesh.material, slots.length);
+      // instancing has no morph targets: give such meshes a plain copy of their geometry
+      let geo = mesh.geometry;
+      if (Object.keys(geo.morphAttributes ?? {}).length) {
+        geo = geo.clone();
+        geo.morphAttributes = {};
+      }
+      const im = new THREE.InstancedMesh(geo, mesh.material, slots.length);
+      if (geo !== mesh.geometry) im.userData.owned = true;
       slots.forEach((sl, i) => {
         place.compose(sl.p, q.setFromAxisAngle(up, sl.rot), sc.setScalar(sl.s));
         tmp.multiplyMatrices(place, mesh.matrixWorld);

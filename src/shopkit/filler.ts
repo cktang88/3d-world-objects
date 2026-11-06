@@ -237,6 +237,8 @@ function geometry(k: Kind['geo']) {
   return g;
 }
 
+const kindMats = new Map<string, THREE.MeshStandardMaterial>();
+
 /** Collects filler slots for the whole shop, then builds one InstancedMesh per kind. */
 export class Filler {
   private slots = new Map<string, { m: THREE.Matrix4; c: THREE.Color }[]>();
@@ -255,7 +257,11 @@ export class Filler {
     const out: THREE.InstancedMesh[] = [];
     for (const [name, list] of this.slots) {
       const k = KINDS[name];
-      const mat = k.geo === 'pot' || k.geo === 'guitar' ? new THREE.MeshStandardMaterial({ roughness: k.rough ?? 0.9, vertexColors: true }) : labelMat(k.rough ?? 0.55, k.metal ?? 0);
+      let mat = kindMats.get(name);
+      if (!mat) {
+        mat = k.geo === 'pot' || k.geo === 'guitar' ? new THREE.MeshStandardMaterial({ roughness: k.rough ?? 0.9, vertexColors: true }) : labelMat(k.rough ?? 0.55, k.metal ?? 0);
+        kindMats.set(name, mat);
+      }
       const im = new THREE.InstancedMesh(geometry(k.geo), mat, list.length);
       list.forEach((s, i) => {
         im.setMatrixAt(i, s.m);
