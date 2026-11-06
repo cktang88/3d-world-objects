@@ -58,9 +58,9 @@ const KINDS: Record<string, KindSpec> = {
   walnut: { tex: 'grain', tile: 0.4, strength: 0.6, bump: 0.9, rough: 0.2, dark: 0.45, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
   pine: { tex: 'grain', tile: 0.5, strength: 0.45, bump: 0.7, rough: 0.2, dark: 0.62, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
   birch: { tex: 'grain', tile: 0.5, strength: 0.3, bump: 0.5, rough: 0.15, dark: 0.75, diff: 0.9, arm: 0.6, nor: 0.7, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
-  steel: { tex: 'brushed', tile: 0.25, strength: 0.14, bump: 0.25, rough: 0.3, dark: 0.75, diff: 0.3, arm: 1, nor: 0.4, detail: 0, r: [0.18, 0.55], metal: STAINLESS, tint: 0.35, aniso: 0.35, wear: 0.4 },
-  brushed_steel: { tex: 'brushed', tile: 0.2, strength: 0.18, bump: 0.3, rough: 0.35, dark: 0.7, diff: 0.3, arm: 1, nor: 0.5, detail: 0, r: [0.22, 0.5], metal: STAINLESS, tint: 0.3, aniso: 0.8, wear: 0.3 },
-  aluminium: { tex: 'brushed', tile: 0.2, strength: 0.12, bump: 0.2, rough: 0.3, dark: 0.8, diff: 0.25, arm: 1, nor: 0.4, detail: 0, r: [0.2, 0.5], metal: [0.916, 0.923, 0.924], tint: 0.35, aniso: 0.45, wear: 0.3 },
+  steel: { tex: 'brushed', tile: 0.25, strength: 0.14, bump: 0.25, rough: 0.3, dark: 0.75, diff: 0.12, arm: 1, nor: 0.4, detail: 0, r: [0.18, 0.55], metal: STAINLESS, tint: 0.35, aniso: 0.35, wear: 0.4 },
+  brushed_steel: { tex: 'brushed', tile: 0.2, strength: 0.18, bump: 0.3, rough: 0.35, dark: 0.7, diff: 0.15, arm: 1, nor: 0.5, detail: 0, r: [0.22, 0.5], metal: STAINLESS, tint: 0.3, aniso: 0.8, wear: 0.3 },
+  aluminium: { tex: 'brushed', tile: 0.2, strength: 0.12, bump: 0.2, rough: 0.3, dark: 0.8, diff: 0.08, arm: 1, nor: 0.4, detail: 0, r: [0.2, 0.5], metal: [0.916, 0.923, 0.924], tint: 0.35, aniso: 0.45, wear: 0.3 },
   chrome: { tex: 'smudge', tile: 0.6, strength: 0.04, bump: 0.05, rough: 0.12, dark: 0.85, diff: 0.1, arm: 1, nor: 0.1, detail: 0, r: [0.03, 0.14], metal: [0.654, 0.685, 0.701], tint: 0.15 },
   brass: { tex: 'smudge', tile: 0.4, strength: 0.18, bump: 0.1, rough: 0.25, dark: 0.7, diff: 0.35, arm: 1, nor: 0.2, detail: 0, r: [0.12, 0.45], metal: [0.91, 0.778, 0.423], tint: 0.3, wear: 0.4 },
   copper: { tex: 'smudge', tile: 0.4, strength: 0.22, bump: 0.1, rough: 0.25, dark: 0.65, diff: 0.4, arm: 1, nor: 0.2, detail: 0, r: [0.12, 0.45], metal: [0.932, 0.623, 0.522], tint: 0.3, wear: 0.4 },
@@ -359,7 +359,9 @@ diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.40, 0.37), triDust * 0.6);
 `;
 
 const ROUGH = `
-float triR = roughnessFactor * mix(1.0 + (triH - 0.5) * uTriRough * 2.0, triArm.g / max(uTriRoughMean, 0.05), uArmMix);
+// sand3d's roughness plus the texture's deviation from its own mean (additive: a ratio would
+// blow up the variation of very smooth sets like polished aluminium)
+float triR = roughnessFactor + mix((triH - 0.5) * uTriRough * roughnessFactor * 2.0, triArm.g - uTriRoughMean, uArmMix);
 #ifdef TRI_WEAR_PAINT
   triR = mix(triR, 0.35, triWear);
 #elif defined(TRI_WEAR_METAL)
