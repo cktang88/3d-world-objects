@@ -245,6 +245,41 @@ function proportionsMatch(o: THREE.Object3D, raw: THREE.Vector3) {
   return a.every((v, i) => Math.abs(v / ga - r[i] / ra) < 0.35 * Math.max(r[i] / ra, 0.25));
 }
 
+/** run `f` when the browser is idle (one queue, one job per idle period: no frame pays for more than one) */
+const idleQueue: (() => void)[] = [];
+let idleArmed = false;
+function idle(f: () => void) {
+  idleQueue.push(f);
+  if (idleArmed) return;
+  idleArmed = true;
+  const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+  const next = () => {
+    const job = idleQueue.shift();
+    if (job) job();
+    if (idleQueue.length) schedule();
+    else idleArmed = false;
+  };
+  const schedule = () => (ric ? ric(next, { timeout: 500 }) : setTimeout(next, 16));
+  schedule();
+}
+
+/** merged, flicker-fixed exhibit parts by exhibit id, for the next time it is shown (LRU) */
+const fixedParts = new Map<string, THREE.Mesh[]>();
+function rememberParts(id: string, root: THREE.Object3D) {
+  const ms: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) ms.push(o as THREE.Mesh);
+  });
+  // shared from now on: disposing this exhibit must not free what the cache keeps
+  for (const m of ms) m.userData.shared = true;
+  fixedParts.set(id, ms);
+  while (fixedParts.size > 64) {
+    const k = fixedParts.keys().next().value!;
+    for (const m of fixedParts.get(k)!) m.geometry.dispose();
+    fixedParts.delete(k);
+  }
+}
+
 export function easeOut(t: number) {
   return 1 - (1 - t) ** 3;
 }
@@ -292,6 +327,9 @@ export abstract class MuseumBase implements Level {
   }
 
   private tick = 0;
+  private roomFixQueued = false;
+  /** run the flicker fix on the room's merged geometry at runtime: off, the shell is authored without shared faces (qa scans it); on only to try a new design */
+  protected roomFix = false;
   /** how exhibits were turned to face the visitor: kept, flipped (both confident), or guessed */
   fronts = { keep: 0, flip: 0, guess: 0 };
   private fills = new Map<THREE.Mesh, { own: THREE.Material; fill: THREE.Material }>();
@@ -430,7 +468,14 @@ export abstract class MuseumBase implements Level {
     const fresh = this.batch.flush(this.group, shadows);
     // the room's own geometry: faces of different merged meshes lying flush in one plane (a trim on a
     // platform top, a case base under its frame) are lifted a few millimetres apart (zfight.ts)
-    if (fresh.length) fixZFight(this.group, (m) => !!m.userData.owned && !m.userData.tex);
+    // once per room, in idle time, however many flushes ask for it
+    if (fresh.length && this.roomFix && !this.roomFixQueued) {
+      this.roomFixQueued = true;
+      idle(() => {
+        this.roomFixQueued = false;
+        if (this.alive) fixZFight(this.group, (m) => !!m.userData.owned && !m.userData.tex, undefined, 'room');
+      });
+    }
   }
 
   // ---- light
@@ -617,8 +662,25 @@ export abstract class MuseumBase implements Level {
         // stop moving; a few joints (a lid, a door) keep their moving parts separate.
         if (!m.library) {
           if (mod.animator && mod.animator.joints.length > 6) mod.animator = null;
-          mergeStatic(mod.object, new Set(mod.animator?.joints.map((j) => j.node) ?? []));
-          fixZFight(mod.object, undefined, 0.002 / Math.max(1e-3, m.k));
+          const cached = !mod.animator && fixedParts.get(e.id);
+          if (cached) {
+            // seen before: the merged, flicker-fixed parts are reused as they are
+            mod.object.clear();
+            for (const c of cached) {
+              const mm = new THREE.Mesh(c.geometry, c.material);
+              mm.userData.shared = true;
+              mod.object.add(mm);
+            }
+          } else {
+            mergeStatic(mod.object, new Set(mod.animator?.joints.map((j) => j.node) ?? []));
+            // the flicker fix in idle time, one exhibit at a time; kept for the next visit
+            const obj = mod.object, lift = 0.002 / Math.max(1e-3, m.k), anim = !!mod.animator;
+            idle(() => {
+              if (!this.alive) return;
+              fixZFight(obj, undefined, lift, 'exhibit');
+              if (!anim) rememberParts(e.id, obj);
+            });
+          }
         }
         holder.add(mod.object);
         trackForDetail(holder, mod.object, e.id, e.og, mod.size);

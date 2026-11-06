@@ -132,9 +132,9 @@ export function buildShell(lv: MuseumBase, p: Plan, st: Style, opts: { entry?: n
     else run(0, 0.16, 0.025, dark ? mat(shade(p.wallColor, 0.6)) : trim);
     if (st.arch === 'period') {
       run(0.95, 0.06, 0.03, trim);
-      run(Hw - 0.35, 0.35, 0.12, trim);
+      run(Hw - 0.35, 0.34, 0.12, trim); // a centimetre short of the ceiling (no shared faces)
     }
-    if (st.arch === 'study' || st.arch === 'machine') run(Hw - 0.25, 0.25, 0.08, trim);
+    if (st.arch === 'study' || st.arch === 'machine') run(Hw - 0.25, 0.24, 0.08, trim);
   }
 
   // ceilings
@@ -152,9 +152,10 @@ function structure(lv: MuseumBase, p: Plan, st: Style) {
   const cols = (lv as unknown as { cols: ReturnType<typeof rect>[] }).cols;
   for (const pl of p.pilasters) {
     const f = pl.wall === 'W' ? new Frame(-W / 2, pl.at, Math.PI / 2) : pl.wall === 'E' ? new Frame(W / 2, pl.at, -Math.PI / 2) : new Frame(pl.at, -D, 0);
-    lv.bx(m, 0.6, Hw, 0.18, 0, 0, 0.09, f);
-    lv.bx(m, 0.78, 0.28, 0.3, 0, 0, 0.15, f);
-    lv.bx(m, 0.8, 0.32, 0.3, 0, Hw - 0.32, 0.15, f);
+    // backs a few millimetres off the wall and off each other, the shaft short of the capital's top: no shared faces
+    lv.bx(m, 0.6, Hw - 0.01, 0.18, 0, 0, 0.094, f);
+    lv.bx(m, 0.78, 0.28, 0.3, 0, 0, 0.157, f);
+    lv.bx(m, 0.8, 0.32, 0.3, 0, Hw - 0.32, 0.157, f);
     cols.push(f.rect(0, 0.15, 0.8, 0.3));
   }
   for (const c of p.columns) {
@@ -217,12 +218,14 @@ function doorFrame(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: D
   const cc = c + (out * T) / 2;
   const depth = T + 0.08;
   for (const s of [-1, 1]) {
-    const o = d.at + s * (d.w / 2 + fw / 2);
-    if (axis === 'z') lv.bx(trim, fw, d.h, depth, o, 0, cc);
-    else lv.bx(trim, depth, d.h, fw, cc, 0, o);
+    // the jamb's inner face 5 mm proud of the wall's reveal (not flush with it)
+    const o = d.at + s * (d.w / 2 + fw / 2 - 0.005);
+    // tops inside the lintel, not flush with the passage walls' tops
+    if (axis === 'z') lv.bx(trim, fw, d.h - 0.003, depth, o, 0, cc);
+    else lv.bx(trim, depth, d.h - 0.003, fw, cc, 0, o);
   }
-  if (axis === 'z') lv.bx(trim, d.w + 2 * fw, fw * 1.2, depth, d.at, d.h, cc);
-  else lv.bx(trim, depth, fw * 1.2, d.w + 2 * fw, cc, d.h, d.at);
+  if (axis === 'z') lv.bx(trim, d.w + 2 * fw, fw * 1.2, depth, d.at, d.h - 0.005, cc);
+  else lv.bx(trim, depth, fw * 1.2, d.w + 2 * fw, cc, d.h - 0.005, d.at);
   if (st.arch === 'period') {
     // a pediment-ish cornice over the door
     if (axis === 'z') lv.bx(trim, d.w + 2 * fw + 0.3, 0.12, depth + 0.1, d.at, d.h + fw * 1.2, cc);
@@ -259,7 +262,7 @@ function corridor(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: Do
   };
   box(m, 0.1, h, L, d.at - half, 0, cc);
   box(m, 0.1, h, L, d.at + half, 0, cc);
-  box(m, 2 * half + 0.1, 0.1, L, d.at, h, cc);
+  box(m, 2 * half + 0.1, 0.095, L, d.at, h, cc); // its top 5 mm under the door trim's
   if (v) box(glow, 2 * half - 0.6, 0.02, L - 0.6, d.at, h - 0.02, cc);
   // the end wall fits between the side walls (no faces shared with them)
   box(m, 2 * half - 0.1, h, 0.1, d.at, 0, end, grp);
@@ -346,10 +349,10 @@ function ceilingOf(lv: MuseumBase, p: Plan, st: Style) {
       g.add(flatCeil(ceilM, W, D, H, cz));
       const beam = mat(st.dark ? '#6b665f' : '#ece6da', { rough: 0.9 });
       const s = 2.4;
-      for (let x = -W / 2 + s; x < W / 2 - 0.5; x += s) lv.bx(beam, 0.28, 0.38, D, x, H - 0.38, cz);
-      for (let z = -D + s; z < -0.5; z += s) lv.bx(beam, W, 0.38, 0.28, 0, H - 0.38, z);
-      lv.bx(beam, W, 0.5, 0.4, 0, H - 0.5, -D + 0.2);
-      lv.bx(beam, W, 0.5, 0.4, 0, H - 0.5, -0.2);
+      for (let x = -W / 2 + s; x < W / 2 - 0.5; x += s) lv.bx(beam, 0.28, 0.375, D - 0.3, x, H - 0.38, cz); // stopping short of the cornice
+      for (let z = -D + s; z < -0.5; z += s) lv.bx(beam, W - 0.3, 0.365, 0.27, 0, H - 0.38, z); // tops under the capitals', sides off the pilasters'
+      lv.bx(beam, W - 0.01, 0.495, 0.39, 0, H - 0.5, -D + 0.2);
+      lv.bx(beam, W - 0.01, 0.495, 0.39, 0, H - 0.5, -0.2);
       return;
     }
     case 'lantern': {

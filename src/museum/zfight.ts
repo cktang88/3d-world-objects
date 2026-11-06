@@ -18,7 +18,14 @@ export function scanZFight(root: THREE.Object3D, filter?: (m: THREE.Mesh) => boo
 }
 
 /** lift overlapping coplanar faces of different meshes apart (at most 4 passes); returns triangles moved */
-export function fixZFight(root: THREE.Object3D, filter?: (m: THREE.Mesh) => boolean, lift = 0.002): number {
+export function fixZFight(root: THREE.Object3D, filter?: (m: THREE.Mesh) => boolean, lift = 0.002, kind = 'fix'): number {
   // every mesh is seen, only the filtered ones move
-  return fix(root, { ...FINE, movable: filter as ((o: THREE.Object3D) => boolean) | undefined, step: lift }).moved;
+  const r = fix(root, { ...FINE, movable: filter as ((o: THREE.Object3D) => boolean) | undefined, step: lift });
+  zfixStats.push({ kind, ms: r.ms, moved: r.moved });
+  if (zfixStats.length > 400) zfixStats.shift();
+  return r.moved;
 }
+
+/** timings of the fixer's calls by kind (window.__zfix in the browser) */
+export const zfixStats: { kind: string; ms: number; moved: number }[] = [];
+if (typeof window !== 'undefined') (window as unknown as { __zfix: unknown }).__zfix = zfixStats;

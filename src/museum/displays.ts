@@ -218,7 +218,7 @@ export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, 
       const o = f.sub(0, -0.5, angle);
       if (ph > 0) {
         lv.bx(c.m.plinth, pw, ph, pd, 0, 0, 0, o);
-        lv.bx(c.m.plinthAlt, pw + 0.04, 0.02, pd + 0.04, 0, ph - 0.02, 0, o);
+        lv.bx(c.m.plinthAlt, pw + 0.04, 0.02, pd + 0.04, 0, ph - 0.015, 0, o); // 5 mm proud of the top (no flicker)
       }
       if (cradle) {
         // two timber saddles under the hull
@@ -325,7 +325,7 @@ export function riser(items: Measured[], barrierKind: Barrier): Unit {
         const y = (nt - i) * step;
         const td = tierD[i];
         lv.bx(c.m.plinth, W, y, td, 0, 0, z + td / 2, o);
-        lv.bx(c.m.plinthAlt, W + 0.02, 0.02, 0.04, 0, y - 0.02, z + td - 0.02, o);
+        lv.bx(c.m.plinthAlt, W + 0.02, 0.02, 0.04, 0, y - 0.015, z + td - 0.015, o); // proud of the step, not flush
         // spread this tier's objects evenly
         const used = t.reduce((s, m) => s + along(m).w, 0);
         const g = (W - used) / (t.length + 1);
@@ -521,7 +521,7 @@ export function tableCase(items: Measured[], maxLen: number): { unit: Unit; rest
         const W = L + 0.12, D = depth + 0.12;
         lv.bx(c.m.caseBase, W - 0.1, base - 0.1, D - 0.1, 0, 0.1, 0, f);
         lv.bx(c.m.fixture, W - 0.2, 0.1, D - 0.2, 0, 0, 0, f);
-        lv.bx(c.m.plinthAlt, W, 0.025, D, 0, base - 0.025, 0, f);
+        lv.bx(c.m.plinthAlt, W, 0.025, D, 0, base - 0.02, 0, f); // 5 mm proud of the cabinet
         lv.bx(c.m.glass, W, hoodH, D, 0, base, 0, f);
         lv.bx(c.m.frame, W + 0.01, 0.015, D + 0.01, 0, base + hoodH, 0, f);
         let z = -depth / 2 + 0.03;
@@ -623,7 +623,7 @@ export function drawers(items: Measured[]): { unit: Unit; rest: Measured[] } {
           const tx = (sx * W) / 4;
           lv.bx(wood, trayW + 0.04, 0.06, trayD + 0.04, tx, y0, tz, o);
           lv.bx(mat('#e9e2d2', { rough: 0.9 }), trayW, 0.005, trayD, tx, y0 + 0.06, tz, o);
-          lv.bx(c.m.glass, trayW + 0.04, 0.08, trayD + 0.04, tx, y0 + 0.06, tz, o);
+          lv.bx(c.m.glass, trayW + 0.04, 0.079, trayD + 0.04, tx, y0 + 0.061, tz, o);
           for (const it of trays[t]) lv.exhibit(it.m, o, tx + it.x, y0 + 0.066, tz + it.z, it.rot, { prio: c.prio() });
         }
         lv.col(o, 0, pull / 2, W + 0.1, D + pull + 0.1);
@@ -667,8 +667,9 @@ export function periodRoom(items: Measured[], r: Rng): Unit {
       lv.bx(wallM, W + 0.2, wallH, 0.1, 0, 0, -D / 2 - 0.05, o);
       for (const sx of [-1, 1]) lv.bx(wallM, 0.1, wallH, D, (sx * (W + 0.1)) / 2, 0, 0, o);
       lv.bx(trimM, W, 0.12, 0.03, 0, ph, -D / 2 + 0.015, o);
-      lv.bx(trimM, W + 0.2, 0.14, 0.14, 0, wallH - 0.14, -D / 2, o);
-      for (const sx of [-1, 1]) lv.bx(trimM, 0.14, 0.14, D, (sx * (W + 0.1)) / 2, wallH - 0.14, 0, o);
+      // cornices short of the walls' tops and ends, the side runs below the back one: no shared faces
+      lv.bx(trimM, W + 0.19, 0.135, 0.13, 0, wallH - 0.14, -D / 2, o);
+      for (const sx of [-1, 1]) lv.bx(trimM, 0.13, 0.125, D - 0.01, (sx * (W + 0.1)) / 2, wallH - 0.135, 0, o);
       // rug, a picture over the back row, a chandelier
       lv.bx(mat(r.pick(['#7a2f2a', '#2f4a6a', '#6a5a2a', '#3d5a3a']), { rough: 1 }), W * 0.6, 0.01, D * 0.55, 0, ph, 0.1, o);
       const pw = Math.min(1.4, W * 0.3);
@@ -752,8 +753,9 @@ export function wallCase(items: Measured[], len0: number, storage: boolean): { u
         lv.bx(c.m.caseBase, len, base, depth, 0, 0, zc, f);
         lv.bx(c.m.frame, len, 0.03, depth, 0, base, zc, f);
         lv.bx(c.m.glass, len, gh, 0.012, 0, base, depth, f);
-        lv.bx(c.m.caseBase, len, gh, 0.02, 0, base, 0.01, f);
-        for (const s of [-1, 1]) lv.bx(c.m.frame, 0.035, gh, depth, (s * len) / 2, base, zc, f);
+        // back panel and side frames off the wall and the base strip by a few millimetres
+        lv.bx(c.m.caseBase, len, gh, 0.02, 0, base, 0.012, f);
+        for (const s of [-1, 1]) lv.bx(c.m.frame, 0.035, gh - 0.005, depth - 0.008, (s * len) / 2, base + 0.005, zc, f);
         if (storage) for (let x = -len / 2 + 0.9; x < len / 2 - 0.3; x += 0.9) lv.bx(c.m.frame, 0.02, gh, 0.02, x, base, depth, f);
         lv.bx(c.m.frame, len + 0.02, 0.15, depth + 0.02, 0, base + gh, zc, f);
         lv.bx(c.m.caseLight, len - 0.1, 0.01, 0.12, 0, base + gh - 0.012, depth - 0.12, f);

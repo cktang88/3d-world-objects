@@ -172,8 +172,8 @@ export class AtriumLevel extends MuseumBase {
     const s = 9;
     this.bx(glaze, s, 0.05, s, CENTRE.x, H + 1.6, CENTRE.z);
     for (const k of [-1, 1]) {
-      this.bx(frame, s + 0.4, 1.6, 0.25, CENTRE.x, H, CENTRE.z + (k * (s + 0.2)) / 2);
-      this.bx(frame, 0.25, 1.6, s + 0.4, CENTRE.x + (k * (s + 0.2)) / 2, H, CENTRE.z);
+      this.bx(frame, s + 0.4, 1.6, 0.25, CENTRE.x, H - 0.005, CENTRE.z + (k * (s + 0.2)) / 2);
+      this.bx(frame, 0.24, 1.6, s + 0.38, CENTRE.x + (k * (s + 0.2)) / 2, H - 0.005, CENTRE.z);
     }
     for (let i = 1; i < 6; i++) {
       const o = -s / 2 + (s * i) / 6;
