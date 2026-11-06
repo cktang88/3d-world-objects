@@ -194,7 +194,7 @@ export class NycLevel implements Level {
     }
     this.group.add(ch.group);
     this.chunks.set(k, ch);
-    this.vis.add(cx, cz, ch.group); // [vis]
+    this.vis.add(cx, cz, ch.group, ch.hulls); // [vis]
   }
 
   // ------------------------------------------------------------ one block

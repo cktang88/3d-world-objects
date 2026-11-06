@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AX, SZ, LX, LZ } from './common';
 import { CityHlod } from './hlod';
+import type { Hull } from './buildings';
 
 /**
  * City chunk visibility (WP2 in docs/research/performance.md):
@@ -182,15 +183,34 @@ export class CityVis {
     return [...this.chunks.values()].map((c) => `${c.cx},${c.cz}:w${c.wall.toFixed(0)}/t${c.top.toFixed(0)}/${c.real ? 'R' : 'h'}`).join(' ');
   }
 
+  private root: THREE.Object3D | null = null;
+  private lights: THREE.DirectionalLight[] = [];
+  private lightScan = 0;
+
   attach(root: THREE.Object3D) {
+    this.root = root;
     this.hlod.attach(root);
   }
 
-  add(cx: number, cz: number, group: THREE.Object3D) {
+  /** the far shadow cascade casts proxies instead of real chunks (refreshes the light list every ~2 s) */
+  private shadowLayers() {
+    if (!this.root) return;
+    if (--this.lightScan <= 0) {
+      this.lightScan = 120;
+      let scene: THREE.Object3D = this.root;
+      while (scene.parent) scene = scene.parent;
+      const ls: THREE.DirectionalLight[] = [];
+      scene.traverse((o) => { const l = o as THREE.DirectionalLight; if (l.isDirectionalLight && l.castShadow) ls.push(l); });
+      this.lights = ls;
+    }
+    this.hlod.shadowLayers(this.lights);
+  }
+
+  add(cx: number, cz: number, group: THREE.Object3D, hulls?: Hull[], hullsLocal = false) {
     const grid = heightGrid(group);
     const top = Math.max(16, grid.top);
     group.userData.chunk = true;
-    const hlodId = this.hlod.add(cx, cz, grid);
+    const hlodId = this.hlod.add(cx, cz, grid, hulls, hullsLocal);
     this.chunks.set(`${cx},${cz}`, { cx, cz, group, wall: wallHeight(grid), top, tall: tallParts(grid), hlodId, real: true, occluded: false });
     this.lastKey = '';
   }
@@ -208,6 +228,7 @@ export class CityVis {
    * rx/rz: the resident ring radius (chunks beyond are unload hysteresis).
    */
   update(eye: THREE.Vector3, ccx: number, ccz: number, rx: number, rz: number) {
+    this.shadowLayers();
     const key = `${ccx},${ccz},${this.chunks.size},${this.enabled},${rx},${rz},${this.hlodDist}`;
     if (key === this.lastKey && eye.distanceToSquared(this.lastEye) < 0.25) return;
     this.lastKey = key;

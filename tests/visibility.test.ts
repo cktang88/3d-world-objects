@@ -9,7 +9,8 @@ import { test, expect, between, fmt, stats } from './qa';
 import { NycLevel } from '../src/nyc';
 import { nycChunk } from './world';
 import { CityVis, heightGrid } from '../src/nyc/occlusion';
-import { hlodGeometry } from '../src/nyc/hlod';
+import { hlodGeometry, hullGeometry } from '../src/nyc/hlod';
+import type { Hull } from '../src/nyc/buildings';
 import { AX, SZ, LX, LZ } from '../src/nyc/common';
 
 /** a synthetic chunk: one solid block of height h (and optionally a tower of height t) */
@@ -132,8 +133,13 @@ test('real block: height grid finds the buildings and the HLOD proxy is cheap', 
   between(filled / g.h.length, 0.3, 1, 'share of the building area covered by roofs');
   expect(g.top >= maxH, `top ${fmt(g.top)} below roof max ${fmt(maxH)}`);
   const geo = hlodGeometry(g, 1);
-  const tris = geo.index!.count / 3;
-  between(tris, 10, 4000, 'HLOD triangles per chunk');
+  between(geo.index!.count / 3, 10, 4000, 'grid HLOD triangles per chunk');
+  // the real proxy: from the block's building hulls (masses, cornices, water towers, bulkheads)
+  const hulls = (c as unknown as { hulls?: Hull[] }).hulls ?? [];
+  expect(hulls.length > 0, 'block has no building hulls');
+  const hg = hullGeometry(hulls, 1);
+  between(hg.index!.count / 3, 50, 8000, 'hull HLOD triangles per chunk');
+  for (const a of ['position', 'normal', 'uv', 'color', 'aKind']) expect(!!hg.getAttribute(a) && !!geo.getAttribute(a), `HLOD geometries must share attribute ${a} (one BatchedMesh)`);
 });
 
 test('chunk builds are time-sliced: many short steps, same result as the one-go build', () => {
