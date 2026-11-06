@@ -552,6 +552,7 @@ Street cars, via the [Objaverse](https://huggingface.co/datasets/allenai/objaver
 - **escalade** — "2009 Cadillac Escalade" by nekkantisrikar2007, https://sketchfab.com/3d-models/7c5516c76bd441d998af76e2240a2b8d, CC-BY-4.0 (CC Attribution)
 - **explorer** — "Ford Explorer ST" by David_Holiday, https://sketchfab.com/3d-models/a47d2d8c83b44d348329dba8f92d1adc, CC-BY-4.0 (CC Attribution)
 - **sprinter** — "Mercedes Benz Sprinter 2006" by Max-7215, https://sketchfab.com/3d-models/f69de1315bb049c8946d57f6006acd73, CC-BY-4.0 (CC Attribution)
+- **accord19** — "2019 Honda Accord" by David_Holiday, https://sketchfab.com/3d-models/aad70ad7eae3467e99c71ef0c7150138, CC-BY-4.0 (CC Attribution)
 
 ## Third-party model libraries (streamed at runtime, src/libraries.ts)
 

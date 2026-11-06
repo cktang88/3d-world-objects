@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
 
 /**
@@ -25,6 +25,7 @@ export const FLEET: Record<string, FleetModel> = {
   taxi_cv: { id: 'taxi_cv', len: 5.38, wid: 2.0, wheelR: 0.34, paint: false },
   prius: { id: 'prius', len: 4.54, wid: 1.76, wheelR: 0.31, paint: true },
   accord: { id: 'accord', len: 4.93, wid: 1.85, wheelR: 0.33, paint: true },
+  accord19: { id: 'accord19', len: 4.88, wid: 1.86, wheelR: 0.34, paint: true },
   charger: { id: 'charger', len: 5.08, wid: 1.9, wheelR: 0.36, paint: true },
   suburban: { id: 'suburban', len: 5.7, wid: 2.0, wheelR: 0.39, paint: true },
   escalade: { id: 'escalade', len: 5.14, wid: 2.05, wheelR: 0.4, paint: false },
@@ -204,9 +205,13 @@ function prepare(root: THREE.Object3D, id: string): Part[] {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     const src = mesh.material as THREE.MeshStandardMaterial;
-    const g = toFloat(mesh.geometry);
+    let g = toFloat(mesh.geometry);
     g.applyMatrix4(mesh.matrixWorld);
-    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    if (!g.getAttribute('normal')) {
+      // welded for simplification: rebuild normals keeping hard edges (creases over 35 degrees)
+      g = toCreasedNormals(g, (35 * Math.PI) / 180);
+      g.setIndex(Array.from({ length: g.getAttribute('position').count }, (_, i) => i));
+    }
     else fixInverted(g);
     const n = g.getAttribute('position').count;
     if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));

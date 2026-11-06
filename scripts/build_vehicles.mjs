@@ -31,6 +31,7 @@ export const FLEET = [
   { id: 'suburban', uid: 'b01950cf99aa48c1ba2ebd0addc8a9d4', len: 5.7, yaw: Math.PI, paint: /^default$/, glass: /^blackplast1$/, drop: /^tree$|^inter01$|^stuf$/, tris: 40000, lod1: 6000 },
   { id: 'escalade', uid: '7c5516c76bd441d998af76e2240a2b8d', len: 5.14, yaw: Math.PI, paint: null, glass: /Platinum23Mtl$/, drop: null, tris: 40000, lod1: 6000 },
   { id: 'explorer', uid: 'a47d2d8c83b44d348329dba8f92d1adc', len: 5.05, yaw: Math.PI, paint: /wire_187200200|Exterior_01/, glass: /Glass/, drop: null, tris: 40000, lod1: 6000 },
+  { id: 'accord19', uid: 'aad70ad7eae3467e99c71ef0c7150138', len: 4.88, yaw: Math.PI, paint: /^Platinum_White_Metallic$/, glass: /Glass/, drop: /^edge_color|^BlackTrim$/, tris: 45000, lod1: 6000, err0: 0.02 },
   { id: 'sprinter', uid: 'f69de1315bb049c8946d57f6006acd73', len: 5.9, yaw: Math.PI, paint: null, glass: /vitre|glass/i, drop: /Interrieur/, tris: 30000, lod1: 5000 },
   // { id: 'lexus', uid: '6f2f754c78794734b794237913ba97cc', len: 4.76, yaw: 0, paint: null, glass: null, drop: null, tris: 40000, lod1: 6000 },
 ];
@@ -96,10 +97,10 @@ async function main() {
       await doc.transform(dedup({ propertyTypes: [PropertyType.ACCESSOR, PropertyType.MESH, PropertyType.TEXTURE] }), flatten(), join({ keepNamed: false }), weld({}));
       const tris = count(root);
       const ratio = Math.min(1, target / tris);
-      if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? 0.003 : 0.02, lockBorder: false }));
+      if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? (cfg.err0 ?? 0.003) : 0.02, lockBorder: false }));
       // seams (uv/normal splits) stop the simplifier early: for the far LOD drop normals (and uvs of untextured
       // parts), weld by position alone and simplify again; normals are recomputed at load
-      if (lod === 1 && count(root) > target * 1.15) {
+      if (count(root) > target * 1.15) {
         for (const m of root.listMeshes())
           for (const p of m.listPrimitives()) {
             p.setAttribute('NORMAL', null);
@@ -108,7 +109,7 @@ async function main() {
           }
         await doc.transform(weld({}));
         const now = count(root);
-        await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, target / now), error: 0.04, lockBorder: false }));
+        await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, target / now), error: lod === 0 ? 0.006 : 0.04, lockBorder: false }));
       }
       await doc.transform(
         prune(),

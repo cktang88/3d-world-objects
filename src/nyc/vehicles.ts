@@ -21,9 +21,9 @@ export type VehicleKind = 'cab' | 'sedan' | 'bus' | 'truck';
 
 /** which model a street car is, weighted like NYC traffic: lots of SUVs and sedans, some vans */
 const SEDANS: [string, number][] = [
-  ['accord', 18], ['prius', 12], ['charger', 8], ['suburban', 14], ['explorer', 12], ['escalade', 8], ['sprinter', 6],
+  ['accord', 10], ['accord19', 12], ['prius', 12], ['charger', 8], ['suburban', 14], ['explorer', 12], ['escalade', 8], ['sprinter', 6],
 ];
-const CABS: [string, number][] = [['taxi_cv', 4], ['prius', 3], ['accord', 3]];
+const CABS: [string, number][] = [['taxi_cv', 3], ['prius', 3], ['accord', 2], ['accord19', 3]];
 /** black-car (livery) SUVs are usually black */
 const BLACK_CAR = new Set(['suburban', 'escalade']);
 
@@ -73,6 +73,7 @@ const decalCache = new Map<string, THREE.Mesh[]>();
 const DECAL_AT: Record<string, { door: number; quarter: number; y: number }> = {
   prius: { door: -0.35, quarter: 1.45, y: 0.72 },
   accord: { door: -0.45, quarter: 1.55, y: 0.68 },
+  accord19: { door: -0.4, quarter: 1.5, y: 0.7 },
 };
 let decalMats: { logo: THREE.Material; num: THREE.Material } | null = null;
 function taxiDecals(id: string, p: Prepared): THREE.Mesh[] {
