@@ -12,6 +12,10 @@ npx vite --port <your port> --strictPort &                    # your own dev ser
 The Blender + sand3d Python env (for rebuilding objects from their programs) is at
 `/tmp/claude-0/-home-user-3d-world-objects/8099eee9-d314-5309-8ed7-ba7c5d8c746e/scratchpad/venv/bin/python`.
 
+## Hard limits (read first)
+
+Nothing may run long or crash-loop. Shots and perf runs stop at `--max` seconds (default 240). Lock waits use `flock -w 300`. Batch jobs run in chunks of 15 minutes or less that can resume. Log progress to a file. After two failures, shrink the experiment rather than retrying it. `scripts/reap.sh` kills overruns. The full workflow is in `.claude/skills/fast-3d-testing/SKILL.md`.
+
 ## Iterate fast: the lab
 
 Never iterate in the full world. Make a lab scene showing just your thing:
@@ -20,7 +24,7 @@ Never iterate in the full world. Make a lab scene showing just your thing:
 - Open `/?lab=<name>&cam=x,y,z&look=x,y,z&env=studio|nyc|museum|night`. `?lab=index` lists all scenes.
 - Screenshot it: `node scripts/shot.mjs --port <port> --url "/?lab=<name>" --out /tmp/…/x.png --w 960 --h 540`. Then look at the PNG.
 - Software rendering is slow: use `--quality high` (default) or `low`. Avoid `ultra` in screenshots.
-- **Full-world runs (`?mode=world`, `?mode=museum`) use ~2 GB RAM each and the machine has 16 GB shared by many agents.** Run them one at a time across all agents: `flock /tmp/claude-0/world-shot.lock node scripts/shot.mjs ...`. Lab scenes don't need the lock.
+- **Full-world runs (`?mode=world`, `?mode=museum`) use ~2 GB RAM each and the machine has 16 GB shared by many agents.** Run them one at a time across all agents: `flock -w 300 /tmp/claude-0/world-shot.lock node scripts/shot.mjs --max 600 ...`. Lab scenes don't need the lock.
 - `--eval "<js>"` runs code first. `window.__world` exposes the renderer, player and level (in the full game).
 
 ## References first, always

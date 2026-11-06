@@ -5,6 +5,8 @@
  *   node scripts/shot.mjs --url "/?lab=vehicles" --out /path/shot.png [--port 5173]
  *        [--w 960] [--h 540] [--wait 2000] [--eval "js run in the page before the shot"]
  *        [--quality low|high|ultra]   (default high: ultra is very slow in software rendering)
+ *        [--max 240]   hard wall-clock cap in seconds (default 240, never above 600): the run
+ *                      kills its browser and exits 124 so nothing hangs or loops for long
  *
  * Requests to Hugging Face / Poly Haven are fetched with curl (which trusts this machine's
  * proxy CA) and handed to the browser, so streamed models and textures work headlessly.
@@ -28,7 +30,16 @@ const W = Number(args.w ?? 960), H = Number(args.h ?? 540);
 const curl = (u) =>
   new Promise((res) => execFile('curl', ['-sSL', '--max-time', '90', '-D', '-', u], { encoding: 'buffer', maxBuffer: 256 << 20 }, (_e, o) => res(o)));
 
-const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const MAX = Math.min(600, Number(args.max ?? 240));
+const t0 = Date.now();
+const log = (...a) => console.log(`[shot +${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
+let browser;
+setTimeout(() => {
+  log(`TIMEOUT after ${MAX}s: killing browser (make the scene smaller: a lab, ?notex=1, ?post=0, --quality low, smaller --w/--h)`);
+  try { browser?.process?.()?.kill('SIGKILL'); } catch {}
+  process.exit(124);
+}, MAX * 1000).unref();
+browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (route) => {
   const buf = await curl(route.request().url());
@@ -43,12 +54,14 @@ await page.route(/huggingface\.co|hf\.co|polyhaven|3d-api\.si\.edu/, async (rout
 page.on('pageerror', (e) => { if (!/Pointer Lock/.test(e.message)) console.log('PAGEERROR', e.message); });
 page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.text().slice(0, 300)); });
 
+log('loading', url);
 await page.goto(`http://localhost:${port}${url}`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.__labReady !== undefined || window.__world !== undefined, null, { timeout: 60000 }).catch(() => {});
 await page.evaluate(() => window.__labReady).catch(() => {});
 if (args.eval) console.log('eval:', await page.evaluate(args.eval).catch((e) => 'ERR ' + e.message));
 await page.waitForTimeout(Number(args.wait ?? 2000));
 const info = await page.evaluate(() => { const r = window.__world?.renderer?.info?.render; return r ? `calls=${r.calls} tris=${r.triangles}` : ''; }).catch(() => '');
+log('ready, screenshotting');
 await page.screenshot({ path: out, timeout: 240000 });
 console.log('saved', out, info);
 await browser.close();

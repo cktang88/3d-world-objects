@@ -53,8 +53,19 @@ This machine has **no GPU** (SwiftShader software rendering), 4 CPUs shared by m
 
 ## 4. Rules for the shared machine
 
+**Nothing runs long, and nothing crash-loops.** These are hard limits:
+- **Time caps:** every screenshot/perf run is capped (`shot.mjs --max`, default 240 s, max 600 s). Batch jobs (Python/Blender) run in chunks of 15 min or less that resume from a cache. Waiting on the world lock is capped: `flock -w 300`. `scripts/reap.sh` kills anything over these limits (lock waits over 5 min, shots/perf/browsers over 10 min, Python/Blender over 20 min), and the coordinator runs it every check-in.
+- **Logging:** log progress with timestamps to a file in your scratchpad (`... 2>&1 | tee <scratchpad>/run.log`), so a slow or dying run shows *where* it is stuck. `shot.mjs` prints `[shot +Ns]` stages.
+- **Failures:** if a run fails or times out **twice**, do not retry the same thing. Make the experiment smaller:
+  - a lab instead of the world
+  - one building, one room or one object
+  - `?notex=1&post=0`, `--quality low`, a smaller viewport
+  - a `qa` test instead of pixels
+  - fewer chunks or people (`?people=0`)
+- **Background jobs:** never start a background job without a timeout (`timeout 600 ...`).
+
 - **Full-game runs** (`?mode=world` / `?mode=museum`) run one at a time across all agents:
-  `flock /tmp/claude-0/world-shot.lock node scripts/shot.mjs ...` (`perf.mjs` takes the lock itself).
+  `flock -w 300 /tmp/claude-0/world-shot.lock node scripts/shot.mjs --max 600 ...` (`perf.mjs` takes the lock itself).
 - **Your own dev server:** `npx vite --port <port> --strictPort &` in your worktree. Kill it when done.
 - **Parallel workers:** keep Python/Blender worker counts low (≤ 4–16).
 - **Memory errors:** if a headless page crashes ("Target crashed"), it is usually RAM. Retry under the lock with a smaller scene, not a bigger timeout.
