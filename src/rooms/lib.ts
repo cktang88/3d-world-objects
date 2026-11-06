@@ -16,6 +16,15 @@ export const LIB: Record<string, [number, number, number]> = {
   modern_arm_chair_01: [0.82, 1.023, 0.987],
   mid_century_lounge_chair: [1.009, 1.169, 1.19],
   Ottoman_01: [0.885, 0.624, 0.621],
+  dining_chair_02: [0.434, 0.973, 0.576],
+  painted_wooden_chair_01: [0.432, 0.956, 0.54],
+  bar_chair_round_01: [0.483, 0.751, 0.486],
+  metal_stool_02: [0.448, 0.458, 0.473],
+  GothicBed_01: [1.494, 1.534, 2.04],
+  dining_table: [2.256, 0.877, 1.39],
+  WoodenTable_03: [1.327, 0.83, 0.562],
+  small_wooden_table_01: [0.916, 0.533, 0.44],
+  wooden_bookshelf_worn: [1.374, 2.063, 0.581],
   // tables
   modern_coffee_table_01: [1.202, 0.39, 0.6],
   modern_coffee_table_02: [1.199, 0.369, 1.2],
@@ -66,11 +75,14 @@ export const LIB: Record<string, [number, number, number]> = {
 };
 
 export const SETS: Record<string, string[]> = {
-  sofa: ['Sofa_01', 'sofa_02'],
+  sofa: ['sofa_02'],
+  loveseat: ['Sofa_01'],
   armchair: ['ArmChair_01', 'GreenChair_01', 'modern_arm_chair_01'],
   coffee: ['modern_coffee_table_01', 'modern_coffee_table_02', 'industrial_coffee_table'],
   side: ['side_table_01', 'side_table_tall_01'],
   nightstand: ['ClassicNightstand_01', 'painted_wooden_nightstand'],
+  diningchair: ['dining_chair_02'],
+  stool: ['bar_chair_round_01', 'metal_stool_02'],
   dresser: ['GothicCommode_01', 'painted_wooden_cabinet', 'ClassicConsole_01'],
   chandelier: ['Chandelier_01', 'Chandelier_02'],
   pendant: ['modern_ceiling_lamp_01', 'hanging_industrial_lamp'],
