@@ -65,18 +65,20 @@ const scene: LabScene = {
       for (let i = 0; i < Math.max(12, Number(params.get('t') ?? 0) * 10); i++) crowd.update(0.1, origin, (labTime += 0.1), labCols);
       // perf readout for shot.mjs --eval "__peopleStats()": meshes and triangles of the crowd
       (window as unknown as { __peopleStats: () => string }).__peopleStats = () => {
-        let meshes = 0, tris = 0, shadow = 0;
+        let meshes = 0, tris = 0, shadow = 0, farN = 0;
         group.traverseVisible((o) => {
           const m = o as THREE.Mesh;
           if (!m.isMesh) return;
           const g = m.geometry;
-          const t = (g.index ? g.index.count : g.attributes.position.count) / 3;
+          const inst = (m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1;
+          if (inst > 1 || (m as THREE.InstancedMesh).isInstancedMesh) farN += inst;
+          const t = ((g.index ? g.index.count : g.attributes.position.count) / 3) * inst;
           meshes++;
           tris += t;
           if (m.castShadow) shadow += t;
         });
         const vis = crowd!.peds.filter((d) => d.p.root.visible).length;
-        return `people=${crowd!.peds.length} visible=${vis} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)} skeletonUpdates/frame=${skelPerFrame.toFixed(1)}`;
+        return `people=${crowd!.peds.length} visible=${vis} far=${farN} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)} skeletonUpdates/frame=${skelPerFrame.toFixed(1)}`;
       };
       return;
     }

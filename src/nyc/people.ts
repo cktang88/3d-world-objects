@@ -3,6 +3,7 @@ import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
+import { FarCrowd } from './peopleFar';
 import { Dog, coffeeGeo, handBagGeo, propVcMat, strollerGeo } from './peopleProps';
 import { Rng, hashN } from '../rng';
 import { CURB, AX, SZ, AVE, ST, SW, CYCLE, lightFor } from './common';
@@ -513,8 +514,16 @@ export class Person {
     const at = (x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) =>
       new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
     const headTop = gender === 'male' ? 1.712 : 1.655;
+    // far-crowd look (painted hair: -1 bald, 0 short / hat, 1 long)
+    const b0 = BODY[gender];
+    this.far = {
+      top: new THREE.Color(o.top), bottom: new THREE.Color(o.bottom), shoe: new THREE.Color(o.shoe), skin: new THREE.Color(o.skin), hair: new THREE.Color(o.hair),
+      style: new THREE.Vector4(o.topStyle, o.topStyle === 0 ? b0.shoulderX + 0.13 : b0.wristX - 0.035, o.bottomStyle === 2 ? b0.knee + 0.07 : b0.ankle, hat ? 0 : style === 'Hair_Long' ? 1 : style ? 0 : -1),
+      coat: o.coatLen >= 0 ? b0.knee - o.coatLen : -1,
+    };
     if (hat) {
       const hc = r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a']);
+      this.far.hair.set(hc);
       const bm = propMat(hc, 0.95);
       attach('Head', new THREE.Mesh(propGeo.beanie, bm), at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)));
       this.detail.push(attach('Head', new THREE.Mesh(propGeo.cuff, bm), at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12))));
@@ -656,6 +665,36 @@ export class Person {
       };
     }
   }
+  far!: { top: THREE.Color; bottom: THREE.Color; shoe: THREE.Color; skin: THREE.Color; hair: THREE.Color; style: THREE.Vector4; coat: number };
+  /** the far crowd's animation state: clip 0 walk / 1 idle, phase 0..1 */
+  vatClip = 0;
+  vatPhase = Math.random();
+  /** advance the far-crowd clock (instead of the mixer) */
+  farStep(dt: number) {
+    const walking = this.activity === 'walk' && this.speed > 0.05;
+    const clip = walking ? 0 : 1;
+    if (clip !== this.vatClip) {
+      this.vatClip = clip;
+      this.vatPhase = Math.random();
+    }
+    const dur = this.actions.get(walking ? this.walkClip : 'Idle_Loop')!.getClip().duration;
+    const rate = walking ? this.actions.get(this.walkClip)!.timeScale : 1;
+    this.vatPhase = (this.vatPhase + (dt * rate) / dur) % 1;
+  }
+  /** entering / leaving the far crowd: carry the animation phase across */
+  syncFromFar() {
+    const a = this.actions.get(this.activity === 'walk' ? this.walkClip : this.activity === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop');
+    if (a) a.time = this.vatPhase * a.getClip().duration;
+  }
+  syncToFar() {
+    const walking = this.activity === 'walk' && this.speed > 0.05;
+    const a = this.actions.get(walking ? this.walkClip : 'Idle_Loop');
+    this.vatClip = walking ? 0 : 1;
+    if (a) this.vatPhase = (a.time / a.getClip().duration) % 1;
+  }
+  get scaleH() {
+    return this.model().scale.x;
+  }
   /** this frame: keep last frame's pose and matrices */
   frozen = false;
   /** skeleton updates performed (all people), for perf readouts */
@@ -792,6 +831,8 @@ interface Ped {
   buddy?: Ped;
   /** distance to the player this frame */
   dist: number;
+  /** drawn by the far crowd */
+  far?: boolean;
   /** simulated position / facing; copied to the rendered person on its animation frames */
   pos: THREE.Vector3;
   rot: number;
@@ -808,10 +849,20 @@ const COUNT = (() => {
   }
 })();
 const SHADOWS = 20;
+/** switch to / from the VAT far crowd (hysteresis) */
+const FAR_IN = 32, FAR_OUT = 28;
 /** ?pfreeze=0 disables culling / frozen frames (for before/after perf comparisons) */
 const FREEZE = (() => {
   try {
     return new URLSearchParams(location.search).get('pfreeze') !== '0';
+  } catch {
+    return true;
+  }
+})();
+/** ?pfar=0 keeps everyone as skinned people (no VAT far crowd) */
+const FAR = FREEZE && (() => {
+  try {
+    return new URLSearchParams(location.search).get('pfar') !== '0';
   } catch {
     return true;
   }
@@ -862,6 +913,7 @@ class ColliderGrid {
 }
 const _rects: Rect[] = [];
 const _sphere = new THREE.Sphere();
+const _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const _m4 = new THREE.Matrix4();
 
 export class Pedestrians {
@@ -968,6 +1020,12 @@ export class Pedestrians {
       if (pd.buddy) this.follow(pd.buddy, pd);
     }
     const cam = this.updateFrustum();
+    if (!this.farCrowd && FAR && this.assets && this.peds.length >= COUNT) {
+      const A = this.assets.body;
+      this.farCrowd = new FarCrowd(this.group, { male: A.male, female: A.female }, BODY, COUNT);
+    }
+    const far = this.farCrowd;
+    far?.begin();
     for (const pd of this.peds) {
       // LOD: animate near people every frame, far ones every 2nd / 4th frame, off-screen ones not
       // at all (they keep their last pose and matrices and are hidden)
@@ -978,6 +1036,29 @@ export class Pedestrians {
       _sphere.center.set(pd.pos.x, pd.pos.y + 0.9, pd.pos.z).applyMatrix4(this.group.matrixWorld);
       _sphere.radius = pd.p.noPhone ? 2.2 : 1.4;
       const seen = !FREEZE || d < 6 || !cam || this.frustum.intersectsSphere(_sphere);
+      // beyond ~30 m: one instance of the VAT far crowd instead of a skinned person
+      const wantFar = !!far && (pd.far ? d > FAR_OUT : d > FAR_IN);
+      if (wantFar) {
+        if (!pd.far) {
+          pd.far = true;
+          pd.p.syncToFar();
+        }
+        r.visible = false;
+        pd.p.frozen = true;
+        pd.p.farStep(dt);
+        if (seen) {
+          const f = pd.p.far;
+          _q.setFromAxisAngle(_up, pd.rot);
+          _s.setScalar(pd.p.scaleH);
+          far.add(pd.p.gender === 'female', { matrix: _m4.compose(pd.pos, _q, _s), clip: pd.p.vatClip, phase: pd.p.vatPhase, top: f.top, bottom: f.bottom, shoe: f.shoe, skin: f.skin, hair: f.hair, style: f.style, coat: f.coat });
+        }
+        continue;
+      }
+      if (pd.far) {
+        pd.far = false;
+        pd.p.syncFromFar();
+        r.visible = false; // forces a full update below
+      }
       if (!seen) {
         r.visible = false;
         pd.p.frozen = true;
@@ -1002,6 +1083,7 @@ export class Pedestrians {
       } else pd.p.frozen = true;
       pd.p.setLod(d < 22 ? 0 : 1);
     }
+    far?.end();
     // shadows only for the nearest SHADOWS people (skinned shadow casters cost a full skinning pass)
     const order = this.order;
     order.length = 0;
@@ -1010,6 +1092,7 @@ export class Pedestrians {
     order.forEach((pd, i) => pd.p.setShadows(i < SHADOWS && pd.dist < 30));
   }
   private order: Ped[] = [];
+  private farCrowd: FarCrowd | null = null;
   private frustum = new THREE.Frustum();
   private probeCam: THREE.Camera | null = null;
   private probe: THREE.Mesh | null = null;
