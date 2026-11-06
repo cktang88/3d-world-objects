@@ -15,6 +15,8 @@ export class Player {
   /** touch input: move vector in [-1, 1] */
   touchMove = new THREE.Vector2();
   private bob = 0;
+  /** vertical.ts: the walkable height under (x, z) near height y (stairs); null = flat floor at 0 */
+  ground: ((x: number, z: number, y: number) => number) | null = null;
 
   constructor(public camera: THREE.PerspectiveCamera, private dom: HTMLElement) {
     addEventListener('keydown', (e) => {
@@ -96,11 +98,13 @@ export class Player {
       }
     }
     this.pos.y += this.vel.y * dt;
-    if (this.pos.y <= 0) {
-      this.pos.y = 0;
+    const g = this.ground ? this.ground(this.pos.x, this.pos.z, this.pos.y) : 0;
+    // step up onto the stair surface; stick to it going down (up to 0.4 m per frame)
+    if (this.pos.y <= g || (this.onGround && this.vel.y <= 0 && this.pos.y - g < 0.4)) {
+      this.pos.y = g;
       this.vel.y = 0;
       this.onGround = true;
-    }
+    } else if (this.pos.y - g >= 0.4) this.onGround = false;
 
     const moving = Math.hypot(this.vel.x, this.vel.z);
     this.bob += moving * dt * 1.6;

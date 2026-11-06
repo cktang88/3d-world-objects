@@ -200,7 +200,7 @@ export function countTris(o: THREE.Object3D) {
 /** the lights that stand in for a previewed level's own (always in the scene: no recompiles) */
 const POOL = 2;
 
-const PREBUILD_KINDS = new Set(['interior', 'gallery', 'atrium']);
+const PREBUILD_KINDS = new Set(['interior', 'gallery', 'atrium', 'floor']); // 'floor': src/rooms/vertical.ts
 
 export class Seamless {
   slots = new Map<string, Slot>();
@@ -464,6 +464,12 @@ export class Seamless {
       this.wanted.add(descKey(desc));
       if (!this.slots.has(descKey(desc)) && this.queue.length < 2) this.prebuild(desc);
     }
+    // ---- vertical.ts hook: levels may ask for others (the floors above/below near a stair, a lift's destination)
+    for (const desc of level.prefetch?.(player) ?? []) {
+      this.wanted.add(descKey(desc));
+      if (!this.slots.has(descKey(desc))) this.prebuild(desc);
+    }
+    // ---- end vertical hook
     // turned away: drop half-built ones nobody wants any more
     for (const s of [...this.queue]) {
       if (this.wanted.has(s.key) || this.pins.has(s.key)) continue;

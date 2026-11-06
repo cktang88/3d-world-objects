@@ -25,6 +25,8 @@ import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
 import { Seamless, descKey, doorOf, type Slot } from './seamless';
 import { Lazy, type LazyContainer } from './lazy';
+import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
+import { Vertical } from './vertical';
 
 // ---------------------------------------------------------------- renderer
 
@@ -191,6 +193,7 @@ function build(desc: LevelDesc, staged = false): Level {
     case 'atrium': return new AtriumLevel();
     case 'gallery': return new GalleryLevel(desc);
     case 'interior': return desc.shop ? new ShopLevel(desc, { staged }) : new InteriorLevel(desc, { staged });
+    case 'floor': return new FloorLevel(desc, { staged }); // src/rooms/vertical.ts
   }
 }
 
@@ -245,6 +248,12 @@ function prewarmShops() {
 }
 // ---- end seamless
 
+// ---- vertical.ts: stairs you walk up between floors (Player.ground), elevators; floors switch in the same frame
+let aimedNow: Portal | null = null;
+const vert = new Vertical({ scene, camera, renderer, seam, player, aimed: () => aimedNow });
+player.ground = (x, z, y) => vert.ground(level, x, z, y);
+// ---- end vertical
+
 function descName(d: LevelDesc): string {
   switch (d.kind) {
     case 'atrium': return 'Atrium';
@@ -253,6 +262,7 @@ function descName(d: LevelDesc): string {
       return t ? t.name + (d.page ? ` ${d.page + 1}` : '') : 'Gallery';
     }
     case 'interior': return d.floor > 0 ? `${d.name} · floor ${d.floor + 1}` : d.name;
+    case 'floor': return floorName(d);
     default: return d.name;
   }
 }
@@ -263,6 +273,7 @@ function placeOf(d: LevelDesc): Place {
     case 'atrium':
     case 'gallery': return 'museum';
     case 'interior': return d.shop ? 'shop' : 'interior';
+    case 'floor': return d.floor >= d.floors ? 'outdoor' : 'interior';
     default: return 'studio';
   }
 }
@@ -672,9 +683,25 @@ function frame() {
       transitioning = true;
       goBack().then(() => (transitioning = false));
     }
+    // ---- vertical.ts hook: walking up/down stairs and arriving by lift switch floors in this frame
+    const vsw = !transitioning ? vert.update(dt, level, active && !infoOpen) : null;
+    if (vsw) {
+      const t0 = performance.now();
+      const vel = player.vel.clone(), onGround = player.onGround;
+      currentDesc = vsw.desc;
+      seamSwitch(seam.take(vsw.desc), vsw.pos, vsw.yaw);
+      player.vel.copy(vel);
+      player.onGround = onGround;
+      camera.position.y += vsw.dy;
+      vert.afterSwitch(level, vsw);
+      vert.stats.maxSwitchMs = Math.max(vert.stats.maxSwitchMs, performance.now() - t0);
+      if (vsw.why === 'lift' || (currentDesc.kind === 'floor' && currentDesc.floor >= currentDesc.floors)) toast(descName(currentDesc));
+    }
+    // ---- end vertical hook
     const auto = active ? autoPortal() : null;
     if (auto) enter(auto);
     aimed = active && !infoOpen ? target() : null;
+    aimedNow = aimed;
     lazy.update(dt, camera, level);
     const box = active && !infoOpen ? lazy.aim(ray, 2.4, level) : null; // ray was set by target()
     aimedBox = box && (!aimed || box.d < 1.6) ? box.c : null;
@@ -725,6 +752,8 @@ async function startMode(m: Mode) {
   else {
     const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;
     currentDesc = params.get('biome') ? { kind: 'city', seed, biome: params.get('biome')!, name: 'The World' } : { kind: 'nyc', seed, name: 'Manhattan' };
+    // vertical.ts: ?building=walkup|prewar|office|loft&floors=n&floor=n starts inside a building (testing)
+    if (params.get('building')) currentDesc = testBuilding(params);
   }
   if (level) scene.remove(level.group);
   seam.clear();
@@ -793,7 +822,7 @@ ready.then(() => {
 });
 
 Object.assign(window, {
-  __world: { seam, renderer, lighting, weather, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+  __world: { seam, vert, renderer, lighting, weather, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
 });
 
 // ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----

@@ -15,7 +15,9 @@ export type LevelDesc =
   | { kind: 'interior'; seed: number; name: string; style: string; floor: number; floors: number; biome: string; shop?: string }
   | { kind: 'nyc'; seed: number; name: string }
   | { kind: 'atrium' }
-  | { kind: 'gallery'; theme: number; page: number; wing?: string };
+  | { kind: 'gallery'; theme: number; page: number; wing?: string }
+  /** a storey of a building (src/rooms/vertical.ts): floor 0 is the lobby, floor === floors the roof */
+  | { kind: 'floor'; seed: number; name: string; type: string; floor: number; floors: number };
 
 export interface Portal {
   box: THREE.Box3;
@@ -79,6 +81,8 @@ export interface Level {
    * it must drain it (seamless.ts does so within a per-frame ms budget) before using the level.
    */
   staging?: Iterator<unknown>;
+  /** seamless.ts: other levels to prebuild now (e.g. the floors above and below when near a stair; src/rooms/vertical.ts) */
+  prefetch?(player: THREE.Vector3): LevelDesc[];
 }
 
 /** run a staged level's remaining construction at once */
