@@ -1,6 +1,6 @@
 /** Museum doorways: walking up to any onward doorway (4 m, facing it) builds the next room and shows it through the opening before you reach it. */
 import * as THREE from 'three';
-import { test, expect, none } from './qa';
+import { test, expect, none, stats } from './qa';
 import { settle } from './env';
 import { loadMuseum } from '../src/museumData';
 import { GalleryLevel, AtriumLevel } from '../src/museum';
@@ -90,4 +90,23 @@ test('a previewed room casts no shadows and is hidden when its doorway is out of
   for (let i = 0; i < 3; i++) seam.update(1 / 60, here.level, player);
   expect(!s()!.shown || !s()!.level.group.visible, 'a previewed room behind you is still drawn');
   seam.clear();
+});
+
+test('budget: the atrium with the rooms shown through its doorways stays under 400 meshes and 1.5M triangles', async () => {
+  await loadMuseum();
+  const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 500), scene = new THREE.Scene();
+  const seam = makeSeam(camera, scene);
+  const here = seam.take({ kind: 'atrium' });
+  seam.setActive(here);
+  scene.add(here.level.group);
+  const a = here.level as AtriumLevel;
+  const player = a.spawn.pos.clone();
+  camera.position.set(player.x, 1.6, player.z);
+  camera.lookAt(player.x - Math.sin(a.spawn.yaw) * 10, 1.6, player.z - Math.cos(a.spawn.yaw) * 10);
+  camera.updateMatrixWorld(true);
+  for (let i = 0; i < 400 && [...seam.slots.values()].filter((s) => s.shown).length < 2; i++) { seam.update(1 / 60, a, player); await settle(5); }
+  const st = stats(scene);
+  seam.clear();
+  expect(st.drawables <= 400, `${st.drawables} meshes (draw calls) with previews`);
+  expect(st.tris <= 1_500_000, `${st.tris} triangles with previews (room shells and stand-ins; exhibits stream in later)`);
 });
