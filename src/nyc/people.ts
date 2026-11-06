@@ -449,6 +449,8 @@ export class Person {
   private lodMesh: THREE.Mesh | null = null;
   private fullMesh: THREE.Mesh | null = null;
   private faceMeshes: THREE.Mesh[] = [];
+  /** small parts hidden on far people (shoes, straps, cups...) */
+  private detail: THREE.Object3D[] = [];
   private lod = 0;
   /** 0: full body; 1: ~2.5k-triangle body, no eyes/brows */
   setLod(l: number) {
@@ -457,6 +459,7 @@ export class Person {
     this.lodMesh.visible = l === 1;
     this.fullMesh.visible = l === 0;
     for (const m of this.faceMeshes) m.visible = l === 0;
+    for (const m of this.detail) m.visible = l === 0;
   }
   constructor(public assets: PeopleAssets, r: Rng, public gender: Gender = r.chance(0.5) ? 'male' : 'female') {
     const A = assets.body[gender];
@@ -514,7 +517,7 @@ export class Person {
       const hc = r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a']);
       const bm = propMat(hc, 0.95);
       attach('Head', new THREE.Mesh(propGeo.beanie, bm), at(0, headTop, -0.012).multiply(new THREE.Matrix4().makeScale(1, 1.05, 1.1)));
-      attach('Head', new THREE.Mesh(propGeo.cuff, bm), at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12)));
+      this.detail.push(attach('Head', new THREE.Mesh(propGeo.cuff, bm), at(0, headTop + 0.012, -0.012).multiply(new THREE.Matrix4().makeScale(1.02, 1, 1.12))));
     }
     // bags
     const bagRoll = r.next();
@@ -523,7 +526,7 @@ export class Person {
       const bc = r.pick(['#151517', '#22262e', '#3a3f45', '#2f3a2a', '#5a1a1c', '#1f3d5a']);
       const bm = propMat(bc, 0.7);
       attach('spine_03', new THREE.Mesh(propGeo.backpack, bm), at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)));
-      for (const s of [-1, 1]) attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0));
+      for (const s of [-1, 1]) this.detail.push(attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.17, 0.075 + (o.topStyle === 2 ? 0.03 : 0), -0.5, 0, 0)));
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0));
@@ -545,7 +548,7 @@ export class Person {
     // shoes (the bare feet are shrunk inside them in the shader)
     const dark = !/^#[de]/.test(o.shoe);
     const sg = shoeGeo(o.shoe, o.sole, gender === 'male' ? 0.285 : 0.255, dark && r.chance(0.3));
-    for (const [s, bone] of [[1, 'foot_l'], [-1, 'foot_r']] as const) attach(bone, new THREE.Mesh(sg, shoeMat), at(s * b.legX, 0, gender === 'male' ? 0.02 : 0.025));
+    for (const [s, bone] of [[1, 'foot_l'], [-1, 'foot_r']] as const) this.detail.push(attach(bone, new THREE.Mesh(sg, shoeMat), at(s * b.legX, 0, gender === 'male' ? 0.02 : 0.025)));
     // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
     const target = (gender === 'male' ? 1.76 : 1.63) * r.range(0.94, 1.06);
     model.scale.setScalar(target / b.height);
@@ -613,6 +616,7 @@ export class Person {
       cup.position.y = -0.05;
       grip.add(cup);
       this.meshes.push(cup);
+      this.detail.push(cup);
       this.pose = (p) => {
         p.aim('upperarm_l', 'lowerarm_l', _v3.set(-0.1, -1, 0.08));
         p.aim('lowerarm_l', 'hand_l', _v3.set(-0.25, 0.3, 1));
@@ -671,8 +675,8 @@ export class Person {
     this.rq.copy(this.model().getWorldQuaternion(_q0));
     if (this.slow) {
       // older people: a slight stoop, head carried forward
-      this.turn('spine_02', 0.16);
-      this.turn('neck_01', 0.12);
+      this.turn('spine_02', 0.08);
+      this.turn('neck_01', 0.1);
     }
     if (phone) this.phonePose();
     this.pose?.(this);
