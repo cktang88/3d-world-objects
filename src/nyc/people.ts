@@ -30,7 +30,11 @@ const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wri
 };
 
 // ---------------------------------------------------------------- wardrobe (from the reference photos)
-const SKIN_TINT = ['#ffffff', '#f4e2d4', '#e6c4a6', '#c99a74', '#a8734e', '#7d5236', '#5c3a26'];
+/** skin albedos (sRGB). The body texture is the stock "Dark" skin (mean sRGB 166,120,88, already
+ *  orange-tan); these used to multiply it, which squared its chroma into orange. The shader now
+ *  divides the texture by its mean and keeps only its (softened) light/dark detail, so these are
+ *  the colours people actually get, and the far crowd paints the same colour. */
+const SKIN_TINT = ['#efd2bf', '#e2b99d', '#cfa07f', '#b3805e', '#946245', '#704731', '#503324'];
 const HAIR = ['#0e0b09', '#14100c', '#1c1410', '#241810', '#2a1c12', '#3d2a1a', '#4a3220', '#7a5a3a', '#b89868', '#6b6b6b'];
 const COAT = ['#151517', '#1b1d22', '#22262e', '#1d2433', '#2b2f36', '#3a3f45', '#4a4238', '#5b4a36', '#8a6c4a', '#a8865c', '#3b4232', '#4a1f22', '#6b6e72'];
 const PUFFER = ['#121214', '#1a1c22', '#1c2638', '#2f3a2a', '#5a1a1c', '#7a7f86', '#c8c4ba', '#1f3d5a'];
@@ -287,9 +291,15 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
         float clothRough = 0.88;
         if (pr < 0.5) {
           // skin: the tint, a little blotchy variation, warmer cheeks / nose / ears
-          diffuseColor.rgb *= uSkin * (0.95 + 0.1 * pedNoise(vBody * 28.0));
           float face = smoothstep(0.03, 0.09, vBody.z) * smoothstep(uSlimC.y + 0.06, uSlimC.y + 0.12, vBody.y) * (1.0 - smoothstep(uSlimC.y + 0.19, uSlimC.y + 0.25, vBody.y));
-          diffuseColor.rgb *= mix(vec3(1.0), vec3(1.06, 0.95, 0.92), face * 0.7);
+          // texture / its mean (linear 0.381, 0.188, 0.098): luminance detail, contrast softened (most
+          // on the face, where the baked occlusion made dark eye sockets), a little of its hue (lips)
+          vec3 skMean = vec3(0.381, 0.188, 0.098);
+          float skD = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)) / dot(skMean, vec3(0.2126, 0.7152, 0.0722));
+          vec3 skHue = diffuseColor.rgb / (skMean * max(skD, 0.05));
+          diffuseColor.rgb = uSkin * pow(max(skD, 0.0), mix(0.8, 0.5, face)) * mix(vec3(1.0), clamp(skHue, 0.6, 1.6), 0.3);
+          diffuseColor.rgb *= 0.95 + 0.1 * pedNoise(vBody * 28.0);
+          diffuseColor.rgb *= mix(vec3(1.0), vec3(1.04, 0.97, 0.95), face * 0.7);
         }
         else {
           vec3 c = pr == 1.0 ? uTop : pr == 2.0 ? uBottom : uShoe;
@@ -478,15 +488,15 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
  *  trapezius and down into the top of the pack (model space; was a flat 12 mm card standing off
  *  the chest). Cached per body / side / padding. */
 const strapGeos = new Map<string, THREE.BufferGeometry>();
-function strapGeo(side: number, neck: number, sp: number, pad: number) {
-  const k = `${side}|${neck}|${sp}|${pad}`;
+function strapGeo(side: number, neck: number, sp: number, pad: number, chest: number) {
+  const k = `${side}|${neck}|${sp}|${pad}|${chest}`;
   let g = strapGeos.get(k);
   if (g) return g;
-  const x = side * 0.1;
+  const x = side * 0.076;
   const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(x + side * 0.035, sp + 0.0, 0.085 + pad), // ends low on the chest, toward the armpit
-    new THREE.Vector3(x + side * 0.012, sp + 0.12, 0.092 + pad),
-    new THREE.Vector3(x, neck - 0.04, 0.06 + pad),
+    new THREE.Vector3(x + side * 0.02, sp + 0.0, chest - 0.01 + pad), // ends low on the chest, toward the armpit
+    new THREE.Vector3(x + side * 0.008, sp + 0.12, chest + pad),
+    new THREE.Vector3(x, neck - 0.04, chest - 0.04 + pad),
     new THREE.Vector3(x - side * 0.005, neck, 0.0), // over the trapezius
     new THREE.Vector3(x, neck - 0.04, -0.075 - pad),
     new THREE.Vector3(x, sp + 0.13, -0.12 - pad), // into the pack's top
@@ -1048,7 +1058,7 @@ export class Person {
       parts.push({ geo: propGeo.backpack, bone: 'spine_03', m: at(0, sp - 0.04, -0.2 - (o.topStyle === 2 ? 0.03 : 0)), color: bc });
       this.far.props |= 1;
       this.far.bag.set(bc);
-      for (const s of [-1, 1]) parts.push({ geo: strapGeo(s, b.neck, sp, o.topStyle === 2 ? 0.03 : o.topStyle === 3 || o.topStyle === 4 ? 0.012 : 0), bone: 'spine_03', m: new THREE.Matrix4(), color: bc });
+      for (const s of [-1, 1]) parts.push({ geo: strapGeo(s, b.neck, sp, [0, 0.008, 0.028, 0.014, 0.012][o.topStyle], (gender === 'male' ? 0.128 : 0.1) + (o.build === 2 ? 0.03 : o.build === 0 ? -0.01 : 0)), bone: 'spine_03', m: new THREE.Matrix4(), color: bc });
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       parts.push({ geo: propGeo.crossbody, bone: 'pelvis', m: at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0), color: bc });

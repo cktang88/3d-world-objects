@@ -354,7 +354,7 @@ export class FarCrowd {
             vec3 p = vBody;
             float ax = abs(p.x);
             float waist = uB0.x, neck = uB0.y, sx = uB0.z, ankle = uB0.w;
-            vec3 c = vSkin * vec3(0.93, 0.74, 0.6);
+            vec3 c = vSkin;   // skin albedo as the near shader paints it (people.ts SKIN_TINT)
             float headTop = uB1.z * 0.96;
             bool arm = ax > sx && p.y > waist + 0.25;
             if (arm) { if (ax < vStyle.y) c = vTop; }
