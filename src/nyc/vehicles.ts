@@ -73,6 +73,84 @@ function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean
     obj.add(sign);
     for (const d of taxiDecals(id, p)) near.add(d);
   }
+  // the Crown Vic's texture carries a generic "Yellow Cab" livery: paint the NYC one over it
+  if (id === 'taxi_cv') for (const d of crownVicLivery(p)) near.add(d);
+}
+
+/**
+ * Yellow cover panels in the body's own texture colour, projected over the Crown Vic's "Yellow Cab" oval (front
+ * doors) and "TAXI SERVICE" / fare text (rear doors): the NYC "T" roundel + NYC, and the medallion number.
+ */
+let cvCache: THREE.Mesh[] | null = null;
+function crownVicLivery(p: Prepared): THREE.Mesh[] {
+  if (!cvCache) {
+    // the body is the textured part with the most triangles
+    const body = [...p.lod0].filter((x) => x.mat !== 'paint' && (x.mat as THREE.MeshStandardMaterial).map).sort((a, b) => (b.geo.index?.count ?? 0) - (a.geo.index?.count ?? 0))[0];
+    if (!body) return [];
+    const bg = '#' + bodyYellow((body.mat as THREE.MeshStandardMaterial).map!).getHexString(THREE.SRGBColorSpace);
+    const front = decalMat(
+      canvasTex(512, 256, (g) => {
+        g.fillStyle = bg;
+        g.fillRect(0, 0, 512, 256);
+        g.fillStyle = '#111';
+        g.beginPath();
+        g.arc(150, 128, 78, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = bg;
+        g.fillRect(110, 78, 80, 18);
+        g.fillRect(140, 78, 20, 92);
+        g.fillStyle = '#111';
+        g.font = 'bold 64px Arial';
+        g.textBaseline = 'middle';
+        g.fillText('NYC', 250, 132);
+      }),
+      false,
+    );
+    const rear = decalMat(
+      canvasTex(512, 128, (g) => {
+        g.fillStyle = bg;
+        g.fillRect(0, 0, 512, 128);
+        g.fillStyle = '#111';
+        g.font = 'bold 30px Arial';
+        g.textBaseline = 'middle';
+        g.fillText('7J42', 24, 40);
+        g.font = '20px Arial';
+        g.fillText('NYC TAXI  ·  $3.00 initial charge', 24, 92);
+      }),
+      false,
+    );
+    const mesh = new THREE.Mesh(body.geo);
+    mesh.updateMatrixWorld();
+    cvCache = [];
+    for (const s of [-1, 1]) {
+      const ori = new THREE.Euler(0, (s * Math.PI) / 2, 0);
+      const at = (y: number, z: number) => {
+        const hit = new THREE.Raycaster(new THREE.Vector3(s * 2, y, z), new THREE.Vector3(-s, 0, 0)).intersectObject(mesh)[0];
+        return new THREE.Vector3(hit ? hit.point.x : s * 0.95, y, z);
+      };
+      cvCache.push(new THREE.Mesh(new DecalGeometry(mesh, at(0.66, -0.5), ori, new THREE.Vector3(1.05, 0.52, 0.5)), front));
+      cvCache.push(new THREE.Mesh(new DecalGeometry(mesh, at(0.86, 0.62), ori, new THREE.Vector3(0.95, 0.24, 0.5)), rear));
+    }
+    cvCache.forEach((m) => (m.userData.owned = false));
+  }
+  return cvCache.map((m) => m.clone());
+}
+/** the brightest half of a texture's colours, averaged (the body colour of an atlas) */
+function bodyYellow(t: THREE.Texture): THREE.Color {
+  const c = new THREE.Color(TAXI_YELLOW);
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 16;
+    const g = cv.getContext('2d')!;
+    g.drawImage(t.image as CanvasImageSource, 0, 0, 16, 16);
+    const d = g.getImageData(0, 0, 16, 16).data;
+    const px: number[][] = [];
+    for (let i = 0; i < d.length; i += 4) if (d[i] > d[i + 2] + 60) px.push([d[i], d[i + 1], d[i + 2]]); // yellowish only
+    if (px.length) c.setRGB(...([0, 1, 2].map((k) => px.reduce((a, q) => a + q[k], 0) / px.length / 255) as [number, number, number]), THREE.SRGBColorSpace);
+  } catch {
+    /* keep taxi yellow */
+  }
+  return c;
 }
 
 /** door livery for painted cabs: the black "T" roundel + NYC on the front doors, medallion number on the rear quarter */
@@ -132,8 +210,8 @@ function taxiDecals(id: string, p: Prepared): THREE.Mesh[] {
   }
   return out.map((m) => m.clone());
 }
-function decalMat(map: THREE.Texture) {
-  return new THREE.MeshStandardMaterial({ map, transparent: true, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -4, depthWrite: false });
+function decalMat(map: THREE.Texture, transparent = true) {
+  return new THREE.MeshStandardMaterial({ map, transparent, roughness: 0.4, polygonOffset: true, polygonOffsetFactor: -4, depthWrite: !transparent });
 }
 
 /** NYC taxi roof light: a slim white box with "TAXI" and the medallion number, lit when the cab is free */
