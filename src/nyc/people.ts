@@ -18,9 +18,9 @@ import { CURB, AX, SZ, AVE, ST } from './common';
 type Gender = 'male' | 'female';
 
 /** body-space landmarks of each base mesh in its T-pose (metres, +z forward) */
-const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wristX: number; elbowX: number; ankle: number; knee: number; height: number }> = {
-  male: { waist: 1.0, neck: 1.505, shoulderX: 0.2, wristX: 0.675, elbowX: 0.46, ankle: 0.115, knee: 0.54, height: 1.83 },
-  female: { waist: 0.985, neck: 1.47, shoulderX: 0.15, wristX: 0.61, elbowX: 0.39, ankle: 0.105, knee: 0.53, height: 1.74 },
+const BODY: Record<Gender, { waist: number; neck: number; shoulderX: number; wristX: number; elbowX: number; ankle: number; knee: number; height: number; armY: number; armZ: number; legX: number; legZ: number }> = {
+  male: { waist: 1.0, neck: 1.505, shoulderX: 0.2, wristX: 0.675, elbowX: 0.46, ankle: 0.115, knee: 0.54, height: 1.83, armY: 1.455, armZ: -0.065, legX: 0.114, legZ: -0.036 },
+  female: { waist: 0.985, neck: 1.47, shoulderX: 0.15, wristX: 0.61, elbowX: 0.39, ankle: 0.105, knee: 0.53, height: 1.74, armY: 1.418, armZ: -0.054, legX: 0.111, legZ: -0.045 },
 };
 
 // ---------------------------------------------------------------- wardrobe (from the reference photos)
@@ -65,8 +65,11 @@ function pickOutfit(r: Rng, gender: Gender): Outfit {
 
 // ---------------------------------------------------------------- shader: clothes painted on the skinned body
 const REGION_GLSL = /* glsl */ `
-uniform mat4 uGeo;
+uniform mat4 uGeo, uGeoInv;
 uniform float uGeoScale;
+uniform vec4 uSlimA; // arm thickness factor, arm axis y, arm axis z, shoulder |x|
+uniform vec4 uSlimB; // leg thickness factor, leg axis |x|, shoulder pull-in (m), leg axis z
+uniform vec4 uSlimC; // torso depth factor
 uniform vec4 uCut;   // waist y, neckline y, sleeve end |x|, trouser hem y
 uniform vec4 uBody;  // shoulder |x|, ankle y, jacket bottom y, top style
 uniform vec4 uInfl;  // top, bottom, shoes, bottom style
@@ -82,16 +85,20 @@ float pedRegion(vec3 p) {
 }
 `;
 
-function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number) {
+function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number, r: Rng) {
   const m = base.clone();
   const b = BODY[g];
   const sleeve = o.topStyle === 0 ? b.shoulderX + 0.13 : b.wristX - 0.035;
   const hem = o.bottomStyle === 2 ? b.knee + 0.07 : o.bottomStyle === 3 ? b.ankle + 0.06 : b.ankle;
   const neck = b.neck + (o.topStyle === 2 || o.topStyle === 4 ? 0.035 : o.topStyle === 3 ? 0.02 : 0);
-  const infl = [[0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle], [0.007, 0.008, 0.007, 0.002][o.bottomStyle], 0.012];
+  const infl = [[0.006, 0.014, 0.034, 0.02, 0.018][o.topStyle], [0.007, 0.008, 0.007, 0.002][o.bottomStyle], 0.02];
   const u = {
     uGeo: { value: geo },
     uGeoScale: { value: geoScale },
+    uGeoInv: { value: geo.clone().invert() },
+    uSlimA: { value: new THREE.Vector4(r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
+    uSlimB: { value: new THREE.Vector4(r.range(0.86, 0.97), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
+    uSlimC: { value: new THREE.Vector4(r.range(0.8, 0.95), 0, 0, 0) },
     uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
     uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
     uInfl: { value: new THREE.Vector4(infl[0], infl[1], infl[2], o.bottomStyle) },
@@ -110,6 +117,19 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vBody = (uGeo * vec4(position, 1.0)).xyz;
+        // the base meshes are superheroes: slim limbs, narrow shoulders and flatten the chest
+        vec3 bp = vBody;
+        float bax = abs(bp.x);
+        float wa = smoothstep(uSlimA.w - 0.02, uSlimA.w + 0.09, bax) * smoothstep(uCut.x + 0.15, uCut.x + 0.25, bp.y);
+        vec2 ac = uSlimA.yz;
+        bp.yz = ac + (bp.yz - ac) * mix(1.0, uSlimA.x, wa);
+        bp.x -= sign(bp.x) * uSlimB.z * smoothstep(0.04, uSlimA.w + 0.04, bax) * smoothstep(uCut.x + 0.05, uCut.x + 0.2, bp.y);
+        float wl = (1.0 - smoothstep(uCut.x - 0.14, uCut.x - 0.02, bp.y)) * smoothstep(0.0, 0.05, bax) * step(uBody.y, bp.y);
+        vec2 lc = vec2(sign(bp.x) * uSlimB.y, uSlimB.w);
+        bp.xz = lc + (bp.xz - lc) * mix(1.0, uSlimB.x, wl);
+        float wt = smoothstep(uCut.x - 0.12, uCut.x, bp.y) * (1.0 - wa) * (1.0 - smoothstep(uCut.y - 0.06, uCut.y + 0.02, bp.y));
+        bp.z = mix(bp.z, -0.03 + (bp.z + 0.03) * uSlimC.x, wt);
+        transformed = (uGeoInv * vec4(bp, 1.0)).xyz;
         float pr = pedRegion(vBody);
         float inf = pr == 1.0 ? uInfl.x : pr == 2.0 ? uInfl.y : pr == 3.0 ? uInfl.z : 0.0;
         transformed += normalize(normal) * (inf / uGeoScale);`,
@@ -145,7 +165,8 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
               c *= 0.72 + 0.32 * smoothstep(0.0, 0.55, d);
               clothRough = 0.42;
             } else if (st > 2.5 && st < 3.5) {     // open coat: shirt shows down the front
-              if (!arm && vBody.z > 0.02 && ax < 0.045 + 0.03 * smoothstep(uCut.x + 0.2, uCut.y, vBody.y) && vBody.y > uCut.x - 0.02) c = uInner;
+              if (!arm && vBody.z > 0.02 && ax < 0.012 + 0.055 * smoothstep(uCut.x + 0.18, uCut.y, vBody.y) && vBody.y > uCut.x + 0.12) c = uInner;
+              else if (!arm && vBody.z > 0.02 && ax < 0.008) c *= 0.6;   // closure line
               if (!arm && vBody.y < uCut.x + 0.02 && vBody.y > uCut.x - 0.01) c *= 0.7;
               clothRough = 0.8;
             } else if (st > 3.5) {                  // hoodie: kangaroo pocket seam + hood bulk at the neck
@@ -173,7 +194,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nvec3 pedGeoNormal = normal;')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, pedGeoNormal, cloth));');
   };
-  m.customProgramCacheKey = () => 'ped-body-v1';
+  m.customProgramCacheKey = () => 'ped-body-v2';
   return m;
 }
 
@@ -310,8 +331,10 @@ export class Person {
       const m = x as THREE.SkinnedMesh;
       if (!m.isSkinnedMesh) return;
       const name = (m.material as THREE.Material).name;
-      if (/Superhero/i.test(name)) m.material = bodyMaterial(A.base, o, gender, A.geo, A.geoScale);
+      if (/Superhero/i.test(name)) m.material = bodyMaterial(A.base, o, gender, A.geo, A.geoScale, r);
       else if (/Hair/i.test(name)) m.material = hm;
+      // a fixed, generous bounds: the lazily computed skinned bounds can be taken mid-update
+      m.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.3);
       this.meshes.push(m);
     });
     // hair (static meshes riding the head bone)
@@ -355,7 +378,7 @@ export class Person {
       for (const s of [-1, 1]) attach('spine_03', new THREE.Mesh(propGeo.strap, bm), at(s * 0.1, sp + 0.07, 0.115 + (o.topStyle === 2 ? 0.03 : 0), -0.15, 0, 0));
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
-      attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.15, b.waist - 0.02, 0.1, 0, -0.5, 0));
+      attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0));
     }
     // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
     const target = (gender === 'male' ? 1.76 : 1.63) * r.range(0.94, 1.06);
@@ -363,7 +386,7 @@ export class Person {
     this.mixer = new THREE.AnimationMixer(model);
     for (const [name, clip] of A.clips) this.actions.set(name, this.mixer.clipAction(clip));
     // a phone, shown for phone-users
-    this.phone = attach('hand_r', new THREE.Mesh(propGeo.phone, propMat('#0c0c0e', 0.25)), at(-b.wristX - 0.08, 1.45 - 0.01, 0.03, 0, 0, Math.PI / 2));
+    this.phone = attach('hand_r', new THREE.Mesh(propGeo.phone, propMat('#0c0c0e', 0.25)), at(-b.wristX - 0.075, b.armY - 0.035, b.armZ + 0.02, Math.PI / 2, 0, Math.PI / 2));
     this.phone.visible = false;
     this.setActivity('walk', r.range(0, 10));
   }
@@ -395,25 +418,43 @@ export class Person {
     this.mixer.update(dt);
     if (this.activity === 'phone') this.phonePose();
   }
-  private q = new THREE.Quaternion();
-  private e = new THREE.Euler();
-  /** hold the phone up in front of the chest and look down at it */
+  twoHands = false;
+  /** hold the phone up in front of the chest and look down at it (aimed in world space, so it
+   *  does not depend on the rig's local bone axes) */
   private phonePose() {
-    const set = (n: string, x: number, y: number, z: number, w = 1) => {
-      const b = this.bones.get(n);
-      if (!b) return;
-      this.q.setFromEuler(this.e.set(x, y, z));
-      b.quaternion.slerp(this.q, w);
+    const model = this.model();
+    model.updateMatrixWorld(true);
+    const rq = model.getWorldQuaternion(_q0);
+    const aim = (bone: string, child: string, dir: THREE.Vector3) => {
+      const b = this.bones.get(bone), c = this.bones.get(child);
+      if (!b || !c || !b.parent) return;
+      const from = c.getWorldPosition(_v1).sub(b.getWorldPosition(_v0)).normalize();
+      const to = _v2.copy(dir).normalize().applyQuaternion(rq);
+      const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromUnitVectors(from, to));
+      b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
+      b.updateMatrixWorld(true);
     };
-    set('upperarm_r', 1.25, 0.25, 0.25, 1);
-    set('lowerarm_r', 0, 0, 1.85, 1);
-    set('hand_r', -0.2, 0.3, 0, 1);
-    const h = this.bones.get('Head');
-    if (h) h.rotateX(0.35);
-    const n = this.bones.get('neck_01');
-    if (n) n.rotateX(0.2);
+    const turn = (bone: string, axis: THREE.Vector3, ang: number) => {
+      const b = this.bones.get(bone);
+      if (!b || !b.parent) return;
+      const ax = _v2.copy(axis).applyQuaternion(rq);
+      const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromAxisAngle(ax, ang));
+      b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
+      b.updateMatrixWorld(true);
+    };
+    // the model faces +z; its right side is -x
+    aim('upperarm_r', 'lowerarm_r', _v3.set(0.12, -1, 0.18));
+    aim('lowerarm_r', 'hand_r', _v3.set(0.45, 0.8, 0.6));
+    if (this.twoHands) {
+      aim('upperarm_l', 'lowerarm_l', _v3.set(-0.12, -1, 0.18));
+      aim('lowerarm_l', 'hand_l', _v3.set(-0.45, 0.8, 0.6));
+    }
+    turn('neck_01', _v3.set(1, 0, 0), 0.25);
+    turn('Head', _v3.set(1, 0, 0), 0.3);
   }
 }
+const _v0 = new THREE.Vector3(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+const _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
 
 // ---------------------------------------------------------------- the crowd
 interface Ped {
@@ -430,7 +471,7 @@ interface Ped {
   tick: number;
   acc: number;
 }
-const COUNT = 40;
+const COUNT = 60;
 
 export class Pedestrians {
   peds: Ped[] = [];
@@ -450,13 +491,13 @@ export class Pedestrians {
     pd.off = 0;
     const standing = ahead ? r.chance(0.3) : r.chance(0.12);
     if (pd.axis === 'x') {
-      const k = Math.round(p.z / SZ - 0.5) + r.int(-1, 1);
+      const k = Math.round(p.z / SZ - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
       pd.line = (k + 0.5) * SZ + r.pick([-1, 1]) * (ST / 2 + r.range(0.9, 3.4));
-      pd.t = p.x + (ahead ? r.range(-60, 60) : -pd.dir * r.range(40, 70));
+      pd.t = p.x + (ahead ? r.range(-50, 50) : -pd.dir * r.range(40, 60));
     } else {
-      const k = Math.round(p.x / AX - 0.5) + r.int(-1, 1);
+      const k = Math.round(p.x / AX - 0.5) + (r.chance(0.6) ? 0 : r.int(-1, 1));
       pd.line = (k + 0.5) * AX + r.pick([-1, 1]) * (AVE / 2 + r.range(0.9, 3.4));
-      pd.t = p.z + (ahead ? r.range(-60, 60) : -pd.dir * r.range(40, 70));
+      pd.t = p.z + (ahead ? r.range(-50, 50) : -pd.dir * r.range(40, 60));
     }
     pd.v = r.range(1.05, 1.5);
     if (standing) {
