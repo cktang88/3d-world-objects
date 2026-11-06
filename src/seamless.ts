@@ -85,6 +85,20 @@ export function subtractRect(a: Rect, b: Rect): Rect[] {
   return out;
 }
 
+// ---------------------------------------------------------------- floors of one building
+
+/**
+ * The level stack across a building's floors: leaving the lobby (floor 0) for another floor pushes
+ * the lobby; coming back down to it pops it; floor-to-floor moves change nothing. So Q on any
+ * upper floor goes to the lobby, and Q in the lobby to the street. `top` is the stack's top desc.
+ */
+export function floorStackStep(top: LevelDesc | undefined, from: LevelDesc, to: LevelDesc): 'push' | 'pop' | null {
+  if (from.kind !== 'floor' || to.kind !== 'floor' || from.seed !== to.seed || from.name !== to.name) return null;
+  const lobbyOnTop = top?.kind === 'floor' && top.seed === from.seed && top.name === from.name && top.floor === 0;
+  if (to.floor === 0) return lobbyOnTop ? 'pop' : null;
+  return from.floor === 0 && !lobbyOnTop ? 'push' : null;
+}
+
 // ---------------------------------------------------------------- see-through glass
 
 const HOLES = 2;
@@ -157,6 +171,10 @@ export interface Slot {
   shown: boolean;
   /** the portal it was last placed at */
   portal: Portal | null;
+  /** started by the door policy (cancellable when you walk on), not asked for by a level */
+  byDoor?: boolean;
+  /** has been the active level */
+  entered?: boolean;
 }
 
 export interface SeamlessStats {
@@ -166,6 +184,7 @@ export interface SeamlessStats {
   seamless: number;
   fades: number;
   evicted: number;
+  cancelled: number;
   lastBuildMs: number;
   maxSliceMs: number;
   log: string[];
@@ -204,7 +223,7 @@ const PREBUILD_KINDS = new Set(['interior', 'gallery', 'atrium', 'floor']); // '
 
 export class Seamless {
   slots = new Map<string, Slot>();
-  stats: SeamlessStats = { builds: 0, hits: 0, prebuilds: 0, seamless: 0, fades: 0, evicted: 0, lastBuildMs: 0, maxSliceMs: 0, log: [] };
+  stats: SeamlessStats = { builds: 0, hits: 0, prebuilds: 0, seamless: 0, fades: 0, evicted: 0, cancelled: 0, lastBuildMs: 0, maxSliceMs: 0, log: [] };
   enabled = true;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -350,6 +369,7 @@ export class Seamless {
     s.level.group.quaternion.identity();
     s.level.group.updateMatrixWorld(true);
     this.active = s;
+    s.entered = true;
     for (const p of this.pool) p.intensity = 0;
     s.used = performance.now();
     this.pins = new Set([s.key, ...keep]);
@@ -380,7 +400,8 @@ export class Seamless {
 
   private evict() {
     const free = [...this.slots.values()].filter((s) => !this.pins.has(s.key) && !s.shown && !this.wanted.has(s.key));
-    free.sort((a, b) => a.used - b.used);
+    // door prebuilds you never went into go first, then least recently used
+    free.sort((a, b) => Number(!!b.byDoor && !b.entered) - Number(!!a.byDoor && !a.entered) || a.used - b.used);
     let tris = free.reduce((n, s) => n + s.tris, 0);
     while (free.length > this.capacity || (free.length > 1 && tris > this.triBudget)) {
       const s = free.shift()!;
@@ -398,6 +419,7 @@ export class Seamless {
   update(dt: number, level: Level, player: THREE.Vector3): { enter?: Portal; exit?: boolean } {
     const t0 = performance.now();
     const out: { enter?: Portal; exit?: boolean } = {};
+    this.clock += dt;
     if (this.blend) {
       this.blend.t = Math.min(1, this.blend.t + dt / 0.45);
       const e = this.blend.t * this.blend.t * (3 - 2 * this.blend.t);
@@ -442,10 +464,24 @@ export class Seamless {
     return out;
   }
 
+  /**
+   * Door prebuild policy. On the street (storefronts 5–10 m apart) a door you face within 14 m is
+   * worth building; inside a building, where a hall passes a door every few metres, only one you
+   * stop in front of: within 5 m, looked at squarely, for 0.3 s.
+   */
+  policy = {
+    street: { range: 14, dot: 0.5, near: 3, dwell: 0, max: 2 },
+    inside: { range: 4.5, dot: 0.85, near: 0, dwell: 0.4, max: 1 },
+  };
+  private dwell = new Map<string, number>();
+  private clock = 0;
+
   private choose(level: Level, player: THREE.Vector3) {
     const fwd = this.camera.getWorldDirection(V());
     fwd.y = 0;
     fwd.normalize();
+    const kind = this.active?.level === level ? this.active.desc.kind : '';
+    const pol = kind === 'floor' || kind === 'interior' ? this.policy.inside : this.policy.street;
     const c = V();
     const cands: { p: Portal; d: number }[] = [];
     for (const p of level.portals()) {
@@ -453,26 +489,37 @@ export class Seamless {
       p.box.getCenter(c);
       c.y = player.y;
       const d = c.distanceTo(player);
-      if (d > 14) continue;
+      if (d > pol.range) continue;
       const dir = c.sub(player).normalize();
-      if (d < 3 || dir.dot(fwd) > 0.5) cands.push({ p, d });
+      if (d < pol.near || dir.dot(fwd) > pol.dot) cands.push({ p, d });
     }
     cands.sort((a, b) => a.d - b.d);
     this.wanted.clear();
-    for (const { p } of cands.slice(0, 2)) {
+    const now = this.clock * 1000; // game time: dwell counts frames, not wall clock
+    const seen = new Map<string, number>();
+    for (const { p } of cands.slice(0, pol.max)) {
       const desc = p.target as LevelDesc;
-      this.wanted.add(descKey(desc));
-      if (!this.slots.has(descKey(desc)) && this.queue.length < 2) this.prebuild(desc);
+      const key = descKey(desc);
+      const since = this.dwell.get(key) ?? now;
+      seen.set(key, since);
+      if (now - since < pol.dwell * 1000 && !this.slots.has(key)) continue;
+      this.wanted.add(key);
+      if (!this.slots.has(key) && this.queue.length < 2) {
+        this.prebuild(desc);
+        this.slots.get(key)!.byDoor = true;
+      }
     }
+    this.dwell = seen;
     // ---- vertical.ts hook: levels may ask for others (the floors above/below near a stair, a lift's destination)
     for (const desc of level.prefetch?.(player) ?? []) {
       this.wanted.add(descKey(desc));
       if (!this.slots.has(descKey(desc))) this.prebuild(desc);
     }
     // ---- end vertical hook
-    // turned away: drop half-built ones nobody wants any more
+    // turned away or walked past: drop half-built door prebuilds nobody wants any more
     for (const s of [...this.queue]) {
-      if (this.wanted.has(s.key) || this.pins.has(s.key)) continue;
+      if (!s.byDoor || this.wanted.has(s.key) || this.pins.has(s.key)) continue;
+      this.stats.cancelled++;
       this.queue = this.queue.filter((q) => q !== s);
       this.drop(s);
     }

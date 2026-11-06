@@ -2,7 +2,11 @@
 import * as THREE from 'three';
 import { test, expect, between, fmt } from './qa';
 import './env';
-import { Seamless, descKey, facing, placementMatrix } from '../src/seamless';
+import { Seamless, descKey, facing, placementMatrix, floorStackStep } from '../src/seamless';
+import { FloorLevel, type FloorDesc } from '../src/rooms/vertical';
+import { InteriorLevel } from '../src/interior';
+import { Vertical } from '../src/vertical';
+import { Player } from '../src/player';
 import { Lazy, registerContainer } from '../src/lazy';
 import { realScale } from '../src/realscale';
 import type { Level, LevelDesc, Portal } from '../src/level';
@@ -111,4 +115,97 @@ test('realScale: common things come out at real size', () => {
     const k = realScale(t, '', '', L, 'objaverse');
     between(L * k, lo, hi, `"${t}" (modelled ${L}) -> ${fmt(L * k)} m`);
   }
+});
+
+// ---------------------------------------------------------------- inside a building
+
+/** a walk-up the way main.ts drives it: real floors and apartments, Seamless + Vertical + Player, the level stack */
+function building(floors: number) {
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera();
+  const renderer = { compileAsync: () => Promise.resolve(), toneMappingExposure: 1 } as unknown as THREE.WebGLRenderer;
+  const kinds: string[] = [];
+  const seam = new Seamless({
+    scene, camera, renderer,
+    build: (d: LevelDesc, staged: boolean) => {
+      kinds.push(d.kind);
+      return d.kind === 'floor' ? new FloorLevel(d, { staged }) : new InteriorLevel(d as Extract<LevelDesc, { kind: 'interior' }>, { staged });
+    },
+  });
+  const player = new Player(camera, { addEventListener() {} } as unknown as HTMLElement);
+  let level!: Level;
+  const vert = new Vertical({ scene, camera, renderer, seam, player, aimed: () => null });
+  player.ground = (x, z, y) => vert.ground(level, x, z, y);
+  const stack: LevelDesc[] = [{ kind: 'nyc', seed: 1, name: 'street' }];
+  let cur: LevelDesc = { kind: 'floor', seed: 4242, name: 'QA Walkup', type: 'walkup', floor: 0, floors };
+  const set = (desc: LevelDesc, pos?: THREE.Vector3, yaw?: number) => {
+    const s = seam.take(desc);
+    if (level) scene.remove(level.group);
+    level = s.level;
+    seam.setActive(s, stack.slice(-2).map(descKey));
+    scene.add(level.group);
+    player.place(pos ?? level.spawn.pos, yaw ?? level.spawn.yaw);
+    cur = desc;
+  };
+  set(cur);
+  const frame = (dt = 1 / 60) => {
+    player.update(dt, seam.colliders(level.colliders(player.pos), player.pos), true);
+    level.update(dt, player.pos, 0);
+    seam.update(dt, level, player.pos);
+    const sw = vert.update(dt, level, true);
+    if (sw) {
+      const step = floorStackStep(stack[stack.length - 1], cur, sw.desc);
+      if (step === 'pop') stack.pop();
+      else if (step === 'push') stack.push(cur);
+      const vel = player.vel.clone();
+      set(sw.desc, sw.pos, sw.yaw);
+      player.vel.copy(vel);
+      vert.afterSwitch(level, sw);
+    }
+    camera.position.copy(player.pos);
+  };
+  const walkTo = (x: number, z: number) => {
+    for (let i = 0; i < 900; i++) {
+      const dx = x - player.pos.x, dz = z - player.pos.z, d = Math.hypot(dx, dz);
+      if (d < 0.12) return true;
+      const step = Math.min(d, 3 / 60);
+      player.pos.x += (dx / d) * step;
+      player.pos.z += (dz / d) * step;
+      player.yaw = Math.atan2(-dx, -dz);
+      frame();
+    }
+    return false;
+  };
+  return { seam, kinds, stack, walkTo, get level() { return level; }, get cur() { return cur; } };
+}
+
+test('seamless in a building: lobby -> roof by the stairs builds the floors, few apartments, little eviction; the stack holds the lobby', () => {
+  const floors = 6;
+  const w = building(floors);
+  const d = (w.level as FloorLevel).d;
+  const ax = (d.ax0 + d.ax1) / 2, bx = (d.bx0 + d.bx1) / 2, zm = -d.Lf - d.Md / 2;
+  expect(w.walkTo(0, d.Ld + 1.2), 'walked to the stair hall');
+  const lap = () => [[ax, 0.6], [ax, -0.2], [ax, zm], [bx, zm], [bx, -0.2], [bx, 0.6]].every(([x, z]) => w.walkTo(x, z));
+  for (let f = 1; f <= floors; f++) {
+    expect(lap(), `climbed to floor ${f}`);
+    // the level stack: the street, then the lobby, however high you climb (Q goes to the lobby)
+    expect(w.stack.length === 2 && w.stack[1].kind === 'floor' && w.stack[1].floor === 0, `stack at floor ${f}: ${w.stack.map((s) => s.kind + (s.kind === 'floor' ? s.floor : '')).join(' > ')}`);
+  }
+  expect((w.level as FloorLevel).roof, 'reached the roof');
+  const apts = w.kinds.filter((k) => k === 'interior').length, flo = w.kinds.filter((k) => k === 'floor').length;
+  console.log(`   lobby -> roof: ${flo} floor builds, ${apts} apartment prebuilds, ${w.seam.stats.evicted} evicted, ${w.seam.stats.cancelled} cancelled`);
+  // every floor once (+ the roof), and at most one apartment per landing you stand at
+  expect(flo <= floors + 2, `${flo} floor builds for ${floors + 1} floors`);
+  expect(apts <= floors, `${apts} apartments prebuilt walking straight up the stair`);
+  expect(w.seam.stats.evicted <= floors, `${w.seam.stats.evicted} levels evicted`);
+});
+
+test('floorStackStep: leaving the lobby pushes it once, floor to floor nothing, back down pops it, other buildings untouched', () => {
+  const F = (floor: number, seed = 1): FloorDesc => ({ kind: 'floor', seed, name: 'B', type: 'walkup', floor, floors: 6 });
+  expect(floorStackStep(undefined, F(0), F(1)) === 'push', 'lobby -> 1 pushes the lobby');
+  expect(floorStackStep(F(0), F(1), F(2)) === null, '1 -> 2 pushes nothing');
+  expect(floorStackStep(F(0), F(3), F(0)) === 'pop', 'back to the lobby pops it');
+  expect(floorStackStep(F(0), F(0), F(1)) === null, 'lobby already on the stack: no second push');
+  expect(floorStackStep(F(0), F(0, 2), F(1, 2)) === 'push', 'another building has its own entry');
+  expect(floorStackStep(undefined, F(2), { kind: 'interior', seed: 1, name: 'x', style: 'apartment', floor: 0, floors: 1, biome: 'town' }) === null, 'entering an apartment is a normal portal');
 });

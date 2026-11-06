@@ -26,7 +26,7 @@ import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
 import { Weather } from './weather';
 import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
-import { Seamless, descKey, doorOf, type Slot } from './seamless';
+import { Seamless, descKey, doorOf, floorStackStep, type Slot } from './seamless';
 import { Lazy, type LazyContainer } from './lazy';
 import { FloorLevel, floorName, testBuilding } from './rooms/vertical';
 import { Vertical } from './vertical';
@@ -248,6 +248,17 @@ function prewarmShops() {
     idle(next);
   };
   idle(next);
+}
+/**
+ * Floors of one building share one stack entry: leaving the lobby (by stair or lift) pushes the
+ * lobby, so Q on any upper floor takes you back to the lobby, and Q there to the
+ * street; coming back down to the lobby pops it. Floor-to-floor moves push nothing.
+ */
+function seamFloorStack(from: LevelDesc, to: LevelDesc) {
+  const step = floorStackStep(stack[stack.length - 1]?.desc, from, to);
+  if (step === 'pop') stack.pop();
+  // back in the lobby at its spawn by the street door: where you left it is mid-stair, which would climb again
+  else if (step === 'push') stack.push({ desc: from, pos: level.spawn.pos.clone(), yaw: level.spawn.yaw, exact: true, scale });
 }
 // ---- end seamless
 
@@ -691,6 +702,7 @@ function frame() {
     if (vsw) {
       const t0 = performance.now();
       const vel = player.vel.clone(), onGround = player.onGround;
+      seamFloorStack(currentDesc, vsw.desc);
       currentDesc = vsw.desc;
       seamSwitch(seam.take(vsw.desc), vsw.pos, vsw.yaw);
       player.vel.copy(vel);
