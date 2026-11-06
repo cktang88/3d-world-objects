@@ -185,7 +185,9 @@ const settle = (minFrames = 5, stableFor = 4) =>
       if (f.frame !== lastFrame) {
         lastFrame = f.frame;
         const lv = window.__world.level;
-        const k = [lv?.chunks?.size ?? 0, f.geometries, f.textures, f.programs, lv?.name].join('|');
+        // geometry/texture counts in 5% steps: traffic and seamless prebuilding keep nudging them
+        const q = (n) => Math.round(Math.log(1 + n) / Math.log(1.05));
+        const k = [lv?.chunks?.size ?? 0, q(f.geometries), q(f.textures), f.programs, lv?.name].join('|');
         if (k === key) since++;
         else { key = k; since = 0; }
         if (f.frame - start >= minFrames && since >= stableFor) return resolve({ frames: f.frame - start, key });
@@ -262,7 +264,9 @@ async function measure(pose) {
     });
   }
   at(`${pose.name}: settle`);
-  const st = await settle();
+  // settle for at most 60% of the pose budget, then measure anyway (recorded as settled: false)
+  const st = await limit(settle(), 'settle', POSE_MAX * 0.6).catch(() => ({ frames: null, unsettled: true }));
+  if (st.unsettled) log(`${pose.name}: counts still changing, measuring anyway`);
   at(`${pose.name}: sample`);
   const s = await sample();
   await sampleMem();
@@ -270,7 +274,7 @@ async function measure(pose) {
     desc: pose.desc, level: await levelName(), ...(label ? { portal: label } : {}), ...(pose.pos ? { pos: pose.pos, yaw: +pose.yaw.toFixed(3), pitch: pose.pitch } : {}),
     commit, date: new Date().toISOString(), quality, viewport: [W, H], seed: Number(seed), tod,
     calls: s.calls, callsRange: s.callsRange, tris: s.tris, programs: s.programs, geometries: s.geometries, textures: s.textures,
-    perPass: s.perPass, scene: s.scene, top: s.top, settleFrames: st.frames, memoryPeak: { ...poseMem },
+    perPass: s.perPass, scene: s.scene, top: s.top, settleFrames: st.frames, settled: !st.unsettled, memoryPeak: { ...poseMem },
   };
   log(`${pose.name}: calls ${s.calls}  tris ${(s.tris / 1e6).toFixed(2)}M  programs ${s.programs}  inFrustum ${s.scene.meshesInFrustum}/${s.scene.meshesVisible}  mem r${poseMem.rendererMB}/g${poseMem.gpuMB}/h${poseMem.jsHeapMB} MB  (${((Date.now() - ts) / 1000).toFixed(0)} s)`);
   for (const [k, v] of Object.entries(s.perPass)) log(`    ${k.padEnd(22)} ${String(v.calls).padStart(5)} ${(v.tris / 1e6).toFixed(2).padStart(6)}M x${v.n}`);
