@@ -1542,6 +1542,7 @@ const _rects: Rect[] = [];
 const _dir = new THREE.Vector3();
 const _tv = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
+const _v4 = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const _m4 = new THREE.Matrix4();
 
@@ -1804,9 +1805,46 @@ export class Pedestrians {
     }
     far?.end();
     // shadows only for the nearest SHADOWS people (skinned shadow casters cost a full skinning pass)
-    order.forEach((pd, i) => pd.p.setShadows(i < SHADOWS && pd.dist < 30));
+    // everyone else in view gets a soft contact blob: all of them in one instanced draw
+    const blobs = this.blobs();
+    let nb = 0;
+    order.forEach((pd, i) => {
+      const cast = i < SHADOWS && pd.dist < 30;
+      pd.p.setShadows(cast);
+      if (cast || !pd.seen || pd.dist > 90 || nb >= blobs.instanceMatrix.count) return;
+      _s.set(pd.lead || pd.buddy ? 0.55 : 0.5, 1, pd.lead || pd.buddy ? 0.55 : 0.5);
+      _q.identity();
+      _v4.set(pd.pos.x, pd.pos.y + 0.012, pd.pos.z);
+      blobs.setMatrixAt(nb++, _m4.compose(_v4, _q, _s));
+    });
+    blobs.count = nb;
+    blobs.instanceMatrix.needsUpdate = true;
   }
   private order: Ped[] = [];
+  private blobMesh: THREE.InstancedMesh | null = null;
+  /** soft dark ellipses on the ground under people that cast no real shadow */
+  private blobs() {
+    if (this.blobMesh) return this.blobMesh;
+    const n = 64, d = new Uint8Array(n * n * 4);
+    for (let y = 0; y < n; y++)
+      for (let x = 0; x < n; x++) {
+        const r = Math.hypot(x - n / 2 + 0.5, y - n / 2 + 0.5) / (n / 2);
+        const a = Math.max(0, 1 - r) ** 1.6;
+        d.set([255, 255, 255, Math.round(a * 255)], (y * n + x) * 4);
+      }
+    const tex = new THREE.DataTexture(d, n, n);
+    tex.needsUpdate = true;
+    const geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: tex, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const m = new THREE.InstancedMesh(geo, mat, Math.max(1, COUNT));
+    m.count = 0;
+    m.frustumCulled = false;
+    m.renderOrder = 1;
+    m.name = 'people-blobs';
+    this.group.add(m);
+    this.blobMesh = m;
+    return m;
+  }
   private farCrowd: FarCrowd | null = null;
   private weatherSeen = 0;
   private bakeMs = 0;
