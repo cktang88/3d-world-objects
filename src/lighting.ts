@@ -133,7 +133,13 @@ const U = {
   night: { value: 0 },
   lit: { value: 0 },
   wet: { value: 0 },
+  /** planar reflection of bright things (lit windows, signs, lamps, signals) for wet ground */
+  reflTex: { value: null as THREE.Texture | null },
+  reflMat: { value: new THREE.Matrix4() },
+  reflOn: { value: 0 },
 };
+/** layer of the meshes that show in wet-ground reflections (emissive things; lighting.ts tags them) */
+export const REFLECT_LAYER = 5;
 let night = 0;
 let tod: TimeOfDay = 'day';
 const listeners: ((t: TimeOfDay, night: number) => void)[] = [];
@@ -217,12 +223,18 @@ export function wetSurface(m: THREE.MeshStandardMaterial, amount = 1) {
     prev(sh, r);
     sh.uniforms.uWet = U.wet;
     sh.uniforms.uWetK = k;
+    sh.uniforms.uReflTex = U.reflTex;
+    sh.uniforms.uReflMat = U.reflMat;
+    sh.uniforms.uReflOn = U.reflOn;
     sh.vertexShader = 'varying vec3 vWetPos;\n' + sh.vertexShader.replace(
       '#include <worldpos_vertex>',
       `#include <worldpos_vertex>
 vWetPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
     );
     sh.fragmentShader = `uniform float uWet;\nuniform float uWetK;\nvarying vec3 vWetPos;
+uniform sampler2D uReflTex;
+uniform mat4 uReflMat;
+uniform float uReflOn;
 float wetHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float wetNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
@@ -238,10 +250,30 @@ diffuseColor.rgb *= 1.0 - 0.45 * wetMask;`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 roughnessFactor = mix(roughnessFactor, mix(0.32, 0.06, puddle), wetMask);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-normal = normalize(mix(normal, normalize(vNormal), wetAmt * puddle));`);
+normal = normalize(mix(normal, normalize(vNormal), wetAmt * puddle));`)
+      .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+if (uReflOn > 0.5 && wetMask > 0.02) {
+  // the mirrored bright things, smeared vertically on rough wet asphalt, sharp in puddles
+  vec4 rc = uReflMat * vec4(vWetPos, 1.0);
+  vec2 ruv = rc.xy / rc.w + normal.xz * 0.01;
+  float smear = mix(0.022, 0.003, puddle);
+  // per-pixel jitter between the taps (dithered, so the streak is smooth rather than dashed)
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
+  vec3 rr = vec3(0.0);
+  float wsum = 0.0;
+  for (int k = -4; k <= 4; k++) {
+    float o = float(k) + jit;
+    float wk = 1.0 - abs(o) / 5.0;
+    rr += texture2D(uReflTex, ruv + vec2(0.0, o * smear)).rgb * wk;
+    wsum += wk;
+  }
+  rr /= wsum;
+  float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 5.0);
+  gl_FragColor.rgb += rr * wetMask * mix(0.35, 1.0, puddle) * (0.25 + 0.75 * fres);
+}`);
   };
   const key = m.customProgramCacheKey.bind(m);
-  m.customProgramCacheKey = () => key() + '|wet';
+  m.customProgramCacheKey = () => key() + '|wet2';
   m.needsUpdate = true;
   return m;
 }
@@ -612,6 +644,9 @@ export class Lighting {
   private padGroup = new THREE.Group();
   private warned = new Set<string>();
   private lightCount: Record<LightKind, number> = { point: 0, spot: 0, pointShadow: 0, spotShadow: 0 };
+  // wet-ground planar reflections of the bright things (REFLECT_LAYER) at half resolution
+  private reflCam = new THREE.PerspectiveCamera();
+  private reflRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -784,6 +819,7 @@ export class Lighting {
         this.placeLamps(focus);
       }
     }
+    this.reflect();
     if (this.csm) {
       // ?shadows=0 / ?fast=1: no CSM shader patch (a much smaller program per material); one plain sun light
       this.setupCsmMaterials(FLAGS.shadows);
@@ -806,6 +842,53 @@ export class Lighting {
   resize() {
     this.grade.uniforms.uAspect.value = innerWidth / innerHeight;
     if (this.csm) this.csm.updateFrustums();
+  }
+
+  // ------------------------------------------------------------ wet-ground reflections
+
+  /**
+   * Render the emissive things (REFLECT_LAYER) mirrored in the ground plane y = 0 into a half-res
+   * target; wetSurface() materials add it, smeared by roughness, where the street is wet. Only
+   * outdoors, on ultra/high, when something is wet and there is something bright to reflect.
+   */
+  private reflect() {
+    const on = this.place === 'outdoor' && this.quality !== 'low' && FLAGS.post && U.wet.value > 0.05 && (night > 0.1 || weather.wet > 0.05);
+    U.reflOn.value = on ? 1 : 0;
+    if (!on) return;
+    const r = this.renderer, cam = this.camera;
+    const size = r.getDrawingBufferSize(new THREE.Vector2());
+    const w = Math.max(1, Math.round(size.x / 2)), h = Math.max(1, Math.round(size.y / 2));
+    if (this.reflRT.width !== w || this.reflRT.height !== h) this.reflRT.setSize(w, h);
+    cam.updateMatrixWorld();
+    // mirror the camera in the ground plane (position, view direction, up)
+    const rc = this.reflCam;
+    rc.copy(cam, false);
+    const p = new THREE.Vector3().setFromMatrixPosition(cam.matrixWorld);
+    const look = new THREE.Vector3(0, 0, -1).applyMatrix4(cam.matrixWorld);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    p.y = -p.y;
+    look.y = -look.y;
+    up.y = -up.y;
+    rc.position.copy(p);
+    rc.up.copy(up);
+    rc.lookAt(look);
+    rc.updateMatrixWorld();
+    rc.layers.set(REFLECT_LAYER);
+    // texture matrix: world -> reflection uv
+    U.reflMat.value.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1).multiply(rc.projectionMatrix).multiply(rc.matrixWorldInverse);
+    U.reflTex.value = this.reflRT.texture;
+    const prevRT = r.getRenderTarget(), prevAuto = r.shadowMap.autoUpdate, prevBg = this.scene.background;
+    r.shadowMap.autoUpdate = false;
+    this.scene.background = null;
+    const clear = r.getClearColor(new THREE.Color()), alpha = r.getClearAlpha();
+    r.setClearColor(0x000000, 1);
+    r.setRenderTarget(this.reflRT);
+    r.clear();
+    r.render(this.scene, rc);
+    r.setRenderTarget(prevRT);
+    r.setClearColor(clear, alpha);
+    r.shadowMap.autoUpdate = prevAuto;
+    this.scene.background = prevBg;
   }
 
   // ------------------------------------------------------------ fixed light budget
@@ -901,8 +984,9 @@ export class Lighting {
 
   // ------------------------------------------------------------ outdoor: time of day
 
+  /** HDRI download size: 2k (6 MB) only on ultra; the 1k (1.5 MB) one lights just as well (the PMREM is built at 1k either way) */
   private res() {
-    return this.quality === 'low' ? '1k' : '2k';
+    return this.quality === 'ultra' ? '2k' : '1k';
   }
 
   /** (re)aim at the current time of day: load its HDRI, then blend to it */
@@ -1204,6 +1288,9 @@ export class Lighting {
     const found: THREE.Object3D[] = [];
     this.scene.traverse((o) => {
       if (o.userData.streetLight) found.push(o);
+      // bright things show in wet-ground reflections
+      const mm = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if ((o as THREE.Mesh).isMesh && mm && !Array.isArray(mm) && (mm.userData?.litWindows || (mm.emissive && mm.emissiveIntensity > 0 && mm.emissive.getHex() !== 0)) && !o.layers.isEnabled(REFLECT_LAYER)) o.layers.enable(REFLECT_LAYER);
       const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
       if (m && !Array.isArray(m) && m.isMeshStandardMaterial && !this.emissives.has(m) && m.emissive && (m.emissiveMap || m.emissive.getHex() === 0xffe2b0)) {
         m.userData.baseEI ??= m.emissiveIntensity;
