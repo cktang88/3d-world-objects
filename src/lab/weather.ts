@@ -1,18 +1,14 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { streetLightMarker, wetSurface } from '../lighting';
-import { NycLevel } from '../nyc';
 
 /**
  * ?lab=weather — a cheap street canyon for tuning src/weather.ts: road + kerbs + pavements,
  * brick and stone walk-ups with roofs, AC units and a fire escape, an awning and an arcade (must
  * stay dry), two parked "cars", a tree, and Midtown towers up to 330 m (to lose in low cloud).
  *   &weather=clear|partly|overcast|lightrain|rain|fog|snow   &tod=day|golden|dusk|night
- *   &nyc=1  the real NYC blocks instead (heavier)
  * Y cycles the weather.
  */
-let level: NycLevel | null = null;
-const focus = new THREE.Vector3(50.5, 0, 22);
 
 function std(color: string, roughness: number, metalness = 0) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -25,15 +21,7 @@ const scene: LabScene = {
   look: [-1, 5, -10],
   env: 'nyc',
   ground: false,
-  build({ group, params }) {
-    if (params.get('nyc')) {
-      level = new NycLevel({ kind: 'nyc', seed: Number(params.get('seed') ?? 20261105), name: 'lab' });
-      group.add(level.group);
-      for (let i = 0; i < 20; i++) level.update(0.016, focus, i * 0.016);
-      group.userData.cam = new THREE.Vector3(50.5, 1.7, 24);
-      group.userData.look = new THREE.Vector3(53, 9, -30);
-      return;
-    }
+  build({ group }) {
     const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number) => {
       const o = new THREE.Mesh(geo, m);
       o.position.set(x, y, z);
@@ -48,7 +36,8 @@ const scene: LabScene = {
     const g = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), road);
     g.receiveShadow = true;
     group.add(g);
-    const pave = wetSurface(std('#9a968e', 0.85), 0.55);
+    // pavements: plain material, so the lab shows weather.ts's own wet + snow (the road keeps lighting's puddles)
+    const pave = std('#9a968e', 0.85);
     const brick = std('#8a4b3a', 0.88), brick2 = std('#9a5a44', 0.9), stone = std('#c8bca8', 0.8), tar = std('#2b2b2d', 0.95);
     const glass = std('#6e7f90', 0.06, 0.9), steel = std('#2a2a2a', 0.6, 0.6), metal = std('#b8bcc0', 0.45, 0.5);
     for (const sx of [-1, 1]) {
@@ -90,9 +79,6 @@ const scene: LabScene = {
     // a few lamps for night rain
     for (const z of [-20, 0, 20]) group.add(streetLightMarker(5.2, 8.5, z));
     for (const z of [-20, 0, 20]) box(0.18, 8.5, 0.18, steel, 5.4, 0.15, z);
-  },
-  update(dt, time) {
-    level?.update(dt, focus, time);
   },
 };
 export default scene;

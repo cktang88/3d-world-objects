@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { groundWeather } from './nyc/ground';
+import { setPeopleWeather } from './nyc/people';
 import { PRESETS, getNight, getTimeOfDay, setWeather as setLightingWeather, type Lighting, type Quality } from './lighting';
 
 /**
@@ -471,6 +472,7 @@ uniform vec3 uBox;
 uniform vec4 uMotion; // time, fall speed, streak seconds, snow 0..1
 uniform vec2 uWind;
 uniform float uCount;
+uniform float uPx; // metres per pixel at 1 m
 varying vec2 vC;
 varying float vA;
 ${OCC_SAMPLE}
@@ -499,7 +501,10 @@ void main() {
     vec3 b = (viewMatrix * vec4(wp - vel * uMotion.z, 1.0)).xyz;
     vec3 ax = b - a;
     vec3 side = normalize(cross(ax, a) + vec3(1e-5, 0.0, 0.0));
-    float w = 0.003 + dist * 0.0016;
+    // at least ~1.3 px wide; thinner-than-a-pixel drops fade instead of vanishing
+    float w0 = 0.0025 + dist * 0.0008;
+    float w = max(w0, 1.3 * uPx * dist);
+    vis *= clamp(w0 / w * 1.6, 0.3, 1.0);
     pos = mix(a, b, aCorner.y) + side * aCorner.x * w;
   }
   vC = aCorner;
@@ -517,7 +522,7 @@ varying float vA;
 void main() {
   float a;
   if (uMotion.w > 0.5) a = 1.0 - smoothstep(0.25, 1.0, length(vec2(vC.x, vC.y * 2.0 - 1.0)));
-  else a = (1.0 - abs(vC.x)) * smoothstep(0.0, 0.35, vC.y) * smoothstep(1.0, 0.75, vC.y);
+  else a = (1.0 - abs(vC.x)) * smoothstep(0.0, 0.35, vC.y) * (1.0 - smoothstep(0.75, 1.0, vC.y));
   a *= vA * uOpacity;
   if (a < 0.004) discard;
   gl_FragColor = vec4(uColor, a);
@@ -561,8 +566,8 @@ varying float vPh;
 void main() {
   if (vPh > 1.0) discard;
   float r = length(vC);
-  float ring = smoothstep(0.2, 0.0, abs(r - 0.75)) ;
-  float core = smoothstep(0.35, 0.0, r) * (1.0 - smoothstep(0.0, 0.35, vPh));
+  float ring = 1.0 - smoothstep(0.0, 0.2, abs(r - 0.75));
+  float core = (1.0 - smoothstep(0.0, 0.35, r)) * (1.0 - smoothstep(0.0, 0.35, vPh));
   float a = (ring * 0.8 + core) * (1.0 - vPh) * uOpacity;
   if (a < 0.004) discard;
   gl_FragColor = vec4(uColor, a);
@@ -630,7 +635,7 @@ const WINDOW_VIEW = /* glsl */ `
   vec2 gi = floor(g), gf = fract(g);
   vec2 c = vec2(fract(sin(dot(gi, vec2(12.9898, 78.233))) * 43758.5453), fract(sin(dot(gi, vec2(39.3468, 11.135))) * 24634.6345));
   c.x += 0.15 * sin(wxState2.z + c.y * 6.0);
-  e += vec3(0.9) * wxView.z * smoothstep(0.12, 0.04, length(gf - c));
+  e += vec3(0.9) * wxView.z * (1.0 - smoothstep(0.04, 0.12, length(gf - c)));
   totalEmissiveRadiance = e;
 }
 `;
@@ -722,16 +727,17 @@ export class Weather {
         uMotion: { value: new THREE.Vector4() },
         uWind: { value: new THREE.Vector2() },
         uCount: { value: 0 },
+        uPx: { value: 0.001 },
         uColor: { value: new THREE.Color() },
         uOpacity: { value: 0.5 },
       },
-      vertexShader: PRECIP_V, fragmentShader: PRECIP_F, transparent: true, depthWrite: false, opacity: 0.5,
+      vertexShader: PRECIP_V, fragmentShader: PRECIP_F, side: THREE.DoubleSide, transparent: true, depthWrite: false, opacity: 0.5,
     });
     this.precip = new THREE.Mesh(quadGeometry(COUNTS.ultra.drops, false), pm);
     this.precip.frustumCulled = false;
     const sm = new THREE.ShaderMaterial({
       uniforms: { ...occU, uSplash: { value: new THREE.Vector4() }, uColor: { value: new THREE.Color() }, uOpacity: { value: 0.5 } },
-      vertexShader: SPLASH_V, fragmentShader: SPLASH_F, transparent: true, depthWrite: false, opacity: 0.5,
+      vertexShader: SPLASH_V, fragmentShader: SPLASH_F, side: THREE.DoubleSide, transparent: true, depthWrite: false, opacity: 0.5,
     });
     this.splash = new THREE.Mesh(quadGeometry(COUNTS.ultra.splashes, true), sm);
     this.splash.frustumCulled = false;
@@ -839,6 +845,9 @@ export class Weather {
     Object.assign(info, { cloud: c.cloud, rain: c.rain, snow: c.snow, fog: c.ground, wind: c.wind, progress: this.tTrans });
     info.umbrellas = Math.min(1, c.rain * 1.6 + c.snow * 0.3);
     info.hoods = Math.min(1, c.rain * 0.6 + c.snow * 0.8);
+    // nyc/people.ts: umbrellas / hoods / hurrying (quantised: it rebuilds props on change)
+    const q = (x: number) => Math.round(Math.min(1, x) * 10) / 10;
+    setPeopleWeather({ rain: q(c.rain * 1.6), snow: q(c.snow) });
 
     // wind and cloud drift
     const ang = this.time * 0.01;
@@ -1121,16 +1130,18 @@ export class Weather {
     this.precip.geometry.setDrawRange(0, active * 6);
     pm.uCount.value = 1; // the draw range already limits the count
     pm.uCam.value.copy(this.camera.position);
+    const hPx = this.renderer.domElement.height || 1080;
+    pm.uPx.value = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / hPx;
     pm.uMotion.value.set(this.time, snow ? 1.1 : 9.5, 1 / 30, snow);
     const w = snow ? this.wind.clone().multiplyScalar(0.6) : this.wind.clone().multiplyScalar(0.35);
     pm.uWind.value.copy(w);
-    (pm.uBox.value as THREE.Vector3).set(snow ? 18 : 13, snow ? 12 : 9, snow ? 18 : 13);
+    (pm.uBox.value as THREE.Vector3).set(snow ? 15 : 13, snow ? 10 : 9, snow ? 15 : 13);
     const fog = this.scene.fog as THREE.FogExp2 | null;
     const base = fog ? fog.color.clone() : new THREE.Color(0.5, 0.5, 0.5);
     const night = getNight();
     // rain reads as light against dark facades; at night it catches lamp and sign light
     (pm.uColor.value as THREE.Color).copy(base).multiplyScalar(snow ? 1.6 : 1.3).add(new THREE.Color(0.9, 0.8, 0.65).multiplyScalar(0.06 * night));
-    pm.uOpacity.value = snow ? 0.95 : 0.35 + 0.2 * c.rain;
+    pm.uOpacity.value = snow ? 0.95 : 0.45 + 0.3 * c.rain;
 
     const su = this.splash.material.uniforms;
     this.splash.visible = c.rain > 0.02 && this.occInfo.x > 0;
