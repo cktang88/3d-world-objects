@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { AX, SZ, AVE, ST, BX, BZ, LX, LZ, CURB, RX, RZ, avenueName, streetName, bake, unitBox, unitCyl, unitSphere, B, C, canvasTex, M, SIG, lightFor, type Side } from './nyc/common';
-import { signalPole, nameSign, lampPost, tree, hydrant, subway } from './nyc/streetprops';
+import { AX, SZ, AVE, ST, BX, BZ, LX, LZ, CURB, RX, RZ, avenueName, streetName, bake, unitBox, unitCyl, unitSphere, B, canvasTex, M, SIG, lightFor, type Side } from './nyc/common';
+import { signalPole, nameSign, lampPost, tree, hydrant, subway, newsBoxes, steamStack, streetExtras } from './nyc/streetprops';
 import { wetSurface, getNight, onTimeChange } from './lighting';
 import { carMesh, Traffic } from './nyc/vehicles';
 import { Pedestrians } from './nyc/people';
@@ -319,12 +319,8 @@ export class NycLevel implements Level {
       colliders.push(rect(x, z, 0.5, 0.5));
       const ave = avenueName(ctx.cx + (sx > 0 ? 0 : -1));
       const st = streetName(ctx.cz + (sz > 0 ? 0 : -1));
-      group.add(nameSign(st, x, 3.6, z, 0));
-      group.add(nameSign(ave, x, 3.9, z, Math.PI / 2));
-      if (rng.chance(0.08)) {
-        // a corner trash can and a mailbox
-        B(stat, mat('#1d5c3a', { rough: 0.7 }), 0.6, 0.95, 0.6, x - sx * 1.6, CURB, z - sz * 0.8);
-      }
+      stat.add(nameSign(st, x, CURB + 6.32, z, 0));
+      stat.add(nameSign(ave, x, CURB + 6.6, z, Math.PI / 2));
     }
     if (rng.chance(0.35)) {
       const sx = rng.chance(0.5) ? -1 : 1, sz = rng.chance(0.5) ? -1 : 1;
@@ -345,7 +341,7 @@ export class NycLevel implements Level {
       for (let t = run.from + 3; t < run.to; t += 26) {
         const [x, z] = P(t);
         if (near(x, z)) continue;
-        lampPost(stat, group, x, z, run.axis, run.c > 0 ? 1 : -1);
+        lampPost(stat, group, x, z, run.axis, run.c > 0 ? 1 : -1, village ? 'crook' : 'cobra');
         colliders.push(rect(x, z, 0.4, 0.4));
       }
       // street trees
@@ -367,9 +363,9 @@ export class NycLevel implements Level {
       }
       if (rng.chance(0.4)) {
         const [x, z] = P(rng.range(run.from + 2, run.to - 2));
-        if (!near(x, z)) for (let k = 0; k < 3; k++) {
-          const ox = run.axis === 'x' ? k * 0.55 : 0, oz = run.axis === 'z' ? k * 0.55 : 0;
-          B(stat, mat(['#c4161c', '#1e4fa3', '#f0b400'][k], { rough: 0.6 }), 0.45, 1.05, 0.45, x + ox, CURB, z + oz);
+        if (!near(x, z)) {
+          newsBoxes(stat, x, z, run.axis, rng, -Math.sign(run.c));
+          colliders.push(run.axis === 'x' ? rect(x, z, 2.2, 0.5) : rect(x, z, 0.5, 2.2));
         }
       }
       if (run.ave && rng.chance(0.35)) {
@@ -377,16 +373,14 @@ export class NycLevel implements Level {
         const [x, z] = P(rng.range(run.from, run.to));
         const ax = run.axis === 'z' ? x + Math.sign(x) * 3.5 : x;
         const az = run.axis === 'x' ? z + Math.sign(z) * 3 : z;
-        const sm = mat('#f07a1e', { rough: 0.6 });
-        const wm = mat('#f2f2f2', { rough: 0.6 });
-        for (let k = 0; k < 6; k++) C(stat, k % 2 ? wm : sm, 0.35, 0.5, ax, k * 0.5, az);
-        colliders.push(rect(ax, az, 0.8, 0.8));
+        steamStack(stat, ax, az, Math.sign(x) > 0 ? Math.PI : 0);
+        colliders.push(rect(ax, az, 1.1, 1.1));
         for (let k = 0; k < 3; k++) {
-          const s = glow('#ffffff', 1.5, ax, 3, az, 0.4);
+          const s = glow('#ffffff', 1.5, ax, 3.8, az, 0.4);
           (s.material as THREE.SpriteMaterial).blending = THREE.NormalBlending;
           s.material = (s.material as THREE.SpriteMaterial).clone();
           s.userData.ph = k / 3;
-          s.userData.y = 3;
+          s.userData.y = 3.8;
           group.add(s);
           this.steam.push(s);
         }
@@ -412,6 +406,8 @@ export class NycLevel implements Level {
         colliders.push(run.axis === 'x' ? rect(x, z, 4.6, 1.9) : rect(x, z, 1.9, 4.6));
       }
     }
+    // litter baskets, mailbox, meters, bags, shelters, sheds, manholes (streetprops.ts)
+    streetExtras({ stat, rng, colliders, near, village });
     // a few sand3d props on the sidewalks (benches, planters, statues) — all enterable worlds
     for (let i = 0; i < 3; i++) {
       const run = rng.pick(runs);

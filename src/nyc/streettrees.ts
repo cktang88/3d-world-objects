@@ -403,7 +403,7 @@ function skeleton(spec: Spec, seed: number) {
     az += (Math.PI * 2) / limbs + r.range(-0.35, 0.35);
     const tilt = r.range(spec.limbTilt[0], spec.limbTilt[1]);
     const dir = new THREE.Vector3(Math.cos(az) * Math.sin(tilt), Math.cos(tilt), Math.sin(az) * Math.sin(tilt));
-    const y0 = r.range(0, 0.35) * leaderLen * 0.4;
+    const y0 = (i / limbs) * leaderLen * 0.3 + r.range(0, 0.4);
     const start = trunkTop.clone().add(new THREE.Vector3(0, y0, 0));
     grow(spec, r, out, tips, start, dir, (H - spec.clear) * r.range(0.6, 0.72), rTop * r.range(0.6, 0.75), 1);
   }
