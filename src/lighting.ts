@@ -40,6 +40,11 @@ interface Preset {
   /** saturation of the image-based light / background (tames very blue skies, sodium-yellow skylines) */
   envSat: number;
   exposure: number;
+  /**
+   * light bounced off sunlit facades into the street canyon (a hemisphere light: warm from below,
+   * neutral from above), in place of the GI we don't have; keeps shade from going sky-blue
+   */
+  bounce: { sky: string; ground: string; intensity: number };
   /** exponential fog density (1/m), tinted from the HDRI horizon */
   fog: number;
   fogTint?: string;
@@ -55,25 +60,25 @@ interface Preset {
 export const PRESETS: Record<TimeOfDay, Preset> = {
   day: {
     label: 'Day', hdri: 'docklands_02', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 6,
-    sky: 0.6, clampMul: 12, envSat: 0.75, exposure: 0.58, fog: 0.0012, night: 0, lit: 0.04, wet: 0,
+    sky: 0.6, clampMul: 12, envSat: 0.7, exposure: 0.58, bounce: { sky: '#dcd6cc', ground: '#b49478', intensity: 0.55 }, fog: 0.0012, night: 0, lit: 0.04, wet: 0,
     bloom: { strength: 0.12, radius: 0.4, threshold: 3.0 },
     grade: { gain: '#fffaf4', lift: '#04060a', sat: 1.04, contrast: 1.04, vignette: 0.22 },
   },
   golden: {
     label: 'Golden hour', hdri: 'venice_sunset', align: true, sunAz: 250, sunElev: 8, sunColor: '#ffb067', sunIntensity: 5.5,
-    sky: 0.55, clampMul: 10, envSat: 1, exposure: 0.8, fog: 0.0022, night: 0.15, lit: 0.12, wet: 0,
+    sky: 0.55, clampMul: 10, envSat: 0.95, exposure: 0.8, bounce: { sky: '#d8c8b8', ground: '#c08860', intensity: 0.35 }, fog: 0.0022, night: 0.15, lit: 0.12, wet: 0,
     bloom: { strength: 0.2, radius: 0.5, threshold: 2.2 },
     grade: { gain: '#fff1e0', lift: '#060812', sat: 1.08, contrast: 1.06, vignette: 0.28 },
   },
   dusk: {
     label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
-    sky: 0.12, clampMul: 30, envSat: 0.95, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.3, wet: 0.35,
+    sky: 0.12, clampMul: 30, envSat: 0.95, exposure: 1.3, bounce: { sky: '#8890a8', ground: '#6a5a50', intensity: 0.04 }, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.3, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
   },
   night: {
     label: 'Night', hdri: 'shanghai_bund', align: false, sunAz: 140, sunElev: 50, sunColor: '#8ea4d6', sunIntensity: 0.12,
-    sky: 0.04, clampMul: 400, envSat: 0.55, exposure: 1.35, fog: 0.0022, fogTint: '#2a2a3a', night: 1, lit: 0.36, wet: 0.8,
+    sky: 0.04, clampMul: 400, envSat: 0.55, exposure: 1.35, bounce: { sky: '#404050', ground: '#4a3a2a', intensity: 0.03 }, fog: 0.0022, fogTint: '#2a2a3a', night: 1, lit: 0.36, wet: 0.8,
     bloom: { strength: 0.5, radius: 0.5, threshold: 0.8 },
     grade: { gain: '#fbfaff', lift: '#050712', sat: 1.12, contrast: 1.08, vignette: 0.38 },
   },
@@ -448,6 +453,8 @@ export class Lighting {
     const p = PRESETS[tod];
     const w = weather;
     if (this.csm) for (const l of this.csm.lights) l.intensity = p.sunIntensity * w.sunMul;
+    // bounce comes from sunlit walls: it fades with the sun under cloud, but sky light still bounces a little
+    this.hemi.intensity = p.bounce.intensity * (0.35 + 0.65 * w.sunMul) * Math.min(1, w.skyMul);
     this.scene.environmentIntensity = this.base.env * w.skyMul;
     this.scene.backgroundIntensity = this.base.bg * w.skyMul;
     const fog = this.scene.fog as THREE.FogExp2 | null;
@@ -596,7 +603,9 @@ export class Lighting {
   private applyOutdoor() {
     const p = PRESETS[tod];
     this.sun.visible = false;
-    this.hemi.intensity = 0;
+    this.hemi.color.set(p.bounce.sky);
+    this.hemi.groundColor.set(p.bounce.ground);
+    this.hemi.intensity = p.bounce.intensity;
     this.ambient.intensity = 0;
     if (!this.csm) this.makeCsm();
     this.lampGroup.visible = true;
