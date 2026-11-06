@@ -227,8 +227,9 @@ export class NycLevel implements Level {
     const cobble = (D.kind === 'industrial' && hashN(this.seed, cx, cz, 9) % 2 === 0) || ((D.kind === 'canal' || village) && hashN(this.seed, cx, cz, 9) % 4 === 0);
     groundBase({ group, stat, cx, cz, village: loft, cobble });
     yield; // [vis]
-    // the hidden backyard core of the block
-    const core = B(stat, mat('#5a564f'), LX * 2 - 1, 2.5, LZ * 2 - 1, 0, 0, 0, false);
+    // the backyard core of the block: kept below the pavement plane so it never stands in front of
+    // a real shop interior previewed behind its glass (seamless.ts)
+    const core = B(stat, mat('#5a564f'), LX * 2 - 1, 0.1, LZ * 2 - 1, 0, 0, 0, false);
 
     const ctx: BCtx = makeCtx(rng, group, stat, cx, cz, hashN(this.seed, cx, cz, 5));
     ctx.colliders = colliders;

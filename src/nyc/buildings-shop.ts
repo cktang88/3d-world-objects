@@ -621,7 +621,8 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
       target: { kind: 'interior', seed: hashN(ctx.seed, Math.round(ent.x * 10), Math.round(ent.z * 10), 11), name: titleCaseName(name), style: 'store', floor: 0, floors: 1, biome: 'metropolis', shop: shop.type },
       // seamless.ts: the real shop is shown behind this door and its glass while you are near
       door: {
-        pos: F.at(du, 0, recess > 0.2 ? -recess : glassZ),
+        // threshold at pavement height (the sidewalk plane is at CURB): the shop floor sits just above it
+        pos: F.at(du, CURB + 0.01, recess > 0.2 ? -recess : glassZ),
         yaw: { S: 0, N: Math.PI, E: Math.PI / 2, W: -Math.PI / 2 }[F.side],
         see: !halfShut,
         hole: new THREE.Box3().setFromPoints([F.at(u0 + 0.2, 0.05, -recess - 0.2), F.at(u1 - 0.2, dispTop, 0.05)]),
