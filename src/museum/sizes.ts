@@ -78,6 +78,9 @@ export interface Measured {
   /** a library scan (not a sand3d program): loads with load() */
   library?: boolean;
   load?: () => Promise<RemoteModel>;
+  /** library scans: load at a given detail (the room swaps the nearest few to full) */
+  loadQ?: (q: 'low' | 'full') => Promise<RemoteModel>;
+  quality?: 'low' | 'full';
   /** the model, if we had to stream it to measure it */
   model?: RemoteModel;
 }

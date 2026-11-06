@@ -113,7 +113,13 @@ interface Slot {
   model?: RemoteModel;
   spin: number;
   placeholder: THREE.Mesh;
+  /** library scans: which detail is shown, and whether a swap is under way */
+  q?: 'low' | 'full';
+  swapping?: boolean;
 }
+
+/** full-detail scans (~150k faces, 2k textures) only for the nearest few */
+const FULL_SCANS = 3;
 
 const phMat = new THREE.MeshBasicMaterial({ color: '#ffe9b0', wireframe: true, transparent: true, opacity: 0.35 });
 const phGeo = new THREE.IcosahedronGeometry(0.5, 1);
@@ -160,7 +166,31 @@ export abstract class MuseumBase implements Level {
     return this.ports;
   }
 
+  private tick = 0;
+  /** the nearest few library scans within reach get their full-detail version; the rest stay low */
+  private scanDetail(player: THREE.Vector3) {
+    const scans = this.slots.filter((s) => s.m.loadQ && s.model && !s.swapping);
+    if (!scans.length) return;
+    const near = scans.map((s) => ({ s, d: s.at.distanceTo(player) })).sort((a, b) => a.d - b.d);
+    near.forEach(({ s, d }, i) => {
+      const want = i < FULL_SCANS && d < 7 ? 'full' : d > 11 || i >= FULL_SCANS + 2 ? 'low' : s.q;
+      if (!want || want === s.q) return;
+      s.swapping = true;
+      s.m.loadQ!(want)
+        .then((mod) => {
+          s.swapping = false;
+          if (!this.alive || !s.model) return;
+          s.holder.remove(s.model.object);
+          s.holder.add(mod.object);
+          s.model = mod;
+          s.q = want;
+        })
+        .catch(() => (s.swapping = false));
+    });
+  }
+
   update(dt: number, player: THREE.Vector3, time: number) {
+    if (++this.tick % 30 === 0) this.scanDetail(player);
     for (const s of this.slots) {
       if (!s.model) {
         s.placeholder.rotation.y += dt;
@@ -364,6 +394,7 @@ export abstract class MuseumBase implements Level {
         holder.userData.fade = 0;
         holder.scale.setScalar(m.k * 0.85);
         slot.model = mod;
+        slot.q = m.quality;
         e.attribution = `${fmtDims(m.real)} · shown at actual size${Math.abs(m.k - 1) > 0.01 ? ' · rescaled from the source to a realistic size' : ''} · ${mod.tris.toLocaleString()} triangles`;
       })
       .catch(() => {

@@ -71,19 +71,16 @@ export function siMeasured(e: LibraryEntry, hero: boolean): Measured {
   };
   // the full scans are ~150k faces with 2k textures: only for a hero you can walk right up to
   const quality = hero && Math.max(real.x, real.y, real.z) < 5 ? 'full' : 'low';
-  return {
-    entry, raw: real.clone(), k: 1, real,
-    library: true,
-    load: () =>
-      loadLibraryModel(e, { quality, shadows: false }).then((g): RemoteModel => {
-        let tris = 0;
-        g.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (!m.isMesh) return;
-          m.userData.shared = true; // geometry is shared with the library's cache
-          tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
-        });
-        return { object: g, size: real.clone(), animator: null, tris: Math.round(tris) };
-      }),
-  };
+  const loadQ = (q: 'low' | 'full') =>
+    loadLibraryModel(e, { quality: q, shadows: false }).then((g): RemoteModel => {
+      let tris = 0;
+      g.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        m.userData.shared = true; // geometry is shared with the library's cache
+        tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+      });
+      return { object: g, size: real.clone(), animator: null, tris: Math.round(tris) };
+    });
+  return { entry, raw: real.clone(), k: 1, real, library: true, quality, loadQ, load: () => loadQ(quality) };
 }
