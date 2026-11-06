@@ -15,6 +15,7 @@ import { AX, SZ } from './common';
 export function districtLab(name: string, description: string, cx: number, cz: number, cam: [number, number, number], look: [number, number, number], span: [number, number] = [1, 0]): LabScene {
   const player = new THREE.Vector3();
   let camera: THREE.Camera | null = null;
+  let detail = true;
   return {
     name,
     description,
@@ -24,6 +25,7 @@ export function districtLab(name: string, description: string, cx: number, cz: n
     ground: false,
     async build({ group, params, camera: cm }) {
       camera = cm;
+      detail = params.get('detail') !== '0' && !(params.has('notex') && params.get('notex') !== '0');
       const ccx = Number(params.get('cx') ?? cx), ccz = Number(params.get('cz') ?? cz);
       const rx = Number(params.get('rx') ?? span[0]), rz = Number(params.get('rz') ?? span[1]);
       player.set(Number(params.get('px') ?? ccx * AX), 0, Number(params.get('pz') ?? ccz * SZ));
@@ -61,7 +63,8 @@ export function districtLab(name: string, description: string, cx: number, cz: n
     update(_dt, time) {
       updateShowcases(player);
       tickWater(time);
-      if (camera) updateDetail(camera.position, 30);
+      // Objaverse originals close up (their textures: not under ?notex / ?fast, or with &detail=0)
+      if (camera && detail) updateDetail(camera.position, 30);
     },
   };
 }

@@ -86,7 +86,8 @@ function chainMesh() {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(1, 1);
-  chainM = new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide, metalness: 0.7, roughness: 0.5 });
+  // a faint screen even when the map is stripped (?notex / ?fast): the wire pattern cuts the rest
+  chainM = new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, metalness: 0.7, roughness: 0.5 });
   chainM.map!.repeat.set(12, 6);
   return chainM;
 }
