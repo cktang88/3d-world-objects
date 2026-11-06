@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { Person, Pedestrians, loadPeopleAssets, type Activity } from '../nyc/people';
 import { Rng } from '../rng';
+import { AX, AVE, SW, CURB } from '../nyc/common';
 
 /**
  * ?lab=people — a lineup of pedestrians (walking in place) for close inspection.
@@ -21,10 +22,40 @@ const scene: LabScene = {
   async build({ group, params }) {
     const assets = await loadPeopleAssets();
     if (params.get('mode') === 'crowd') {
+      // stand on the east sidewalk of the avenue at x = 60 (sidewalk x 68..72.5); the lab origin
+      // maps to that spot, so the default camera looks along the sidewalk
+      origin.set(AX / 2 + AVE / 2 + 2, 0, 10);
+      group.position.set(-origin.x, 0, -origin.z);
+      const walk = new THREE.MeshStandardMaterial({ color: '#8d8a84', roughness: 0.9 });
+      const road = new THREE.MeshStandardMaterial({ color: '#2a2b2e', roughness: 0.95 });
+      for (const s of [-1, 1]) {
+        const sw = new THREE.Mesh(new THREE.BoxGeometry(SW, CURB, 300), walk);
+        sw.position.set(AX / 2 + s * (AVE / 2 + SW / 2), CURB / 2 + 0.002, origin.z);
+        sw.receiveShadow = true;
+        group.add(sw);
+      }
+      const rd = new THREE.Mesh(new THREE.BoxGeometry(AVE, 0.01, 300), road);
+      rd.position.set(AX / 2, 0.006, origin.z);
+      rd.receiveShadow = true;
+      group.add(rd);
       crowd = new Pedestrians(group, Number(params.get('seed') ?? 1));
       await new Promise((r) => setTimeout(r, 50));
       crowd.update(0.016, origin);
       for (let i = 0; i < Number(params.get('t') ?? 0) * 10; i++) crowd.update(0.1, origin);
+      // perf readout for shot.mjs --eval "__peopleStats()": meshes and triangles of the crowd
+      (window as unknown as { __peopleStats: () => string }).__peopleStats = () => {
+        let meshes = 0, tris = 0, shadow = 0;
+        group.traverseVisible((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh) return;
+          const g = m.geometry;
+          const t = (g.index ? g.index.count : g.attributes.position.count) / 3;
+          meshes++;
+          tris += t;
+          if (m.castShadow) shadow += t;
+        });
+        return `people=${crowd!.peds.length} meshes=${meshes} tris=${Math.round(tris)} shadowTris=${Math.round(shadow)}`;
+      };
       return;
     }
     const r = new Rng(Number(params.get('seed') ?? 3));
