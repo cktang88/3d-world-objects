@@ -140,7 +140,7 @@ export function buildWater(c: OpenCtx) {
       stat.add(slab(flat('#9b8f7a', 0.9), fx0, fx1, dz - 1.2, dz + 1.2, fy, 2));
       for (let u = PIER_SHORE + 8; u < tipU - 8; u += 9) {
         stat.add(slab(flat('#9b8f7a', 0.9), X(u) - 0.6, X(u) + 0.6, Math.min(dz, dz - side * 7), Math.max(dz, dz - side * 7), fy, 2));
-        slot({ kind: 'boat', x: X(u + 4.5), y: WATER + 0.05, z: dz - side * 4.5, rot: Math.PI / 2, w: 11, d: 4.2, h: 12, min: 3, radius: 140, maxTris: 250_000 }, false);
+        slot({ kind: 'boat', x: X(u + 4.5), y: WATER + 0.05, z: dz - side * 4.5, rot: Math.PI / 2, w: 11, d: 4.2, h: 12, min: 4, radius: 140, maxTris: 250_000 }, false);
       }
     }
     for (let u = PIER_SHORE + 6; u < tipU - 4; u += 16) slot({ kind: 'pierprop', x: X(u), y: DECK, z: pz0 + 1.3, rot: 0, w: 1.6, d: 1.2, h: 2, min: 0.4, radius: 60, maxTris: 60_000 });

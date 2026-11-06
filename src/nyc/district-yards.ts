@@ -113,8 +113,9 @@ export function buildConstruction(ctx: BCtx, r: Rng): Plan {
   slot({ kind: 'truck', x: (A.x0 + A.x1) / 2, y: Y, z: -6, rot: Math.PI / 2, w: 11, d: 4, h: 5, min: 4, radius: 120, maxTris: 300_000 });
   slot({ kind: 'truck', x: (A.x0 + A.x1) / 2, y: Y, z: 9, rot: Math.PI / 2 + 0.3, w: 11, d: 4, h: 5, min: 4, radius: 120, maxTris: 300_000 });
   for (let i = 0; i < 4; i++) slot({ kind: 'machine', x: R.x0 + 6 + i * 12, y: Y, z: (R.z0 + R.z1) / 2 - row * 3, rot: r.range(0, 6), w: 4, d: 3, h: 4, min: 0.8, radius: 90, maxTris: 150_000 });
-  for (let i = 0; i < 8; i++) slot({ kind: 'tool', x: R.x0 + 4 + i * 6.3, y: Y, z: (R.z0 + R.z1) / 2 + row * 3 + r.range(-1, 1), rot: r.range(0, 6), w: 2.2, d: 1.6, h: 2.6, min: 0.25, radius: 55, maxTris: 80_000 });
-  for (let i = 0; i < 4; i++) slot({ kind: ['freight', 'hardware'], x: (A.x0 + A.x1) / 2 + (i % 2 ? 6 : -6), y: Y, z: (i < 2 ? -18 : 18), rot: 0, w: 2.4, d: 2.4, h: 2.4, min: 0.3, radius: 60, maxTris: 80_000 });
+  for (let i = 0; i < 6; i++) slot({ kind: 'tool', x: R.x0 + 13 + i * 6.3, y: Y, z: (R.z0 + R.z1) / 2 + row * 3 + r.range(-1, 1), rot: r.range(0, 6), w: 2.2, d: 1.6, h: 2.6, min: 0.25, radius: 55, maxTris: 80_000 });
+  // pallets and crates at the ends of the pit, clear of the crane
+  for (let i = 0; i < 4; i++) slot({ kind: ['freight', 'hardware'], x: (A.x0 + A.x1) / 2 + s * (3 + (i % 2) * 4), y: Y, z: (i < 2 ? -19 : 19), rot: 0, w: 2.4, d: 2.4, h: 2.4, min: 0.3, radius: 60, maxTris: 80_000 });
   // rebar bundles, jersey barriers, porta-johns, a site office
   const rebar = flat('#6b3d27', 0.7, 0.5);
   for (let i = 0; i < 3; i++) {

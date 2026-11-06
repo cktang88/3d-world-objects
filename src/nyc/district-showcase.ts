@@ -286,6 +286,8 @@ async function load(s: Slot) {
     s.portal.label = e.title;
     s.portal.sub = `${DATASET_LABEL[e.ds] ?? e.ds}${e.author ? ` · by ${e.author}` : ''} — E for details & its program`;
     s.portal.inspect = e;
+    // which pool it came from (e2e checks boats by it, not by title)
+    (s.portal as Portal & { pool?: string }).pool = poolOf(s, e) ?? undefined;
     s.state = 'shown';
     return;
   }

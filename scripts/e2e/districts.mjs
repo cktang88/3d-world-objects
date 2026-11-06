@@ -46,7 +46,7 @@ await journey('districts', import.meta.url, async (h) => {
       const objs = show().map((p) => {
         const sz = p.box.getSize(new V());
         const c = p.box.getCenter(new V());
-        return { t: p.label.slice(0, 40), len: e.r2(Math.max(sz.x, sz.z) - 0.2), h: e.r2(sz.y - 0.2), d: e.r2(Math.hypot(c.x - x, c.z - z)) };
+        return { t: p.label.slice(0, 40), pool: p.pool, len: e.r2(Math.max(sz.x, sz.z) - 0.2), h: e.r2(sz.y - 0.2), d: e.r2(Math.hypot(c.x - x, c.z - z)) };
       }).sort((a, b) => a.d - b.d).slice(0, 12);
       const district = D.districtAtPos(x, z);
       return {
@@ -65,7 +65,8 @@ await journey('districts', import.meta.url, async (h) => {
     // every slot has a minimum size (src/nyc/district-*.ts): airport slots >= 2.5 m, boats >= 4 m.
     // A model squashed into a 2 m cube by flatten() (quantized rebuilds) fails here.
     if (s.plane) h.check(`${s.key}: nothing on the apron is under 2.5 m`, r.objs.every((o) => Math.max(o.len, o.h) >= 2.5), r.objs);
-    if (s.key === 'pier') h.check(`${s.key}: boats are at least 4 m long`, r.objs.filter((o) => /boat|ship|yacht|tug|ferry/i.test(o.t)).every((o) => o.len >= 4), r.objs);
+    // boats by the pool they were drawn from (pier props are anchors and bollards); every boat >= 4 m
+    if (s.key === 'pier') h.check(`${s.key}: boats are at least 4 m long`, r.objs.some((o) => o.pool === 'boat') && r.objs.filter((o) => o.pool === 'boat').every((o) => o.len >= 4), r.objs);
     if (s.plane) h.check(`${s.key}: an aircraft-sized object (>= 6 m) is on show`, r.objs.some((o) => o.len >= 6), r.objs);
     await h.shot(s.key, s.key === 'airport');
   }

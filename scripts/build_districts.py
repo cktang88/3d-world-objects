@@ -36,7 +36,7 @@ KINDS = {
     "space": (["aircraft or spacecraft"], r"\b(rocket|shuttle|capsule|lander|space ?ship|spaceship|spacecraft|satellite|probe|rover|apollo|soyuz|saturn|falcon|module|space station|lunar)\b", r"part|toy|engine|nozzle|interior|ufo|drone|seat|panel", 80),
     # waterfront
     "boat": (["watercraft"], r"\b(boat|yacht|ship|sailboat|canoe|kayak|ferry|tug|tugboat|barge|dinghy|trawler|speedboat|vessel|catamaran|gondola|raft|schooner|cruiser|fishing|galleon|frigate|destroyer|battleship|steamboat|riverboat|lifeboat|rowboat|pontoon|houseboat|sloop|junk|cutter|launch|motorboat|jet ?ski|submarine|ark|carrier)\b", r"part|oar|paddle|propeller|anchor|rudder|engine|wheel|seat|toy|lego|interior|bottle|helm|steering|sail\b|mast", 160),
-    "pierprop": (["watercraft", "garden or outdoor", "container", "machine or industrial"], r"\b(anchor|buoy|bollard|cleat|life ?ring|lifebuoy|lifebelt|oar|paddle|propeller|net|lobster trap|crab pot|rope|winch|capstan|lighthouse|dock|pier|mooring)\b", r"toy|lego|icon", 80),
+    "pierprop": (["watercraft", "garden or outdoor", "container", "machine or industrial"], r"\b(anchor|buoy|bollard|cleat|life ?ring|lifebuoy|lifebelt|lobster trap|crab pot|winch|capstan|mooring)\b", r"toy|lego|icon|propeller|oar|paddle|boat|ship|yacht", 80),
     # the park
     "bench": (["garden or outdoor", "furniture"], r"\b(bench|picnic table|park bench|garden bench)\b", r"press|work ?bench|weight|lab|piano|toy", 70),
     "playground": (["garden or outdoor", "toy or game", "sports equipment"], r"\b(swing|slide|seesaw|see-saw|playground|sandbox|sand box|climbing|carousel|merry|jungle gym|monkey bars|spring rider|rocking horse|play ?house|trampoline|teeter)\b", r"door|toy car|lego|miniature|card|pin", 70),
@@ -78,7 +78,7 @@ ENTRIES = {
     "plane": "biplane fighter airliner jet aircraft airplane bomber floatplane triplane turboprop trainer monoplane flying_boat seaplane trijet transport_aircraft transport_plane delta_jet stealth_aircraft stealth_jet glider sailplane spaceplane interceptor",
     "heli": "helicopter gunship tiltrotor",
     "space": "rocket satellite spacecraft shuttle capsule lander probe orbital_station shuttle_stack",
-    "boat": "rowboat sailboat boat canoe workboat skiff motorboat tugboat launch riverboat kayak raft longboat schooner yacht speedboat fishing_boat dinghy inflatable_boat runabout patrol_boat ship steamship freighter liner cargo_ship gondola canopy_boat jetski warship battleship destroyer frigate submarine cruiser carrier sailing_ship galleon",
+    "boat": "rowboat sailboat boat canoe workboat skiff motorboat tugboat launch riverboat kayak raft longboat schooner yacht speedboat fishing_boat dinghy inflatable_boat runabout patrol_boat steamship freighter cargo_ship gondola canopy_boat jetski",
     "bench": "bench stone_bench picnic_table",
     "playground": "playground swing swingset swings seesaw slide roundabout ferris_wheel",
     "parkdecor": "fountain well planter pergola pedestal urn gazebo pavilion flowerpot stone_basin shrine monument roofed_well parasol umbrella",

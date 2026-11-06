@@ -182,8 +182,9 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
     const spots: [number, number][] = [[-11, -7], [0, -8], [11, -7], [-11, 6], [11, 6], [-13, 0], [13, 0]];
     for (const [dx, dz] of spots) slot({ kind: 'playground', x: x + dx, y: G, z: z + dz, rot: 0, w: 8, d: 6, h: 6, min: 1.0, radius: 90, maxTris: 250_000 });
     for (let i = 0; i < 6; i++) slot({ kind: 'toy', x: x + r.range(-5, 5), y: G + 0.03, z: z + r.range(-3, 3), rot: r.range(0, 6), w: 0.8, d: 0.8, h: 0.8, min: 0.12, radius: 35, maxTris: 60_000 }, false);
-    benchRing(c, x, z, W / 2 - 1.5, D / 2 - 1.5, 10, slot, 4);
-    return rect(x, z, W + 4, D + 4);
+    // parents' benches outside the playground fence
+    benchRing(c, x, z, W / 2 + 2, D / 2 + 2, 12, slot, 4);
+    return rect(x, z, W + 8, D + 8);
   },
   pond(c, x, z, slot, _b, r) {
     const RX = 26, RZ = 15;
@@ -299,8 +300,12 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
     hoopFence(c.stat, x - 30, z - 16, x + 30, z - 16, G);
     hoopFence(c.stat, x - 30, z + 16, x + 30, z + 16, G);
     const cols = ['#c23b3b', '#3b6fc2', '#e0c341', '#e8e4dc', '#3c9a5c', '#9a3c8a'];
-    for (let i = 0; i < 7; i++) {
+    const spots: [number, number][] = [];
+    for (let i = 0, tries = 0; i < 7 && tries < 40; tries++) {
       const bx = x + r.range(-24, 24), bz = z + r.range(-11, 11);
+      if (spots.some(([sx, sz]) => Math.hypot(sx - bx, sz - bz) < 4)) continue; // blankets keep their distance
+      spots.push([bx, bz]);
+      i++;
       const blanket = new THREE.Mesh(new THREE.PlaneGeometry(r.range(1.6, 2.2), r.range(1.4, 1.9)), flat(r.pick(cols), 1));
       blanket.rotation.set(-Math.PI / 2, 0, r.range(0, 3));
       blanket.position.set(bx, G + 0.03, bz);
@@ -308,7 +313,13 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
       c.stat.add(blanket);
       slot({ kind: r.chance(0.5) ? 'garden' : r.chance(0.5) ? 'toy' : 'sport', x: bx + 0.6, y: G + 0.03, z: bz + 0.4, rot: r.range(0, 6), w: 1.4, d: 1.4, h: 1.5, min: 0.1, radius: 45, maxTris: 80_000 }, false);
     }
-    for (let i = 0; i < 3; i++) slot({ kind: 'garden', x: x + r.range(-20, 20), y: G, z: z + r.range(-10, 10), rot: r.range(0, 6), w: 3, d: 3, h: 3, min: 0.8, radius: 80, maxTris: 120_000 });
+    for (let i = 0, tries = 0; i < 3 && tries < 30; tries++) {
+      const gx = x + r.range(-20, 20), gz = z + r.range(-10, 10);
+      if (spots.some(([sx, sz]) => Math.hypot(sx - gx, sz - gz) < 4)) continue;
+      spots.push([gx, gz]);
+      i++;
+      slot({ kind: 'garden', x: gx, y: G, z: gz, rot: r.range(0, 6), w: 3, d: 3, h: 3, min: 0.8, radius: 80, maxTris: 120_000 });
+    }
     return rect(x, z, 40, 18);
   },
   kiosk(c, x, z, slot, _b, r) {
