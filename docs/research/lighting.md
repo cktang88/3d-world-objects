@@ -97,3 +97,34 @@ hall_of_mammals, decor_shop, comfy_cafe, gear_store.
   warm window grids; night gives dark blue-grey sky, ~35 % lit warm windows, glowing shop fronts,
   lamp pools and streaked wet asphalt. Still missing vs the wet-night photos: true mirror
   reflections of storefront colours in puddles (needs SSR or a planar reflector).
+
+## Round 2 (transitions, reflections, budget, perf)
+
+- **Black golden-hour frame:** not reproducible in the probe lab. The HDRIs contain no Inf/NaN
+  (checked all four 2k files in Node: docklands peaks at the half-float max 65504). `analyse()`
+  now repairs non-finite pixels anyway (one NaN would blacken the frame through PMREM + bloom),
+  rejects black HDRIs (the physical sky stays), and `debug().status` reports a lost WebGL
+  context, the likely cause on this RAM-starved machine. Covered by `npm run qa -- lighting`.
+- **Smooth time of day:** `setTime()` blends every preset value over 4 s (`?todsec=` to change),
+  the sun direction slerps, and the sky is a dome shader crossfading two world-aligned
+  equirects while a 256-cube CubeUV target holds the blended environment map (both PMREMs are
+  built from a 1024-wide copy so their layouts match). The HDRI's sun azimuth is baked into the
+  pixels (column shift) so two HDRIs can blend. Below ~10 degrees the sky melts into the fog
+  colour, so the HDRI's own street-level buildings never show at the end of an avenue.
+- **Overcast:** `OVERCAST` preset (potsdamer_platz) blended in by `setWeather({ overcast })`
+  during daylight; `lighting.preset` exposes the live blended values.
+- **No recompiles between places:** fixed `LIGHT_BUDGET` (16 point, 10 spot, 1 shadow point)
+  padded each frame with dark lights; the 3 cascade lights stay in every scene (intensity 0 and
+  no shadow updates indoors; studio/city suns use them too); fog is always FogExp2; every
+  environment map is a 256 PMREM. Verified in the lab: outdoor -> museum -> outdoor adds no
+  material programs. Also fixed: three r170's CSM shader chunk calls `getPointShadow()` with the
+  pre-r169 signature, so every shadow-casting point light (the apartments' follow light) failed
+  to compile once CSM was installed.
+- **Wet reflections:** emissive meshes are tagged onto `REFLECT_LAYER`; when the street is wet
+  (night or rain) on ultra/high a mirrored camera renders just that layer at half resolution,
+  and `wetSurface()` adds it with fresnel, smeared vertically (dithered taps) on rough asphalt and
+  sharp in puddles. Shop-window glass does not reflect the street yet.
+- **Perf (WP5):** GTAO reads the composer's depth (no normal/depth scene pass, the sprite/glass
+  hide hack is gone), GTAO + bloom at half resolution, DPR capped at 1.5 (ultra) / 1 (high) with
+  dynamic resolution (0.6-1x of the cap from 2-second frame-time averages, `?nodyn=1` off), MSAA 2
+  at DPR > 1, `renderer.compileAsync` behind level fades, 1k HDRIs except on ultra.
