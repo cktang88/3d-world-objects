@@ -682,7 +682,7 @@ export class Person {
       this.meshes.push(pm);
     }
     // root scale: base meshes are tall; real NYC adults ~1.76 m (men) / 1.62 m (women)
-    const target = (gender === 'male' ? 1.76 : 1.63) * r.range(0.94, 1.06);
+    const target = gender === 'male' ? 1.76 * r.range(0.94, 1.06) : 1.66 * r.range(0.95, 1.05);
     model.scale.setScalar(target / b.height);
     if (r.chance(0.3)) this.walkClip = 'Walk_Formal_Loop';
     this.twoHands = r.chance(0.3);
@@ -1105,10 +1105,31 @@ const crossHalf = (axis: 'x' | 'z') => (axis === 'x' ? AVE : ST) / 2;
 const sideHalf = (axis: 'x' | 'z') => (axis === 'x' ? ST : AVE) / 2;
 /** Walk signal: crossing an avenue (walking along x) goes with the street traffic and vice
  *  versa. Only start in the first part of the green so nobody is caught mid-road. */
-function walkSignal(axis: 'x' | 'z', time: number) {
+function walkSignal(axis: 'x' | 'z', time: number, needed: number) {
   const ph = ((time % CYCLE) + CYCLE) % CYCLE;
-  return lightFor(axis, time) === 'g' && (axis === 'x' ? ph < 17.5 : ph < 5.5);
+  if (lightFor(axis, time) !== 'g') return false;
+  // the cross traffic gets green at the end of this phase's yellow: only start if the crossing
+  // (at crossing speed, plus a margin) is done by then
+  return untilRed(axis, ph) >= needed;
 }
+/** seconds from phase time ph until the light along `axis` turns red (scanned once from lightFor) */
+const redTable = new Map<string, Float32Array>();
+function untilRed(axis: 'x' | 'z', ph: number) {
+  let tab = redTable.get(axis);
+  if (!tab) {
+    const n = Math.ceil(CYCLE * 4);
+    tab = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let k = 0;
+      while (k < n && lightFor(axis, (i + k) / 4) !== 'r') k++;
+      tab[i] = k / 4;
+    }
+    redTable.set(axis, tab);
+  }
+  return tab[Math.floor(ph * 4) % tab.length];
+}
+/** people hurry across: at least 1.5 m/s in the roadway */
+const crossSpeed = (v: number) => Math.max(v * 1.3, 1.5);
 
 /** colliders bucketed in 4 m cells, rebuilt when the level hands over a new list */
 class ColliderGrid {
@@ -1193,6 +1214,11 @@ export class Pedestrians {
         pd.t = (kc + 0.5) * CP + r.pick([-1, 1]) * (ch + r.range(0.5, 14));
       }
     } else pd.t = along - pd.dir * r.range(40, 60);
+    {
+      // never start in a roadway: step back onto the sidewalk before it
+      const kc = Math.round(pd.t / CP - 0.5), cc = (kc + 0.5) * CP;
+      if (Math.abs(pd.t - cc) < ch + 0.3) pd.t = cc - pd.dir * (ch + r.range(0.5, 3));
+    }
     pd.v = pd.p.walkSpeed * r.range(0.9, 1.1);
     pd.yaw = yawOf(pd.axis, pd.dir);
     // never start inside a newsstand, tree pit or stoop
@@ -1397,13 +1423,14 @@ export class Pedestrians {
     const u = pd.t / CP - 0.5;
     const inRoad = Math.abs(pd.t - (Math.round(u) + 0.5) * CP) < ch;
     let v = pd.v * pd.p.weatherSpeed;
+    if (inRoad) v = Math.max(v, crossSpeed(pd.v));
     let queue = false;
     if (!inRoad) {
       // the next kerb ahead, and the crossing signal
       const kNext = pd.dir > 0 ? Math.floor(u) + 1 : Math.ceil(u) - 1;
       const kerb = (kNext + 0.5) * CP - pd.dir * ch;
       const dist = (kerb - pd.t) * pd.dir;
-      const go = walkSignal(pd.axis, this.clock);
+      const go = walkSignal(pd.axis, this.clock, (2 * ch) / crossSpeed(pd.v) + 1.5);
       if (pd.state === 'kerb') {
         if (go) {
           pd.wait -= dt;
