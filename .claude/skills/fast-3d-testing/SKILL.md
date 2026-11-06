@@ -16,6 +16,15 @@ This machine has **no GPU** (SwiftShader software rendering), 4 CPUs shared by m
 | Draw calls / triangles of the real world | `node scripts/perf.mjs` (counts only, takes the world lock) | minutes |
 | Full-world screenshot | last resort, under the lock | minutes, ~2 GB |
 
+## 0. Never the full city while developing
+
+Don't render or simulate the whole city for dev, QA or e2e work. Use the smallest slice that answers the question:
+- **Node `qa` tests:** no rendering at all.
+- **A lab scene:** one object, building, room or corner.
+- **`?mode=world&r=0`:** only the block you're on. `&r=1` gives a 3×3 patch. Add `&people=0` and the fast flags.
+
+Even a three-car lab takes minutes to render here under load. Full-city counts are a one-off measurement at the end, never part of an iteration loop.
+
 ## 1. Logic and proportions: `npm run qa`
 
 - Tests live under `tests/` and run the real level generators (NYC chunks, buildings, shops, interiors, museum, people, vehicles) in Node with a shim for canvas/Image/fetch/Worker/localStorage. No textures, no remote models.
