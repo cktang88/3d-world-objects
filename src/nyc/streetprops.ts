@@ -3,7 +3,7 @@ import { Rng } from '../rng';
 import { mat, glow } from '../build';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { SIG, CURB, BX, BZ, LX, LZ, streetName, canvasTex } from './common';
+import { SIG, CURB, BX, BZ, LX, LZ, streetName } from './common';
 import { rect, overlaps, type Rect as LRect } from '../level';
 import { addTree, pickSpecies, TREE_VARIANTS, type Species } from './streettrees';
 import { streetLightMarker } from '../lighting';
@@ -82,34 +82,6 @@ export const PM = {
 
 // ---------------------------------------------------------------- street trees
 
-/** soil + mulch texture for tree pits */
-let soilMat: THREE.MeshStandardMaterial | null = null;
-function pitSoil() {
-  if (soilMat) return soilMat;
-  const t = canvasTex(256, 256, (g) => {
-    g.fillStyle = '#3a2e24';
-    g.fillRect(0, 0, 256, 256);
-    const r = new Rng(9);
-    for (let i = 0; i < 1600; i++) {
-      g.fillStyle = r.pick(['#2a211a', '#4a3a2c', '#5b4733', '#6b5238', '#26201b', '#3f4a2a']);
-      g.save();
-      g.translate(r.range(0, 256), r.range(0, 256));
-      g.rotate(r.range(0, 6.28));
-      g.fillRect(-r.range(2, 7), -1, r.range(4, 14), r.range(1.5, 3));
-      g.restore();
-    }
-    // a few weeds / dead leaves
-    for (let i = 0; i < 60; i++) {
-      g.fillStyle = r.pick(['#4f6a2c', '#6b7a34', '#8a6a3a']);
-      g.beginPath();
-      g.ellipse(r.range(0, 256), r.range(0, 256), r.range(2, 5), r.range(1, 2.5), r.range(0, 3), 0, 6.28);
-      g.fill();
-    }
-  }, true);
-  soilMat = new THREE.MeshStandardMaterial({ map: t, roughness: 1 });
-  return soilMat;
-}
-
 /** NYC tree guard: black steel, 18 in high, top rail with hairpin loops and pickets */
 function guardGeo(L: number, W: number) {
   return cachedGeo(`guard:${L}x${W}`, () => {
@@ -164,10 +136,8 @@ export function tree(stat: THREE.Object3D, x: number, z: number, rng: Rng, group
     put(g, cachedGeo('pitSoil', () => {
       const p = new THREE.PlaneGeometry(L, W);
       p.rotateX(-Math.PI / 2);
-      const uv = p.getAttribute('uv') as THREE.BufferAttribute;
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * L, uv.getY(i) * W);
-      return p;
-    }), pitSoil(), 0, 0.012, 0, 0, false);
+      return toRect(p, region('soil'));
+    }), propAtlas(), 0, 0.012, 0, 0, false);
     const edge = PM.granite();
     put(g, rbox('pitEdgeL', L + 0.2, 0.05, 0.1, 0.012), edge, 0, -0.01, W / 2 + 0.05, 0, false);
     put(g, rbox('pitEdgeL', L + 0.2, 0.05, 0.1, 0.012), edge, 0, -0.01, -W / 2 - 0.05, 0, false);
@@ -189,9 +159,10 @@ export function tree(stat: THREE.Object3D, x: number, z: number, rng: Rng, group
 
 export interface KitPart { geo: THREE.BufferGeometry; mat: THREE.Material; shadow: boolean }
 const _km = new THREE.Matrix4(), _kq = new THREE.Quaternion(), _ke = new THREE.Euler();
-function normGeo(g: THREE.BufferGeometry) {
+function normGeo(g: THREE.BufferGeometry, keepColor = false) {
   let o = g.index ? g.toNonIndexed() : g.clone();
-  for (const k of Object.keys(o.attributes)) if (!['position', 'normal', 'uv'].includes(k)) o.deleteAttribute(k);
+  for (const k of Object.keys(o.attributes)) if (!['position', 'normal', 'uv'].includes(k) && !(keepColor && k === 'color')) o.deleteAttribute(k);
+  if (keepColor && !o.getAttribute('color')) o.setAttribute('color', new THREE.BufferAttribute(new Float32Array(o.getAttribute('position').count * 3).fill(1), 3));
   if (!o.getAttribute('normal')) o.computeVertexNormals();
   if (!o.getAttribute('uv')) o.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(o.getAttribute('position').count * 2), 2));
   return o;
@@ -200,7 +171,7 @@ export class KitBuilder {
   private parts = new Map<string, { mat: THREE.Material; shadow: boolean; geos: THREE.BufferGeometry[] }>();
   /** add a copy of `geo` transformed by position / euler (YXZ) / scale */
   add(geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sc: number | [number, number, number] = 1, shadow = true) {
-    const g = normGeo(geo);
+    const g = normGeo(geo, (m as THREE.MeshStandardMaterial).vertexColors);
     _ke.set(rx, ry, rz, 'YXZ');
     _kq.setFromEuler(_ke);
     _km.compose(new THREE.Vector3(x, y, z), _kq, typeof sc === 'number' ? new THREE.Vector3(sc, sc, sc) : new THREE.Vector3(...sc));
@@ -213,7 +184,7 @@ export class KitBuilder {
   }
   /** add with an arbitrary matrix */
   addM(geo: THREE.BufferGeometry, m: THREE.Material, mx: THREE.Matrix4, shadow = true) {
-    const g = normGeo(geo);
+    const g = normGeo(geo, (m as THREE.MeshStandardMaterial).vertexColors);
     g.applyMatrix4(mx);
     const key = `${m.uuid}|${shadow}`;
     let p = this.parts.get(key);
@@ -279,25 +250,85 @@ function plane(w: number, h: number, r?: Rect) {
   if (r) toRect(g, r);
   return g;
 }
-const emissive = (c: string, ei = 1.2, base = '#fff8e8') => mat(base, { emissive: c, ei, rough: 0.3 });
-/** one shared warm-white lens for every street-light luminaire (one bucket per chunk) */
-const lampLens = () => emissive('#fff1d6', 1.3);
+/**
+ * One shared self-lit material for every luminaire (street-light lenses, crook lanterns, subway
+ * globes, shed lights): vertex colours tint both the base and the glow, so they all bake into a
+ * single draw call per chunk. Its emissive is the lamp colour lighting.ts boosts at night.
+ */
+let glowMat: THREE.MeshStandardMaterial | null = null;
+export function glowVC() {
+  if (!glowMat) {
+    glowMat = new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, emissive: new THREE.Color('#ffe2b0'), emissiveIntensity: 1.3, roughness: 0.3 });
+    glowMat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_COLOR\n totalEmissiveRadiance *= vColor.rgb;\n#endif');
+    };
+    glowMat.customProgramCacheKey = () => 'nyc-glow-vc';
+  }
+  return glowMat;
+}
+/** a geometry copy carrying a uniform vertex colour (for glowVC) */
+function tinted(g: THREE.BufferGeometry, hex: string) {
+  const o = g.index ? g.toNonIndexed() : g.clone();
+  const c = new THREE.Color(hex);
+  const n = o.getAttribute('position').count;
+  const a = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+  o.setAttribute('color', new THREE.BufferAttribute(a, 3));
+  return o;
+}
+const lampLens = () => glowVC();
 
 // ---------------------------------------------------------------- traffic signals
+
+/**
+ * All six signal lenses (red/yellow/green × avenue/street) in ONE material: the vertex colour's red
+ * channel carries the lens id, the shader picks the tint and reads the live intensity of the
+ * matching SIG material (driven by nyc.ts every frame) through uniform getters. Saves five draw
+ * calls per chunk over one material per lens.
+ */
+let sigMat: THREE.MeshStandardMaterial | null = null;
+const SIG_ORDER = () => [SIG.aveR, SIG.aveY, SIG.aveG, SIG.stR, SIG.stY, SIG.stG];
+function signalLensMat() {
+  if (sigMat) return sigMat;
+  const m = new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, emissive: new THREE.Color('#ffffff'), roughness: 0.2 });
+  const uSig = { get value() { return SIG_ORDER().map((x) => x.emissiveIntensity); } };
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uSig = uSig;
+    sh.fragmentShader = 'uniform float uSig[6];\n' + sh.fragmentShader
+      .replace('#include <color_fragment>', `
+        int sid = int(vColor.r * 5.0 + 0.5);
+        int lamp = sid - (sid / 3) * 3;
+        vec3 sigTint = lamp == 0 ? vec3(1.0, 0.16, 0.1) : lamp == 1 ? vec3(1.0, 0.7, 0.1) : vec3(0.16, 1.0, 0.54);
+        float sigI = 0.0;
+        for (int i = 0; i < 6; i++) if (i == sid) sigI = uSig[i];
+        diffuseColor.rgb = sigTint * 0.1;`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance = sigTint * sigI;');
+  };
+  m.customProgramCacheKey = () => 'nyc-sig-lens';
+  return (sigMat = m);
+}
+function lensGeo(id: number) {
+  return cachedGeo(`lens${id}`, () => {
+    const g = new THREE.CylinderGeometry(0.1, 0.1, 0.02, 18).toNonIndexed();
+    const n = g.getAttribute('position').count;
+    const a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) a[i * 3] = id / 5;
+    g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    return g;
+  });
+}
 
 /** NYC signal head: federal-yellow housing, three 12" lenses with tunnel visors, front = +z */
 function signalHead(axis: 'x' | 'z') {
   return kit(`sighead|${axis}`, (k) => {
     const Y = PM.signalYellow();
-    const [R, Yl, G] = axis === 'z' ? [SIG.aveR, SIG.aveY, SIG.aveG] : [SIG.stR, SIG.stY, SIG.stG];
+    const base = axis === 'z' ? 0 : 3;
     k.add(new RoundedBoxGeometry(0.34, 1.0, 0.24, 2, 0.03), Y, 0, 0.5, 0);
     const visorO = new THREE.CylinderGeometry(0.13, 0.13, 0.24, 14, 1, true, -Math.PI * 0.62, Math.PI * 1.24);
     const visorI = flipped(new THREE.CylinderGeometry(0.122, 0.122, 0.24, 14, 1, true, -Math.PI * 0.62, Math.PI * 1.24));
-    const lens = new THREE.CylinderGeometry(0.1, 0.1, 0.02, 18);
     const rim = new THREE.TorusGeometry(0.11, 0.012, 6, 18);
-    [[R, 0.82], [Yl, 0.5], [G, 0.18]].forEach(([m, y]) => {
-      const yy = y as number;
-      k.add(lens, m as THREE.Material, 0, yy, 0.125, Math.PI / 2, 0, 0, 1, false);
+    [0.82, 0.5, 0.18].forEach((yy, i) => {
+      k.add(lensGeo(base + i), signalLensMat(), 0, yy, 0.125, Math.PI / 2, 0, 0, 1, false);
       k.add(rim, PM.signalBlack(), 0, yy, 0.122, 0, 0, 0, 1, false);
       // visor axis along +z, open at the bottom
       k.add(visorO, Y, 0, yy, 0.24, Math.PI / 2, 0, 0);
@@ -564,7 +595,7 @@ export function subway(parent: THREE.Object3D, group: THREE.Group, x: number, z:
       k.add(new THREE.LatheGeometry([[0, 0], [0.13, 0], [0.13, 0.08], [0.09, 0.14], [0.07, 0.5], [0.09, 0.55], [0.05, 0.62], [0, 0.62]].map(([a, b]) => new THREE.Vector2(a, b)), 14), Gm, px, 0, pz);
       k.add(new THREE.CylinderGeometry(0.038, 0.045, 1.75, 10), Gm, px, 0.62 + 0.875, pz);
       k.add(new THREE.CylinderGeometry(0.08, 0.06, 0.08, 12), Gm, px, 2.4, pz);
-      k.add(new THREE.SphereGeometry(0.21, 18, 12), emissive('#46e07a', 1.3, '#9df0b6'), px, 2.62, pz, 0, 0, 0, 1, false);
+      k.add(tinted(new THREE.SphereGeometry(0.21, 18, 12), '#5cf08c'), glowVC(), px, 2.62, pz, 0, 0, 0, 1, false);
       k.add(new THREE.SphereGeometry(0.06, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), Gm, px, 2.81, pz);
       // last baluster run to the post
       k.add(new THREE.BoxGeometry(0.05, 0.05, 0.07), Gm, px, H, pz - 0.03);

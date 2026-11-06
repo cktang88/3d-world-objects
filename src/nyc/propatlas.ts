@@ -37,6 +37,7 @@ const REGIONS = {
   shedSign: [1024, 1024, 512, 128],
   bikePanel: [1536, 1024, 256, 512],
   white: [1800, 1800, 16, 16],
+  soil: [1536, 1536, 512, 256],
 } satisfies Record<string, [number, number, number, number]>;
 export type Region = keyof typeof REGIONS;
 
@@ -137,6 +138,27 @@ function buildAtlas() {
   const r = new Rng(42);
 
   paint(g, 'white', (w, h) => { g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); });
+
+  // tree-pit soil and mulch (2:1, stretched over a 2.4 × 1.2 m pit)
+  paint(g, 'soil', (w, h) => {
+    g.fillStyle = '#3a2e24';
+    g.fillRect(0, 0, w, h);
+    const sr = new Rng(9);
+    for (let i = 0; i < 2600; i++) {
+      g.fillStyle = sr.pick(['#2a211a', '#4a3a2c', '#5b4733', '#6b5238', '#26201b', '#3f4a2a']);
+      g.save();
+      g.translate(sr.range(0, w), sr.range(0, h));
+      g.rotate(sr.range(0, 6.28));
+      g.fillRect(-sr.range(2, 6), -1, sr.range(3, 10), sr.range(1.5, 2.5));
+      g.restore();
+    }
+    for (let i = 0; i < 90; i++) {
+      g.fillStyle = sr.pick(['#4f6a2c', '#6b7a34', '#8a6a3a']);
+      g.beginPath();
+      g.ellipse(sr.range(0, w), sr.range(0, h), sr.range(2, 4), sr.range(1, 2), sr.range(0, 3), 0, 6.28);
+      g.fill();
+    }
+  });
 
   // pedestrian signal: black face, lit orange hand, unlit white walker (NYC countdown style)
   // pedestrian countdown signal: hand / walker overlay on the left, countdown digits on the right
