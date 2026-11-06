@@ -261,7 +261,8 @@ function corridor(lv: MuseumBase, axis: 'x' | 'z', c: number, out: number, d: Do
   box(m, 0.1, h, L, d.at + half, 0, cc);
   box(m, 2 * half + 0.1, 0.1, L, d.at, h, cc);
   if (v) box(glow, 2 * half - 0.6, 0.02, L - 0.6, d.at, h - 0.02, cc);
-  box(m, 2 * half + 0.1, h, 0.1, d.at, 0, end, grp);
+  // the end wall fits between the side walls (no faces shared with them)
+  box(m, 2 * half - 0.1, h, 0.1, d.at, 0, end, grp);
   box(floorM, 2 * half + 0.1, 0.01, L + T, d.at, 0, c + (out * (T + L)) / 2);
   const sides = axis === 'z' ? [rect(d.at - half - 0.05, cc, 0.2, L), rect(d.at + half + 0.05, cc, 0.2, L)] : [rect(cc, d.at - half - 0.05, L, 0.2), rect(cc, d.at + half + 0.05, L, 0.2)];
   pushCols(lv, ...sides);

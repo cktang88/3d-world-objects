@@ -188,14 +188,15 @@ export class AtriumLevel extends MuseumBase {
       g.rotateX(-Math.PI / 2);
       this.geo(m, g, new THREE.Matrix4().makeTranslation(CENTRE.x, y, CENTRE.z));
     };
-    ring(4.2, 4.5, dark, 0.004);
-    ring(5.6, 5.75, dark, 0.004);
-    ring(4.5, 5.6, light, 0.003);
+    // decal layers a visible few millimetres apart (no z-fighting with the floor or each other)
+    ring(4.2, 4.5, dark, 0.008);
+    ring(5.6, 5.75, dark, 0.008);
+    ring(4.5, 5.6, light, 0.004);
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
       const len = i % 2 ? 1.0 : 2.2;
       const f = new Frame(CENTRE.x + Math.sin(a) * (2.9 + len / 2), CENTRE.z + Math.cos(a) * (2.9 + len / 2), a);
-      this.bx(i % 2 ? light : dark, 0.12, 0.005, len, 0, 0, 0, f);
+      this.bx(i % 2 ? light : dark, 0.12, 0.012, len, 0, 0, 0, f);
     }
     // a warm fill under the coffers
     for (const z of [-6, -16, -26]) this.point(new THREE.Vector3(0, H - 2.5, z), '#ffe2bd', 70, 26, 1.2);

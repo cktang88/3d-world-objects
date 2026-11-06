@@ -6,6 +6,7 @@ import { loadRemote, animate, disposeModel, clearQueue, isRebuilt, DATASET_LABEL
 import { trackForDetail } from '../detail';
 import type { Measured } from './sizes';
 import { fmtDims } from './text';
+import { fixZFight } from './zfight';
 
 // ---------------------------------------------------------------- frames & batching
 
@@ -46,6 +47,7 @@ class Batcher {
     l.push(g);
   }
   flush(group: THREE.Group, shadows: boolean) {
+    const out: THREE.Mesh[] = [];
     for (const [mat, list] of this.parts) {
       if (mat.userData.worldUV) for (const g of list) worldUV(g);
       const merged = mergeGeometries(list, false);
@@ -57,8 +59,10 @@ class Batcher {
       mesh.castShadow = shadows && !(mat as THREE.MeshStandardMaterial).transparent;
       if ((mat as THREE.MeshStandardMaterial).transparent) mesh.renderOrder = 2;
       group.add(mesh);
+      out.push(mesh);
     }
     this.parts.clear();
+    return out;
   }
 }
 
@@ -423,7 +427,10 @@ export abstract class MuseumBase implements Level {
     this.cols.push(f.rect(lx, lz, w, d));
   }
   flush(shadows = false) {
-    this.batch.flush(this.group, shadows);
+    const fresh = this.batch.flush(this.group, shadows);
+    // the room's own geometry: faces of different merged meshes lying flush in one plane (a trim on a
+    // platform top, a case base under its frame) are lifted a few millimetres apart (zfight.ts)
+    if (fresh.length) fixZFight(this.group, (m) => !!m.userData.owned && !m.userData.tex);
   }
 
   // ---- light
@@ -611,6 +618,7 @@ export abstract class MuseumBase implements Level {
         if (!m.library) {
           if (mod.animator && mod.animator.joints.length > 6) mod.animator = null;
           mergeStatic(mod.object, new Set(mod.animator?.joints.map((j) => j.node) ?? []));
+          fixZFight(mod.object, undefined, 0.002 / Math.max(1e-3, m.k));
         }
         holder.add(mod.object);
         trackForDetail(holder, mod.object, e.id, e.og, mod.size);

@@ -408,7 +408,7 @@ export class GalleryLevel extends MuseumBase {
       { text: 'Words found in their sand3d programs and titles.', size: 0.05, color: shade(pInk, 0.6), weight: 400, font: SANS },
       { text: 'Look at anything and press E to read its program.', size: 0.05, color: shade(pInk, 0.6), weight: 400, font: SANS },
     ], 2.4, 1.2, panelBg, 420, 'left');
-    intro.position.set(-3.4, 1.55, -0.03);
+    intro.position.set(-3.4, 1.55, -0.06); // clear of the dado rail and skirting (3 cm)
     intro.rotation.y = Math.PI;
     this.group.add(intro);
   }

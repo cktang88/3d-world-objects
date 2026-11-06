@@ -402,3 +402,24 @@ test('exhibits face the visitor: the detailed side (piano keys) turns to the dis
   box.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1, 8, 8, 8)));
   expect(frontOf(box, new THREE.Vector3(0, 0, 1)) === 'guess', 'a symmetric box was given a front');
 });
+
+test('no z-fighting: coplanar overlapping faces of different meshes in the atrium and three room types are gone or tiny', async () => {
+  await loadMuseum();
+  const { scanZFight } = await import('../src/museum/zfight');
+  const bad: string[] = [];
+  const rooms: { n: string; g: THREE.Group; dispose: () => void }[] = [];
+  const a = new AtriumLevel();
+  rooms.push({ n: 'atrium', g: a.group, dispose: () => a.dispose() });
+  for (const t of [3302, 2453, 811]) {
+    const g = new GalleryLevel({ kind: 'gallery', theme: t, page: 0 });
+    await Promise.race([g.built, settle(8000)]);
+    rooms.push({ n: `theme ${t}`, g: g.group, dispose: () => g.dispose() });
+  }
+  for (const r of rooms) {
+    const pairs = scanZFight(r.g);
+    const area = pairs.reduce((s, p) => s + p.area, 0);
+    if (pairs.length > 8 || area > 0.2) bad.push(`${r.n}: ${pairs.length} pairs, ${fmt(area)} m2`);
+    r.dispose();
+  }
+  none(bad, 'z-fighting faces');
+});
