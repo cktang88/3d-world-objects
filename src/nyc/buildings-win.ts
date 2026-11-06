@@ -92,7 +92,7 @@ const H = (o = 0): A => [0.5, o];
 export const REVEAL = 0.24;
 
 export type TrimKind = 'stone' | 'hood' | 'flat' | 'arch' | 'none';
-export type SashKind = 'dh' | 'case' | 'store';
+export type SashKind = 'dh' | 'case' | 'store' | 'none';
 
 const geos = new Map<string, THREE.BufferGeometry>();
 function geo(key: string, make: () => THREE.BufferGeometry) {

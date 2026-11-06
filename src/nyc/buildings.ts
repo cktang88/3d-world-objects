@@ -1084,7 +1084,7 @@ function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Materi
         if (fy < y0 - 0.01) continue;
         for (let k = 0; k < nf; k++) {
           const u = -F.len / 2 + bw * k + 0.06;
-          if (curtain) F.window(u, fy + 0.25, bw - 0.12, 3.05, { trim: 'none', sash: 'store', trimColor: spandrelC, revealColor: spandrelC, sashColor: spandrelC, kind: 'office' });
+          if (curtain) F.window(u, fy + 0.25, bw - 0.12, 3.05, { trim: 'none', sash: 'none', trimColor: spandrelC, revealColor: spandrelC, sashColor: spandrelC, kind: 'office' });
           else F.window(u + 0.2, fy + 0.9, bw - 0.52, 1.9, { trim: 'none', sash: 'case', trimColor: spandrelC, revealColor: new THREE.Color(panelTint).multiplyScalar(0.6), sashColor: spandrelC, kind: 'office' });
         }
       }
