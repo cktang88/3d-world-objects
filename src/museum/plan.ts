@@ -348,19 +348,124 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
   H = Math.max(H, floorTop + 1.8, wallTop + 1.0);
   if (hangU.length) H = Math.max(H, Math.max(floorTop, 2.6) + 1.2 + hangH + 1.2);
 
-  // doors and walls: grow the room until every wall display fits
+  // Doors, walls and rows together. Every onward doorway keeps a clear sight-and-walk corridor
+  // (CLEAR m wide) from the room's middle: north doors a band through every row, side doors an
+  // aisle between rows wide enough for them. The room grows until all of that and the wall
+  // displays fit.
+  const CLEAR = 2.6;
   const big = H >= 7 || W >= 20;
-  let doors: Door[] = [];
+  const entrance: Door = { wall: 'S', at: 0, w: big ? 3.4 : intimate ? 2.0 : 2.4, h: big ? 4.4 : intimate ? 2.7 : 3.2 };
+  let doors: Door[] = [entrance];
   let wall: Placed[] | null = null;
+  let floor: Placed[] = [];
+  let rowsZ: number[] = [];
   const order = r.shuffle<Wall>(['W', 'E', 'N']).concat(['S']);
-  for (let it = 0; it < 40; it++) {
-    doors = [{ wall: 'S', at: 0, w: big ? 3.4 : intimate ? 2.0 : 2.4, h: big ? 4.4 : intimate ? 2.7 : 3.2 }, ...exitDoors(W, D, exits, big, r.fork(it), intimate)];
+
+  /** rows at depth D, width W, packed around the north doors' corridors; null if a row cannot fit */
+  const placeRows = (W: number, D: number, north: Door[]) => {
+    const extra = Math.max(0, D - minD) / (rows.length + 1);
+    const out: Placed[] = [];
+    const zs: number[] = [];
+    const bands = north.map((d) => [d.at - Math.max(CLEAR, d.w + 0.4) / 2, d.at + Math.max(CLEAR, d.w + 0.4) / 2] as [number, number]).sort((p, q) => p[0] - q[0]);
+    // free segments across the floor
+    const segs: [number, number][] = [];
+    let cur = -W / 2 + inset;
+    for (const [b0, b1] of bands) {
+      if (b0 > cur) segs.push([cur, Math.min(b0, W / 2 - inset)]);
+      cur = Math.max(cur, b1);
+    }
+    if (W / 2 - inset > cur) segs.push([cur, W / 2 - inset]);
+    let z = -entry - extra;
+    for (let i = 0; i < rows.length; i++) {
+      const rw = rows[i];
+      const d = rowD[i];
+      const isHero = rw.length === 1 && rw[0].hero;
+      if (isHero) z -= 1;
+      const zc = z - d / 2;
+      zs.push(zc);
+      // fill the segments left to right (the widest first for a lone hero)
+      const order2 = isHero ? [...segs].sort((p, q) => q[1] - q[0] - (p[1] - p[0])) : segs;
+      const fill: Unit[][] = order2.map(() => []);
+      let si = 0;
+      for (const u of rw) {
+        while (si < order2.length && fill[si].reduce((s2, x) => s2 + x.w + 0.6, 0) + u.w > order2[si][1] - order2[si][0]) si++;
+        if (si >= order2.length) return null;
+        fill[si].push(u);
+      }
+      order2.forEach(([s0, s1], k) => {
+        const us = fill[k];
+        if (!us.length) return;
+        const tw = us.reduce((s2, u) => s2 + u.w, 0);
+        const gap = Math.min((s1 - s0 - tw) / (us.length + 1), st.outdoor ? 10 : 4);
+        let x = (s0 + s1) / 2 - (tw + gap * (us.length - 1)) / 2;
+        for (const u of us) {
+          out.push({ u, f: new Frame(x + u.w / 2, zc, 0) });
+          x += u.w + gap;
+        }
+      });
+      z -= d + aisle + extra + (isHero ? 1 : 0);
+    }
+    return { floor: out, rowsZ: zs };
+  };
+
+  for (let it = 0; it < 60; it++) {
+    const proposed = exitDoors(W, D, exits, big, r.fork(it), intimate);
+    const placed = placeRows(W, D, proposed.filter((d) => d.wall === 'N'));
+    if (!placed) {
+      W += 2;
+      continue;
+    }
+    // side doors move into the nearest open band between rows (or before the first / after the last)
+    const gaps: [number, number][] = [];
+    let top = 0;
+    placed.rowsZ.forEach((zc, i) => {
+      gaps.push([zc + rowD[i] / 2, top]);
+      top = zc - rowD[i] / 2;
+    });
+    gaps.push([-D, top]);
+    let ok = true;
+    const used: number[] = [];
+    const final = proposed.map((d) => {
+      if (d.wall === 'N') return d;
+      const need = Math.max(CLEAR, d.w + 0.4);
+      let best: number | null = null;
+      for (const [g0, g1] of gaps) {
+        const lo = Math.max(g0 + need / 2, -D + 1 + d.w / 2), hi = Math.min(g1 - need / 2, -1.5 - d.w / 2);
+        if (lo > hi) continue;
+        const at = Math.min(hi, Math.max(lo, d.at));
+        if (used.some((u) => Math.abs(u - at) < d.w + 1)) continue;
+        if (best === null || Math.abs(at - d.at) < Math.abs(best - d.at)) best = at;
+      }
+      if (best === null) {
+        ok = false;
+        return d;
+      }
+      used.push(best);
+      return { ...d, at: best };
+    });
+    if (!ok) {
+      D += 2;
+      continue;
+    }
+    doors = [entrance, ...final];
     wall = allocateWalls(wallU, W, D, doors, wallDepth + 0.3, order);
-    if (wall) break;
-    D += 2;
-    if (it % 3 === 2) W += 1.5;
+    if (!wall) {
+      D += 2;
+      if (it % 3 === 2) W += 1.5;
+      continue;
+    }
+    floor = placed.floor;
+    rowsZ = placed.rowsZ;
+    break;
   }
   wall ??= [];
+  if (!floor.length && rows.length) {
+    // could not satisfy every corridor: fall back to rows without them
+    const placed = placeRows(W, D, [])!;
+    floor = placed.floor;
+    rowsZ = placed.rowsZ;
+    if (doors.length < 1 + exits) doors = [entrance, ...exitDoors(W, D, exits, big, r.fork(99), intimate)];
+  }
   H = Math.max(H, Math.max(...doors.map((d) => d.h)) + (intimate ? 1.0 : 2.2));
   let Hw = H;
   if (ceiling === 'vault') {
@@ -371,40 +476,23 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
     }
   }
 
-  // place rows, sharing out any extra depth as wider aisles
-  const extra = Math.max(0, D - minD) / (rows.length + 1);
-  const floor: Placed[] = [];
-  const rowsZ: number[] = [];
-  let z = -entry - extra;
-  rows.forEach((rw, i) => {
-    const d = rowD[i];
-    const isHero = rw.length === 1 && rw[0].hero;
-    if (isHero) z -= 1;
-    const zc = z - d / 2;
-    rowsZ.push(zc);
-    const tw = rw.reduce((s, u) => s + u.w, 0);
-    const free = W - 2 * inset - tw;
-    const gap = rw.length > 1 ? Math.min(free / (rw.length - 1), st.outdoor ? 10 : 4) : 0;
-    let x = -(tw + gap * (rw.length - 1)) / 2;
-    for (const u of rw) {
-      floor.push({ u, f: new Frame(x + u.w / 2, zc + (d - u.d) / 2 * 0, 0) });
-      x += u.w + gap;
-    }
-    z -= d + aisle + extra + (isHero ? 1 : 0);
-  });
-
-  // benches in the widest gaps between rows, off the room's centre line
+  // benches in the widest gaps between rows, off the room's centre line, clear of the doorway corridors
   if (!st.outdoor && floorU.length >= 4) {
     const gaps: { z: number; g: number }[] = [];
     for (let i = 0; i + 1 < rowsZ.length; i++) {
       const top = rowsZ[i] - rowD[i] / 2, bot = rowsZ[i + 1] + rowD[i + 1] / 2;
-      gaps.push({ z: (top + bot) / 2, g: top - bot });
+      const zc = (top + bot) / 2;
+      if (doors.some((d) => (d.wall === 'E' || d.wall === 'W') && Math.abs(d.at - zc) < 2.5)) continue;
+      gaps.push({ z: zc, g: top - bot });
     }
     gaps.sort((x, y) => y.g - x.g);
+    const north = doors.filter((d) => d.wall === 'N');
     gaps.slice(0, floorU.length >= 10 ? 2 : 1).forEach((gp, i) => {
       if (gp.g < 3.2) return;
-      const b = bench();
-      floor.push({ u: b, f: new Frame((i % 2 ? 1 : -1) * Math.min(W / 4, 4), gp.z, 0) });
+      let x = (i % 2 ? 1 : -1) * Math.min(W / 4, 4);
+      for (const d of north) if (Math.abs(x - d.at) < CLEAR / 2 + 1.2) x = d.at + Math.sign(x - d.at || 1) * (CLEAR / 2 + 1.3);
+      if (Math.abs(x) > W / 2 - 1.5) return;
+      floor.push({ u: bench(), f: new Frame(x, gp.z, 0) });
     });
   }
 

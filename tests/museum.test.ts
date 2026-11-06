@@ -121,6 +121,25 @@ test('gallery plans: a 1.2 m apron inside every doorway is free of displays', ()
   none(bad, 'doorways blocked');
 });
 
+test('gallery plans: a clear 2.5 m sight-and-walk corridor from the room centre to every onward doorway', () => {
+  const bad: string[] = [];
+  for (const { sn, seed, plan } of plans()) {
+    const fr = plan.floor.map(footRect);
+    for (const d of plan.doors.slice(1)) {
+      const h = 1.25;
+      const zone = d.wall === 'N' ? { minX: d.at - h, maxX: d.at + h, minZ: -plan.D, maxZ: -plan.D / 2 }
+        : d.wall === 'W' ? { minX: -plan.W / 2, maxX: 0, minZ: d.at - h, maxZ: d.at + h }
+        : d.wall === 'E' ? { minX: 0, maxX: plan.W / 2, minZ: d.at - h, maxZ: d.at + h }
+        : { minX: d.at - h, maxX: d.at + h, minZ: -plan.D / 2, maxZ: 0 };
+      fr.forEach((r, i) => {
+        const ix = Math.min(r.maxX, zone.maxX) - Math.max(r.minX, zone.minX), iz = Math.min(r.maxZ, zone.maxZ) - Math.max(r.minZ, zone.minZ);
+        if (ix > 0.05 && iz > 0.05) bad.push(`${sn}#${seed} ${fmt(plan.W)}x${fmt(plan.D)}: ${plan.floor[i].u.type} at (${fmt(plan.floor[i].f.x)}, ${fmt(plan.floor[i].f.z)}) in the corridor to the ${d.wall} doorway at ${fmt(d.at)}`);
+      });
+    }
+  }
+  none(bad, 'doorway corridors blocked');
+});
+
 test('doorways lead to similar themes (theme neighbours share a collection or words)', async () => {
   await loadMuseum();
   const m = museum();
