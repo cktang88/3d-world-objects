@@ -561,11 +561,13 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
   T.add(F.m, addr.split(' ')[0], u0 + 0.11, 2.5, 0.145, 0.12, 0.2, '#e8e2d0', 0);
 
   // ---- portal into the shop
-  const alongX = F.side === 'N' || F.side === 'S';
   const ent = F.at(du, 0, 0.7);
   if (!closed) {
     ctx.portals.push({
-      box: new THREE.Box3().setFromCenterAndSize(ent.clone().setY(1.4), new THREE.Vector3(alongX ? 1.8 : 1.6, 2.8, alongX ? 1.6 : 1.8)),
+      // from the door (at the back of the recess) out across the doorstep
+      box: F.boxOf(du - 0.9, du + 0.9, recess > 0.2 ? -recess : -0.1, 1.5, 0, 2.8),
+      returnPos: F.at(du, 0, 1.8),
+      returnYaw: F.yawOut(),
       label: `Enter ${titleCaseName(name)}`,
       sub: `${addr} · stocked with sand3d ${shop.type === 'machines' ? 'machine parts' : shop.pools[0]}`,
       target: { kind: 'interior', seed: hashN(ctx.seed, Math.round(ent.x * 10), Math.round(ent.z * 10), 11), name: titleCaseName(name), style: 'store', floor: 0, floors: 1, biome: 'metropolis', shop: shop.type },

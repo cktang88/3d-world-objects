@@ -159,6 +159,16 @@ export class Face {
     const a = this.at(u0, 0, z0), b = this.at(u1, 0, z1);
     return { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z) };
   }
+  /** a world box around a face-local box (portal triggers) */
+  boxOf(u0: number, u1: number, z0: number, z1: number, y0: number, y1: number) {
+    const r = this.rectOf(u0, u1, z0, z1);
+    return new THREE.Box3(new THREE.Vector3(r.minX, y0, r.minZ), new THREE.Vector3(r.maxX, y1, r.maxZ));
+  }
+  /** player yaw looking out of this face, towards the street */
+  yawOut() {
+    const n = this.at(0, 0, 1).sub(this.at(0, 0, 0));
+    return Math.atan2(-n.x, -n.z);
+  }
   /** an opening with an instanced window in it */
   window(u0: number, y0: number, w: number, h: number, o: { trim: TrimKind; sash: SashKind; trimColor: THREE.Color; revealColor: THREE.Color; sashColor: THREE.Color; kind: 'apt' | 'office' | 'loft'; ac?: number; muntins?: number }) {
     this.holes.push({ u0, u1: u0 + w, y0, y1: y0 + h });
@@ -826,6 +836,16 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
     const cColor = type === 'brownstone' ? rng.pick(['#3a2a20', '#2a2420', '#5a4a3a', shade(wall, 0.85)]) : type === 'prewar' ? '#d9d1bf' : type === 'castiron' ? shade(tint, 1.0) : rng.pick(CORNICE_PAINT);
     const ex: [boolean, boolean] = [false, false];
     cornice(F, cKind, h, cColor, type === 'castiron' ? 1.3 : type === 'prewar' ? 1.15 : type === 'brownstone' ? 0.85 : 1, ex);
+    // tenement name plate: a raised pediment over the cornice with the year (or name) in the frieze
+    if (isFront && (type === 'tenement' || type === 'castiron') && rng.chance(0.45)) {
+      const pm = mat(cColor, { rough: 0.6, metal: 0.15 });
+      const pw = Math.min(L * 0.4, 3.2);
+      B(F.g, pm, pw, 0.55, 0.5, 0, h, 0.15);
+      B(F.g, pm, pw + 0.2, 0.08, 0.62, 0, h + 0.55, 0.2);
+      B(F.f, pm, 0.5, 0.4, 0.3, 0, h + 0.63, 0.12, false);
+      const label = rng.chance(0.6) ? String(rng.int(1868, 1912)) : rng.pick(['THE ROSALIND', 'ANNA', 'THE ELDORADO', 'KATHERINE', 'THE MARGARET', 'ESTELLE']);
+      ctx.text.add(F.m, label, 0, h - (type === 'castiron' ? 1.3 : 1.0) * 0.72, 0.075, 0.3, Math.min(L * 0.5, 3.5), shade(cColor, 0.55), 1);
+    }
     // ---- fire escape on the front
     if (isFront && (type === 'tenement' || type === 'castiron' || (type === 'midrise' && floors <= 8)) && levels.length >= 2 && rng.chance(type === 'castiron' ? 0.5 : 0.85)) {
       const fw = n >= 4 ? (centres[1] - centres[0]) * 2 + 0.6 : Math.min(L - 0.6, 3.6);
@@ -848,10 +868,12 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   colliders.push({ ...r });
 }
 
-function portalDoor(ctx: BCtx, F: Face, u: number, out: number, alongX: boolean, addr: string, floors: number, type: BType, style: string) {
+function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean, addr: string, floors: number, type: BType, style: string) {
   const entry = F.at(u, 0, out);
   ctx.portals.push({
-    box: new THREE.Box3().setFromCenterAndSize(entry.clone().setY(1.5), new THREE.Vector3(alongX ? 2.2 : 2.4, 3, alongX ? 2.4 : 2.2)),
+    box: F.boxOf(u - 1.1, u + 1.1, out - 1.2, out + 1.2, 0, 3),
+    returnPos: F.at(u, 0, out + 1.4),
+    returnYaw: F.yawOut(),
     label: `Enter ${addr}`,
     sub: `${floors}-storey ${type === 'brownstone' ? 'brownstone' : type === 'tower' ? 'office tower' : type === 'castiron' ? 'cast-iron loft' : type === 'prewar' ? 'pre-war apartment house' : 'walk-up'}`,
     target: { kind: 'interior', seed: hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), name: addr, style, floor: 0, floors: Math.min(floors, 40), biome: 'town' },
