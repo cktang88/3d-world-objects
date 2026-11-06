@@ -7,7 +7,7 @@ import { surface } from './pbr';
 import { realScale } from './realscale';
 import { Rng, hashN } from './rng';
 import { loadPools } from './museumData';
-import { loadRemote, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
+import { loadRemote, isRebuilt, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { SHOPS } from './nyc';
 import { loadOriginal, trackForDetail } from './detail';
 
@@ -35,6 +35,8 @@ export class ShopLevel implements Level {
   private ports: Portal[] = [];
   private alive = true;
   private models: RemoteModel[] = [];
+  /** triangles we are willing to spend on swapping shelf products for their originals */
+  private triBudget = 2_500_000;
 
   constructor(desc: Extract<LevelDesc, { kind: 'interior' }>) {
     this.name = desc.name;
@@ -171,6 +173,8 @@ export class ShopLevel implements Level {
       if (!stock.length) return;
       const pr = new Rng(hashN(desc.seed, 5));
       pr.shuffle(stock);
+      // products rebuilt with UV maps first: they take real textures best
+      stock.sort((a, b) => Number(isRebuilt(b.id)) - Number(isRebuilt(a.id)));
       const products = stock.slice(0, show ? Math.min(stock.length, pedestals.length + 8) : 26);
       // showroom pieces
       pedestals.forEach((p, i) => {
@@ -233,6 +237,18 @@ export class ShopLevel implements Level {
       // then the original textured model, if this product has one
       loadOriginal(e.id, e.og, m.size, { prio: 50 + prio, texMax: 512 }).then((orig) => {
         if (!orig || !this.alive) return;
+        // originals made of many separate meshes would multiply draw calls across every facing
+        let meshes = 0, tris = 0;
+        orig.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh) return;
+          meshes++;
+          tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+        });
+        // keep the shop within a sane triangle budget: originals x facings add up fast
+        const cost = tris * slots.length;
+        if (meshes > 12 || cost > 350_000 || this.triBudget - cost < 0) return;
+        this.triBudget -= cost;
         for (const im of sand) this.group.remove(im);
         this.instance(orig, slots, s);
       });

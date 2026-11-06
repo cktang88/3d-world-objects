@@ -25,6 +25,17 @@ A first-person three.js world built from [**sand3d**](https://github.com/Sandflo
 - **Rendering:** MSAA, ground-truth ambient occlusion (GTAO), bloom, a physical sky that also lights the reflections, and 4K shadow maps. Press <kbd>G</kbd> to cycle ultra / high / low, or open `?quality=high`.
 - **NYC architecture:** instanced 3D windows (frames, mullions, sills, lintels, reflective glass), normal-mapped brick and stone, reflective curtain-wall towers, extruded car bodies, and detailed shop windows.
 
+## Realism
+
+- **Rebuilt from the programs, with UV maps.** `scripts/rebuild.py` runs each object's sand3d program in Blender (`pip install sand3d`), smart-UV-unwraps every part, and rescales the UVs so one unit is one metre. Then it exports a GLB that keeps sand3d's material kinds. All world objects, the museum wings' opening rooms and the shop stock are rebuilt this way and Meshopt-compressed (`public/models/`, `public/rebuilt/`). Everything else streams as USD and gets the same textures through triplanar projection.
+- **Photo-scanned textures at physical size.** `scripts/fetch_pbr.py` builds `public/pbr.json` from CC0 [Poly Haven](https://polyhaven.com) sets, including each texture's real-world dimensions:
+  - **Material kinds:** oak, walnut, pine, birch, metals, linen, velvet, leather, marble, concrete.
+  - **NYC architecture:** brick, brownstone, limestone, sidewalk pavers, asphalt, roofing, bark.
+  - **Interior floors:** parquet, marble, tile, carpet.
+
+  Colour, height and roughness/AO maps stream from Poly Haven's CDN. Object textures keep the object's own sand3d colour.
+- **Realistic scale.** `src/realscale.ts` knows the typical size of ~400 kinds of things (a mug is 12 cm, a cello 1.25 m, a bus 12 m) plus plausible ranges per family. Objaverse-derived objects that are far off get rescaled; CAD, Articraft, SimReady and AutoMate are modelled at real size already. The museum shows objects at actual size when they fit a case and labels the display scale otherwise. Shops stock products at their real size.
+
 ## Run
 
 ```bash

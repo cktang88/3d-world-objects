@@ -11,6 +11,10 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
  */
 
 let loader: GLTFLoader | null = null;
+/** the shared GLB loader (Draco, KTX2 and Meshopt enabled) */
+export function gltf() {
+  return loader;
+}
 export let originalsEnabled = true;
 export function setOriginals(v: boolean) {
   originalsEnabled = v;
@@ -31,6 +35,10 @@ export function originalUrl(id: string, og: number) {
 }
 
 const MAX_BYTES = 40e6;
+const MAX_TRIS_EACH = 1_500_000;
+/** total triangles of originals shown at once (proximity manager) */
+const MAX_TRIS_TOTAL = 9_000_000;
+let shownTris = 0;
 const MAX_ACTIVE = 3;
 let active = 0;
 const waiting: { run: () => void; prio: number }[] = [];
@@ -59,6 +67,7 @@ interface Cached {
   minY: number;
   users: number;
   bytes: number;
+  tris: number;
 }
 const cache = new Map<string, Promise<Cached | null>>();
 const failed = new Set<string>();
@@ -124,7 +133,12 @@ async function fetchOriginal(id: string, og: number, prio: number, texMax: numbe
         }
       }
     });
-    return { scene, size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()), minY: box.min.y, users: 0, bytes: buf.byteLength };
+    let tris = 0;
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+    });
+    return { scene, size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()), minY: box.min.y, users: 0, bytes: buf.byteLength, tris };
   } catch {
     return null;
   } finally {
@@ -145,9 +159,8 @@ export async function loadOriginal(id: string, og: number | undefined, fit: THRE
     trim();
   }
   const c = await p;
-  if (!c) {
+  if (!c || c.tris > MAX_TRIS_EACH) {
     failed.add(id);
-    cache.delete(id);
     return null;
   }
   c.users++;
@@ -219,7 +232,12 @@ let tick = 0;
 export function updateDetail(player: THREE.Vector3, radius: number) {
   if (++tick % 10) return;
   // forget objects from levels that were thrown away
-  for (let i = tracked.length - 1; i >= 0; i--) if (tracked[i].holder.userData.disposed) tracked.splice(i, 1);
+  for (let i = tracked.length - 1; i >= 0; i--) {
+    if (!tracked[i].holder.userData.disposed) continue;
+    shownTris -= (tracked[i].holder.userData.originalTris as number) || 0;
+    tracked.splice(i, 1);
+  }
+  if (shownTris < 0) shownTris = 0;
   if (!originalsEnabled) return;
   const near: { t: Tracked; d: number }[] = [];
   for (const t of tracked) {
@@ -237,6 +255,18 @@ export function updateDetail(player: THREE.Vector3, radius: number) {
         if (g) releaseOriginal(g);
         return;
       }
+      let tris = 0;
+      g.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+      });
+      if (shownTris + tris > MAX_TRIS_TOTAL) {
+        releaseOriginal(g);
+        t.state = 'none'; // over budget: keep the sand3d version rather than retrying every frame
+        return;
+      }
+      shownTris += tris;
+      t.holder.userData.originalTris = tris;
       t.original = g;
       t.holder.add(g);
       t.sand.visible = false;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ParsedObject, JointDef } from './usda/parse';
-import { kindOf, enhance, glassFrom } from './materials';
+import { kindOf, enhance, glassFrom, enhanceTree } from './materials';
+import { gltf } from './detail';
 
 /** One object anywhere in the sand3d release, streamed from Hugging Face on demand. */
 export interface RemoteEntry {
@@ -204,7 +205,45 @@ function buildModel(p: ParsedObject, shadows: boolean): RemoteModel {
   return { object: root, size, animator, tris: p.tris };
 }
 
+/** ids rebuilt from their sand3d programs in Blender, with UV maps (public/rebuilt/) */
+let rebuilt: Set<string> = new Set();
+export async function loadRebuiltIndex() {
+  try {
+    rebuilt = new Set(await (await fetch(`${import.meta.env.BASE_URL}rebuilt/index.json`)).json());
+  } catch {
+    rebuilt = new Set();
+  }
+}
+export function isRebuilt(id: string) {
+  return rebuilt.has(id);
+}
+const glbCache = new Map<string, Promise<{ scene: THREE.Group; size: THREE.Vector3; tris: number }>>();
+function loadRebuilt(e: RemoteEntry) {
+  let p = glbCache.get(e.id);
+  if (!p) {
+    p = gltf()!.loadAsync(`${import.meta.env.BASE_URL}rebuilt/${e.id}.glb`).then((g) => {
+      enhanceTree(g.scene);
+      let tris = 0;
+      g.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        m.userData.shared = true;
+        m.castShadow = m.receiveShadow = true;
+        tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+      });
+      const size = new THREE.Box3().setFromObject(g.scene).getSize(new THREE.Vector3());
+      return { scene: g.scene, size, tris: Math.round(tris) };
+    });
+    glbCache.set(e.id, p);
+  }
+  return p;
+}
+
 export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: boolean } = {}): Promise<RemoteModel> {
+  // prefer the UV-mapped rebuild (static objects only: joints come from the USD)
+  if (rebuilt.has(e.id) && !e.joints && gltf()) {
+    return loadRebuilt(e).then((r) => ({ object: r.scene.clone(true), size: r.size.clone(), animator: null, tris: r.tris }));
+  }
   return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));
 }
 
@@ -236,6 +275,6 @@ export function animate(a: Animator, time: number) {
 export function disposeModel(o: THREE.Object3D) {
   o.traverse((c) => {
     const m = c as THREE.Mesh;
-    if (m.isMesh) m.geometry.dispose();
+    if (m.isMesh && !m.userData.shared) m.geometry.dispose();
   });
 }

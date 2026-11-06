@@ -9,7 +9,7 @@ import { NycLevel } from './nyc';
 import { ShopLevel } from './shop';
 import { AtriumLevel, GalleryLevel } from './museum';
 import { loadMuseum, museum } from './museumData';
-import { DATASET_LABEL, type RemoteEntry } from './remote';
+import { DATASET_LABEL, loadRebuiltIndex, type RemoteEntry } from './remote';
 import type { Env, Level, LevelDesc, Portal } from './level';
 import { skyTex } from './textures';
 import { hashStr } from './rng';
@@ -620,7 +620,7 @@ function frame() {
 // ---------------------------------------------------------------- start
 
 const params = new URLSearchParams(location.search);
-const ready = Promise.all([loadManifest(), loadMuseum(), loadPbr(renderer)]);
+const ready = Promise.all([loadManifest(), loadMuseum(), loadPbr(renderer), loadRebuiltIndex()]);
 
 async function startMode(m: Mode) {
   mode = m;
