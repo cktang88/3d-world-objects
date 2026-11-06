@@ -11,6 +11,7 @@ import type { RemoteEntry } from '../src/remote';
 import { loadMuseum, museum } from '../src/museumData';
 import { GalleryLevel, AtriumLevel } from '../src/museum';
 import { SI_BASE, SI_ROOMS } from '../src/museum/smithsonian';
+import { frontOf } from '../src/museum/base';
 import { Seamless, descKey, facing } from '../src/seamless';
 import { ENTRY_Z } from '../src/museum/shell';
 import type { LevelDesc } from '../src/level';
@@ -371,4 +372,33 @@ test('a gallery seen through a doorway: its shell glows and its stand-in light i
   for (let i = 0; i < 31; i++) g.update(1 / 60, new THREE.Vector3(0, 0, -3), i / 60);
   expect(glow() === before, 'the shell still glows from inside');
   g.dispose();
+});
+
+test('exhibits face the visitor: the detailed side (piano keys) turns to the display front, a flat back away', () => {
+  // an upright piano: a flat back panel at -z, a case, 88 keys along +z
+  const piano = (keysAt: number) => {
+    const g = new THREE.Group();
+    const add = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d));
+      m.position.set(x, y, z);
+      g.add(m);
+    };
+    add(1.5, 1.2, 0.04, 0, 0.6, -keysAt * 0.28);
+    add(1.5, 1.2, 0.5, 0, 0.6, 0);
+    for (let k = 0; k < 88; k++) add(0.015, 0.02, 0.12, -0.7 + k * 0.016, 0.75, keysAt * 0.3);
+    return g;
+  };
+  // the display's front is +z of the model (rot 0): keys at +z stay, keys at -z turn round
+  expect(frontOf(piano(1), new THREE.Vector3(0, 0, 1)) === 'keep', 'keys already towards the visitor, but it would turn');
+  expect(frontOf(piano(-1), new THREE.Vector3(0, 0, 1)) === 'flip', 'the back panel faces the visitor and it does not turn');
+  // a long side placed along x (rot pi/2): the wanted axis is -x
+  const turned = piano(1);
+  turned.rotation.y = Math.PI / 2; // keys now at +x
+  const wrap = new THREE.Group();
+  wrap.add(turned);
+  expect(frontOf(wrap, new THREE.Vector3(-1, 0, 0)) === 'flip', 'keys at +x while the visitor is at -x');
+  // a symmetric thing: left as modelled
+  const box = new THREE.Group();
+  box.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1, 8, 8, 8)));
+  expect(frontOf(box, new THREE.Vector3(0, 0, 1)) === 'guess', 'a symmetric box was given a front');
 });

@@ -179,6 +179,53 @@ export function mergeStatic(root: THREE.Object3D, moving: Set<THREE.Object3D> = 
   root.updateMatrixWorld(true);
 }
 
+/**
+ * Which way a model faces, relative to `want` (a horizontal axis in its own frame). No front is
+ * recorded in the datasets, so it is read from the geometry: the detailed side of a thing (piano
+ * keys, a screen, drawer fronts) carries far more vertices near its face than a flat back panel.
+ * Counts the vertices in the outer 20% slab on the wanted side and on the opposite one.
+ * 'flip' when the opposite side is clearly busier, 'keep' when the wanted side is, else 'guess'
+ * (left as modelled).
+ */
+export function frontOf(root: THREE.Object3D, want: THREE.Vector3): 'keep' | 'flip' | 'guess' {
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const axis = Math.abs(want.x) > Math.abs(want.z) ? 'x' : 'z';
+  const sign = Math.sign(axis === 'x' ? want.x : want.z) || 1;
+  const vals: number[] = [];
+  const v = new THREE.Vector3();
+  const mm = new THREE.Matrix4();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const p = m.geometry.getAttribute('position');
+    if (!p) return;
+    mm.multiplyMatrices(inv, m.matrixWorld);
+    const step = Math.max(1, Math.floor(p.count / 4000));
+    for (let i = 0; i < p.count; i += step) {
+      v.fromBufferAttribute(p, i).applyMatrix4(mm);
+      vals.push(axis === 'x' ? v.x : v.z);
+    }
+  });
+  if (vals.length < 40) return 'guess';
+  let lo = Infinity, hi = -Infinity;
+  for (const x of vals) {
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+  }
+  const band = (hi - lo) * 0.2;
+  if (!(band > 1e-4)) return 'guess';
+  let nHi = 0, nLo = 0;
+  for (const x of vals) {
+    if (x > hi - band) nHi++;
+    if (x < lo + band) nLo++;
+  }
+  const wanted = sign > 0 ? nHi : nLo, other = sign > 0 ? nLo : nHi;
+  if (other > wanted * 1.6 + 20) return 'flip';
+  if (wanted > other * 1.6 + 20) return 'keep';
+  return 'guess';
+}
+
 export function easeOut(t: number) {
   return 1 - (1 - t) ** 3;
 }
@@ -224,6 +271,8 @@ export abstract class MuseumBase implements Level {
   }
 
   private tick = 0;
+  /** how exhibits were turned to face the visitor: kept, flipped (both confident), or guessed */
+  fronts = { keep: 0, flip: 0, guess: 0 };
   private fills = new Map<THREE.Mesh, { own: THREE.Material; fill: THREE.Material }>();
   /**
    * While seen through a doorway the room has no lights of its own (seamless.ts strips them), so its
@@ -469,7 +518,7 @@ export abstract class MuseumBase implements Level {
    * Show an object at its real size. (lx, ly, lz) in frame f is where its base centre goes;
    * `rot` turns it about Y. Never scaled down: the only scale applied is the realScale correction.
    */
-  exhibit(m: Measured, f: Frame, lx: number, ly: number, lz: number, rot = 0, opts: { prio?: number; spin?: number; label?: string; progressive?: boolean } = {}) {
+  exhibit(m: Measured, f: Frame, lx: number, ly: number, lz: number, rot = 0, opts: { prio?: number; spin?: number; label?: string; progressive?: boolean; face?: boolean } = {}) {
     const at = f.point(lx, ly, lz);
     const holder = new THREE.Group();
     holder.userData.exhibit = true;
@@ -514,6 +563,13 @@ export abstract class MuseumBase implements Level {
           if (Math.abs(c.x) > 1e-3 || Math.abs(c.z) > 1e-3 || Math.abs(b.min.y) > 1e-3) mod.object.position.sub(new THREE.Vector3(c.x, b.min.y, c.z));
         }
         holder.remove(placeholder);
+        // face the visitor: the detailed side (keys, a display, doors) towards the display's front
+        if (!m.library && !opts.spin && opts.face !== false) {
+          const want = new THREE.Vector3(Math.sin(-rot), 0, Math.cos(-rot));
+          const fr = frontOf(mod.object, want);
+          this.fronts[fr]++;
+          if (fr === 'flip') holder.rotation.y += Math.PI;
+        }
         // one mesh per material: a sand3d piano is ~90 parts. Objects with many joints (88 piano keys)
         // stop moving; a few joints (a lid, a door) keep their moving parts separate.
         if (!m.library) {
