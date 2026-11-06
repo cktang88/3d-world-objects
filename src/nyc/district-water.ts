@@ -80,6 +80,8 @@ export function buildWater(c: OpenCtx) {
       colliders.push(rect(X(PIER_SHORE - 6.8), z + 6, 0.4, 0.4));
     }
   }
+  // a kiosk, a shelter or a little pavilion on the lawn of the riverside park
+  for (const zz of [inner.minZ + 14, inner.maxZ - 14]) slot({ kind: ['folly', 'structure', 'smallbuilding'], x: X(uLand0 + 22), y: CURB + 0.02, z: zz, rot: s > 0 ? Math.PI / 2 : -Math.PI / 2, w: 8, d: 6, h: 7, min: 1.8, radius: 110, maxTris: 250_000 });
   // the bulkhead railing, open where the pier starts
   const pz0 = -10, pz1 = 10;
   seawall(stat, 'z', X(PIER_SHORE), inner.minZ, pz0, true);

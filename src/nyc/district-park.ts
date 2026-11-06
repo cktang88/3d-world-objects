@@ -197,7 +197,7 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
       const a = (i / 6) * Math.PI * 2 + r.range(-0.3, 0.3);
       slot({ kind: 'boat', x: x + Math.cos(a) * RX * 0.55, y: G - 0.3 - 0.2, z: z + Math.sin(a) * RZ * 0.5, rot: a + Math.PI / 2 + r.range(-0.5, 0.5), w: 6.5, d: 2.6, h: 4, min: 2.2, radius: 110, maxTris: 250_000 }, false);
     }
-    slot({ kind: 'smallbuilding', x: x + RX + 6, y: G, z: z - RZ + 2, rot: -Math.PI / 2, w: 9, d: 7, h: 7, min: 2.5, radius: 120, maxTris: 300_000 });
+    slot({ kind: ['folly', 'structure', 'smallbuilding'], x: x + RX + 6, y: G, z: z - RZ + 2, rot: -Math.PI / 2, w: 9, d: 7, h: 7, min: 2.5, radius: 120, maxTris: 300_000 });
     benchRing(c, x, z, RX + 3, RZ + 3, 12, slot, 4);
     return rect(x, z, RX * 2 + 14, RZ * 2 + 8);
   },
@@ -289,7 +289,7 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
       }
       slot({ kind: 'parkdecor', x: x + bx, y: G + 0.03, z: z + bz, rot: 0, w: 3, d: 3, h: 4, min: 0.5, radius: 70, maxTris: 150_000 }, false);
     }
-    slot({ kind: ['parkdecor', 'smallbuilding'], x, y: G, z, rot: 0, w: 8, d: 6, h: 6, min: 2, radius: 120, maxTris: 300_000 });
+    slot({ kind: ['folly', 'structure', 'parkdecor'], x, y: G, z, rot: 0, w: 8, d: 6, h: 6, min: 2, radius: 120, maxTris: 300_000 });
     for (let i = 0; i < 6; i++) slot({ kind: 'garden', x: x + (i - 2.5) * 6.5, y: G, z: z + D / 2 - 1, rot: Math.PI, w: 2.5, d: 1.6, h: 2.4, min: 0.4, radius: 60, maxTris: 100_000 });
     benchRing(c, x, z, W / 2 - 1, D / 2 - 1, 8, slot, 4);
     void r;
@@ -325,7 +325,7 @@ const FEATURES: Record<ParkFeature, FeatureFn> = {
   kiosk(c, x, z, slot, _b, r) {
     // a food kiosk with café tables, carts and a hot-dog stand
     c.stat.add(slab(hexPaverMat(), x - 16, x + 16, z - 11, z + 11, G + 0.015, 3));
-    slot({ kind: 'smallbuilding', x, y: G, z: z - 4, rot: 0, w: 9, d: 7, h: 7, min: 2.5, radius: 120, maxTris: 300_000 });
+    slot({ kind: ['folly', 'structure', 'smallbuilding'], x, y: G, z: z - 4, rot: 0, w: 9, d: 7, h: 7, min: 2.5, radius: 120, maxTris: 300_000 });
     for (let i = 0; i < 6; i++) slot({ kind: ['garden', 'furniture'], x: x + (i - 2.5) * 4.5, y: G, z: z + 5 + (i % 2) * 2.5, rot: r.range(0, 6), w: 2.2, d: 2.2, h: 2.6, min: 0.6, radius: 60, maxTris: 100_000 });
     for (const s of [-1, 1]) slot({ kind: ['truck', 'bike'], x: x + s * 12, y: G, z: z - 3, rot: Math.PI / 2, w: 4, d: 2.2, h: 3, min: 1.2, radius: 90, maxTris: 150_000 });
     return rect(x, z, 34, 24);

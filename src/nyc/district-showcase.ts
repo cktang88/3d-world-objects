@@ -135,7 +135,7 @@ function pickNext(s: Slot): RemoteEntry | null {
  * Real size ranges per pool (metres): length = the longer horizontal side, height. Anything
  * outside is rescaled to `target` length if its proportions then fit, else rejected.
  */
-export const RANGES: Record<string, { len: [number, number]; h: [number, number]; target: number }> = {
+export const RANGES: Record<string, { len: [number, number]; h: [number, number]; target: number; keep?: boolean }> = {
   car: { len: [3.6, 6], h: [1.3, 2.1], target: 4.6 },
   carShow: { len: [3.6, 6], h: [1.3, 2.1], target: 4.6 },
   truck: { len: [4, 14], h: [1.9, 4.6], target: 7 },
@@ -146,6 +146,9 @@ export const RANGES: Record<string, { len: [number, number]; h: [number, number]
   deckPlane: { len: [7, 25], h: [2, 7], target: 16 },
   heli: { len: [7, 22], h: [2.5, 6], target: 13 },
   boat: { len: [2.5, 60], h: [0.5, 30], target: 8 },
+  // buildings: never shrunk to fit (a farm made 5 m long is a model, not a shed): out of range = skipped
+  structure: { len: [1.8, 14], h: [2, 9], target: 5, keep: true },
+  folly: { len: [1.8, 14], h: [2, 9], target: 5, keep: true },
 };
 /** the uniform factor that brings real-scaled dims into the pool's range (1 = fine), or null to reject */
 export function plausible(pool: string | null, x: number, y: number, z: number): number | null {
@@ -155,6 +158,7 @@ export function plausible(pool: string | null, x: number, y: number, z: number):
   const len = Math.max(x, z);
   if (!(len > 0) || !(y > 0)) return null;
   if (ok(len, y)) return 1;
+  if (R.keep) return null;
   const f = R.target / len;
   return ok(len * f, y * f) ? f : null;
 }

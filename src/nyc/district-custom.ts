@@ -9,7 +9,7 @@ import type { Plan } from './district-build';
 import { addSlot, type SlotSpec } from './district-showcase';
 import { flat, slab, apronMat } from './district-tex';
 import { chainFence, jersey } from './district-props';
-import { buildYard, buildConstruction, buildPlaza, buildMuseum, buildFlea } from './district-yards';
+import { buildYard, buildConstruction, buildPlaza, buildMuseum, buildFlea, buildGarden } from './district-yards';
 
 /**
  * Blocks with something other than buildings on part of them: auto row showrooms and lots,
@@ -32,6 +32,8 @@ export function customBlock(ctx: BCtx, d: District): Plan {
       return buildMuseum(ctx, r);
     case 'garment':
       return buildFlea(ctx, r);
+    case 'brownstone':
+      return buildGarden(ctx, r);
   }
   return all;
 }

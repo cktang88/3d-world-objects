@@ -338,7 +338,9 @@ export function buildSalvage(ctx: BCtx, r: Rng): Plan {
       slot({ kind: 'salvage', x, y: Y, z, rot: Math.PI / 2, w: 3.6, d: 2.2, h: i === back ? 5 : 3.2, min: 0.5, radius: 60, maxTris: 120_000 });
     }
   }
-  return { ave: s > 0 ? [true, false] : [false, true], rows: [true, true], core: false };
+  // and a tool & equipment rental yard on the other avenue end
+  rentalYard(ctx, r, -s);
+  return { ave: [false, false], rows: [true, true], core: false };
 }
 
 // ---------------------------------------------------------------- flea market
@@ -394,5 +396,118 @@ export function buildFlea(ctx: BCtx, r: Rng): Plan {
     }
   }
   sign(ctx, 'FLEA MARKET · SAT & SUN', 0, CURB + 2.8, row * (LZ + 0.1), row > 0 ? 0 : Math.PI, 0.55, 10, '#c21f2a', 'paint');
+  return { ave: [true, true], rows: row > 0 ? [true, false] : [false, true], core: false };
+}
+
+// ---------------------------------------------------------------- tool & equipment rental yard
+
+let pegTex: THREE.Texture | null = null;
+/** perforated hardboard: tan board, a grid of dark holes every inch */
+function pegboard() {
+  if (!pegTex) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    if (g) {
+      g.fillStyle = '#b08a5e';
+      g.fillRect(0, 0, 64, 64);
+      g.fillStyle = '#3a2a1c';
+      for (let y = 4; y < 64; y += 16) for (let x = 4; x < 64; x += 16) g.fillRect(x, y, 4, 4);
+    }
+    pegTex = new THREE.CanvasTexture(c);
+    pegTex.wrapS = pegTex.wrapT = THREE.RepeatWrapping;
+    pegTex.repeat.set(30, 4);
+    pegTex.colorSpace = THREE.SRGBColorSpace;
+  }
+  return new THREE.MeshStandardMaterial({ color: '#c49a6a', map: pegTex, roughness: 0.9 });
+}
+
+/**
+ * A tool & equipment rental yard (the contractors' yards of the West Side): workbenches along a
+ * pegboard wall with hand and power tools on them, and rows of floor machines (generators,
+ * compressors, saws, presses, welders) on the asphalt at real size, behind a chain-link fence.
+ * Shows the hand tool, power tool and machine families.
+ */
+export function rentalYard(ctx: BCtx, r: Rng, s: number) {
+  const slot = slotter(ctx);
+  const A = aveEnd(s);
+  ctx.stat.add(slab(apronMat(), A.x0, A.x1, A.z0, A.z1, Y, 10));
+  chainFence(ctx.stat, s * LX, -LZ, s * LX, -3, 2.4, CURB);
+  chainFence(ctx.stat, s * LX, 3, s * LX, LZ, 2.4, CURB);
+  ctx.colliders.push({ minX: s * LX - 0.15, maxX: s * LX + 0.15, minZ: -LZ, maxZ: -3 }, { minX: s * LX - 0.15, maxX: s * LX + 0.15, minZ: 3, maxZ: LZ });
+  sign(ctx, 'TOOL & EQUIPMENT RENTAL', s * (LX + 0.1), CURB + 2.9, 0, s > 0 ? Math.PI / 2 : -Math.PI / 2, 0.5, 8, '#ffd23f', 'paint');
+  // the pegboard wall at the back of the yard, workbenches in front of it
+  const wx = s * (LX - 19.6);
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 2 * LZ - 2), pegboard());
+  wall.position.set(wx, CURB + 1.3, 0);
+  wall.userData.owned = true;
+  ctx.stat.add(wall);
+  ctx.colliders.push(rect(wx, 0, 0.3, 2 * LZ - 2));
+  const top = flat('#6b4c34', 0.8), steel = flat('#5f6466', 0.5, 0.8);
+  const bx = wx + s * 0.7;
+  for (let z = -LZ + 3; z < LZ - 2; z += 3) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 2.4), top);
+    b.position.set(bx, CURB + 0.9, z);
+    b.userData.owned = true;
+    ctx.stat.add(b);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.86, 2.2), steel);
+    base.position.set(bx, CURB + 0.44, z);
+    base.userData.owned = true;
+    ctx.stat.add(base);
+    ctx.colliders.push(rect(bx, z, 0.8, 2.4));
+    for (const dz of [-0.6, 0.6]) slot({ kind: ['tool', 'hardware'], x: bx, y: CURB + 0.93, z: z + dz, rot: s > 0 ? -Math.PI / 2 : Math.PI / 2, w: 1.1, d: 0.75, h: 0.9, min: 0.08, radius: 40, maxTris: 50_000 }, false);
+  }
+  // floor machines in two rows facing the aisle
+  for (const u of [8.5, 14]) {
+    for (let z = -LZ + 3.5; z < LZ - 3; z += 4.3) {
+      if (Math.abs(z) < 2.5 && u === 14) continue; // the gate aisle
+      slot({ kind: ['workshop', 'machine'], x: s * (LX - u), y: Y, z, rot: Math.PI / 2, w: 3, d: 2.4, h: 2.8, min: 0.5, radius: 60, maxTris: 120_000 });
+    }
+  }
+  void r;
+}
+
+// ---------------------------------------------------------------- community garden
+
+/**
+ * A Lower East Side–style community garden on an empty lot between brownstones: iron fence and
+ * gate, raised beds, gravel paths, and small structures at real size — a casita, a gazebo, a tool
+ * shed, a pergola (the building family, the least-met family in the city) — with garden things.
+ */
+export function buildGarden(ctx: BCtx, r: Rng): Plan {
+  if ((((ctx.cx + ctx.cz) % 2) + 2) % 2 !== 0) return { ave: [true, true], rows: [true, true] };
+  const slot = slotter(ctx);
+  const row = r.chance(0.5) ? 1 : -1;
+  const R = rowArea(row, 18);
+  ctx.stat.add(slab(flat('#7a6a55', 1), R.x0, R.x1, R.z0, R.z1, Y, 2)); // gravel
+  // the street fence with a gate in the middle
+  const fz = row * (LZ - 0.2);
+  for (const [a, b] of [[R.x0, -1.5], [1.5, R.x1]]) {
+    const f = new THREE.Mesh(new THREE.BoxGeometry(b - a, 1.5, 0.05), flat('#1c1d1f', 0.5, 0.5));
+    f.position.set((a + b) / 2, CURB + 0.75, fz);
+    f.userData.owned = true;
+    ctx.stat.add(f);
+    ctx.colliders.push({ minX: a, maxX: b, minZ: fz - 0.1, maxZ: fz + 0.1 });
+  }
+  sign(ctx, 'COMMUNITY GARDEN · OPEN SAT 10-2', 0, CURB + 1.9, fz + row * 0.05, row > 0 ? 0 : Math.PI, 0.35, 7, '#2f6b3a', 'paint');
+  const bed = flat('#5a3f2a', 0.9), soil = flat('#3b2c1e', 1);
+  const zc = (R.z0 + R.z1) / 2;
+  // raised beds near the street half, structures along the back
+  for (let x = R.x0 + 4; x < R.x1 - 4; x += 5.5) {
+    if (Math.abs(x) < 3) continue;
+    const zb = zc + row * 4;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.4, 1.4), bed);
+    box.position.set(x, CURB + 0.2, zb);
+    box.userData.owned = true;
+    ctx.stat.add(box);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.02, 1.2), soil);
+    top.position.set(x, CURB + 0.41, zb);
+    top.userData.owned = true;
+    ctx.stat.add(top);
+    ctx.colliders.push(rect(x, zb, 3.6, 1.4));
+    slot({ kind: 'garden', x, y: CURB + 0.42, z: zb, rot: r.range(0, 6), w: 1.2, d: 1.0, h: 1.4, min: 0.15, radius: 45, maxTris: 60_000 }, false);
+  }
+  const zs = zc - row * 3.5;
+  for (const x of [R.x0 + 7, R.x0 + 21, R.x1 - 21, R.x1 - 7]) slot({ kind: ['folly', 'structure', 'smallbuilding'], x, y: Y, z: zs, rot: row > 0 ? Math.PI : 0, w: 9, d: 7, h: 7, min: 1.8, radius: 110, maxTris: 300_000 });
   return { ave: [true, true], rows: row > 0 ? [true, false] : [false, true], core: false };
 }
