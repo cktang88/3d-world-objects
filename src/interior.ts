@@ -10,6 +10,7 @@ import { Kit } from './rooms/kit';
 import { M } from './rooms/mats';
 import { rugTex, windowViewTex } from './rooms/tex';
 import * as F from './rooms/furniture';
+import { LIB, pickLib, fillHolder } from './rooms/lib';
 
 /**
  * Generated building interiors: a BSP floorplan of real rooms (living rooms, bedrooms, galley
@@ -859,6 +860,72 @@ export class InteriorLevel implements Level {
     if (collide) this.cols.push(shrink(fp, 0.05));
     return { x, z, rot };
   }
+  /**
+   * A piece that may come from the photoreal library: `id` streams in and replaces the procedural
+   * stand-in drawn by `fallback` (also used when the library is unavailable). Library pieces are portals.
+   */
+  private libPiece(f: Frame, id: string | null, fallback: (k: Kit) => F.Piece | void, y = 0): F.Piece | void {
+    if (!id) {
+      let out: F.Piece | void = undefined;
+      this.kit.at(f.x, y, f.z, f.rot, () => (out = fallback(this.kit)));
+      return out;
+    }
+    const holder = new THREE.Group();
+    holder.position.set(f.x, y, f.z);
+    holder.rotation.y = f.rot;
+    this.group.add(holder);
+    const fk = new Kit();
+    const out = fallback(fk);
+    fk.finish(holder);
+    void fillHolder(holder, id);
+    const s = LIB[id];
+    this.libPortal(id, f, s, y);
+    return out;
+  }
+  /** a small library object (no stand-in) */
+  private libDecor(id: string, x: number, y: number, z: number, rot: number) {
+    const holder = new THREE.Group();
+    holder.position.set(x, y, z);
+    holder.rotation.y = rot;
+    this.group.add(holder);
+    void fillHolder(holder, id);
+    this.libPortal(id, { x, z, rot }, LIB[id], y);
+  }
+  private libPortal(id: string, f: Frame, s: [number, number, number], y: number) {
+    const q = Math.round(f.rot / (Math.PI / 2)) & 1;
+    const w = q ? s[2] : s[0], d = q ? s[0] : s[2];
+    const title = id.replace(/_0?\d+$/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+    const rng = new Rng(hashN(this.desc.seed, f.x * 1000, f.z * 1000, y * 1000));
+    const name = `Inside the ${title}`;
+    this.ports.push({
+      box: new THREE.Box3(new THREE.Vector3(f.x - w / 2 - 0.03, y, f.z - d / 2 - 0.03), new THREE.Vector3(f.x + w / 2 + 0.03, y + s[1] + 0.03, f.z + d / 2 + 0.03)),
+      label: `Shrink into the ${title}`,
+      sub: 'Poly Haven · CC0',
+      target: { kind: 'city', seed: rng.int(0, 2 ** 31), biome: rng.pick(ROLE_BIOMES.painting), name },
+      shrink: Math.max(...s),
+    });
+  }
+  /** set 1..n library objects from `set` on a top (a placed piece's local top) */
+  private libTop(r: Rng, f: Frame, t: F.Top, set: string, n: number, maxH = 0.6) {
+    const fp = this.topRect(f, t);
+    const used: Rect[] = [];
+    for (let i = 0; i < n; i++) {
+      const id = pickLib(set, r, (s) => s[1] <= maxH && Math.max(s[0], s[2]) <= Math.min(fp.maxX - fp.minX, fp.maxZ - fp.minZ) + 0.05);
+      if (!id) return;
+      const s = LIB[id];
+      for (let k = 0; k < 10; k++) {
+        const hw = Math.max(s[0], s[2]) / 2;
+        if (fp.maxX - fp.minX < 2 * hw || fp.maxZ - fp.minZ < 2 * hw) break;
+        const x = r.range(fp.minX + hw, fp.maxX - hw), z = r.range(fp.minZ + hw, fp.maxZ - hw);
+        const me = rect(x, z, 2 * hw, 2 * hw);
+        if (used.some((u) => overlaps(u, me, 0.02))) continue;
+        used.push(me);
+        this.libDecor(id, x, t.y, z, f.rot + r.range(-0.4, 0.4));
+        break;
+      }
+    }
+  }
+
   private draw(f: Frame, fn: () => F.Piece | void): F.Piece | void {
     let out: F.Piece | void = undefined;
     this.kit.at(f.x, 0, f.z, f.rot, () => (out = fn()));
@@ -890,7 +957,10 @@ export class InteriorLevel implements Level {
       ff = this.onWall(c, focal, 1.75, 0.75, 2.4, midFree(focal), 0);
       if (ff) {
         const p = this.draw(ff, () => F.fireplace(k, r, r.chance(0.5))) as F.Piece;
-        for (const t of p.tops) this.decorateTop(r, ff, t, ['tableware', 'lamp', 'toy', 'stationery'], [1, 3], 0.4, true);
+        for (const t of p.tops) {
+          this.decorateTop(r, ff, { ...t, w: t.w * 0.3 }, ['tableware', 'toy', 'stationery'], [1, 1], 0.4);
+          for (const sx of [-1, 1]) this.libTop(r, ff, { ...t, x: sx * t.w * 0.33, w: t.w * 0.3 }, 'mantel', 1, 0.55);
+        }
         // built-in bookcases either side of the chimney breast (as in the references)
         const tf = (ff as Frame & { t: number }).t;
         for (const sgn of [-1, 1]) {
@@ -915,19 +985,21 @@ export class InteriorLevel implements Level {
     // sofa facing the focal wall: against the opposite wall if the room is shallow enough, else floating
     const opp = c.sides.find((s) => s.axis === focal.axis && s.inward === -focal.inward)!;
     const across = Math.abs(opp.face - focal.face);
-    const sofaW = THREE.MathUtils.clamp(Math.min(focal.axis === 'z' ? w : d) * 0.55, 1.7, 2.3);
+    const sofaId = r.chance(0.6) ? pickLib('sofa', r) : null;
+    const sofaW = sofaId ? LIB[sofaId][0] : THREE.MathUtils.clamp(Math.min(focal.axis === 'z' ? w : d) * 0.55, 1.7, 2.3);
+    const sofaD = sofaId ? LIB[sofaId][2] : 0.92;
     const tf = (ff as Frame & { t: number }).t ?? (focal.e0 + focal.e1) / 2;
     let sf: Frame | null = null;
-    const dist = Math.min(across - 0.92, 3.6);
-    if (across < 4.8) sf = this.onWall(c, opp, sofaW, 0.92, 0.85, tf, 0.03);
+    const dist = Math.min(across - sofaD, 3.6);
+    if (across < 4.8) sf = this.onWall(c, opp, sofaW, sofaD, 0.85, tf, 0.03);
     if (!sf) {
-      const [x, z] = this.at(focal, tf, dist + 0.46);
-      sf = this.freeAt(c, sofaW, 0.92, x, z, this.rotOf(focal) + Math.PI);
+      const [x, z] = this.at(focal, tf, dist + sofaD / 2);
+      sf = this.freeAt(c, sofaW, sofaD, x, z, this.rotOf(focal) + Math.PI);
     }
     if (!sf) return this.generic(c);
-    this.draw(sf, () => F.sofa(k, r, sofaW, this.pal.fabric, this.pal.metal === M.brass() ? M.walnut() : M.black(), this.pal.accent));
+    this.libPiece(sf, sofaId, (kk) => F.sofa(kk, r, sofaW, this.pal.fabric, this.pal.metal === M.brass() ? M.walnut() : M.black(), this.pal.accent));
     // positions in the focal frame: depth from the focal wall
-    const sofaDepth = Math.abs((focal.axis === 'z' ? sf.z : sf.x) - focal.face) - 0.46;
+    const sofaDepth = Math.abs((focal.axis === 'z' ? sf.z : sf.x) - focal.face) - sofaD / 2;
     const ctDepth = sofaDepth - 0.45 - 0.3;
     const mid = (0.75 + sofaDepth) / 2;
     // rug under the front legs of the group
@@ -940,15 +1012,18 @@ export class InteriorLevel implements Level {
     // coffee table
     {
       const [x, z] = this.at(focal, tf, Math.max(ctDepth, mid));
-      const f = this.freeAt(c, 1.1, 0.62, x, z, this.rotOf(focal), true, 0.02);
+      const ctId = r.chance(0.5) ? pickLib('coffee', r) : null;
+      const cs = ctId ? LIB[ctId] : [1.1, 0.43, 0.62];
+      const f = this.freeAt(c, cs[0], cs[2], x, z, this.rotOf(focal), true, 0.02);
       if (f) {
-        const p = this.draw(f, () => F.coffeeTable(k, r, this.pal.wood, M.brass(), M.marble())) as F.Piece;
-        const top = p.tops[0];
+        const pp = this.libPiece(f, ctId, (kk) => F.coffeeTable(kk, r, this.pal.wood, M.brass(), M.marble())) as F.Piece;
+        const top = ctId ? { x: 0, z: 0, y: cs[1], w: cs[0] * 0.8, d: cs[2] * 0.7 } : pp.tops[0];
         this.kit.at(f.x, 0, f.z, f.rot, () => {
           F.bookStack(k, r, top.w * 0.25, top.y, 0);
           if (r.chance(0.5)) F.mug(k, r, -top.w * 0.2, top.y, top.d * 0.2);
         });
-        this.decorateTop(r, f, { ...top, x: -top.w * 0.2, w: top.w * 0.45 }, ['tableware', 'food', 'toy', 'plant'], [1, 1], 0.3);
+        if (r.chance(0.5)) this.decorateTop(r, f, { ...top, x: -top.w * 0.2, w: top.w * 0.45 }, ['tableware', 'food', 'toy', 'plant'], [1, 1], 0.3);
+        else this.libTop(r, f, { ...top, x: -top.w * 0.2, w: top.w * 0.45 }, 'table', 1, 0.45);
       }
     }
     // armchairs at the sides of the group, turned toward the middle
@@ -956,8 +1031,9 @@ export class InteriorLevel implements Level {
       if (!r.chance(0.75)) continue;
       const [x, z] = this.at(focal, tf + sgn * (sofaW / 2 + 0.75), mid);
       const toward = this.rotOf(focal) + Math.PI + sgn * (focal.axis === 'z' ? 1 : 1) * (Math.PI / 2) * (focal.inward > 0 === (focal.axis === 'z') ? -1 : 1);
-      const f = this.freeAt(c, 0.84, 0.84, x, z, Math.round(toward / (Math.PI / 2)) * (Math.PI / 2));
-      if (f) this.draw({ ...f, rot: Math.atan2(this.at(focal, tf, mid)[0] - x, this.at(focal, tf, mid)[1] - z) }, () => F.armchair(k, r.chance(0.5) ? this.pal.accent[0] : this.pal.fabric, M.walnut()));
+      const acId = r.chance(0.6) ? pickLib('armchair', r) : null;
+      const f = this.freeAt(c, 0.9, 0.9, x, z, Math.round(toward / (Math.PI / 2)) * (Math.PI / 2));
+      if (f) this.libPiece({ ...f, rot: Math.atan2(this.at(focal, tf, mid)[0] - x, this.at(focal, tf, mid)[1] - z) }, acId, (kk) => F.armchair(kk, r.chance(0.5) ? this.pal.accent[0] : this.pal.fabric, M.walnut()));
     }
     // end tables with lamps at the sofa arms
     for (const sgn of [-1, 1]) {
@@ -967,9 +1043,11 @@ export class InteriorLevel implements Level {
       const x = sf.x + lx * c0, z = sf.z - lx * s0;
       const f = this.freeAt(c, 0.45, 0.45, x, z, sf.rot, true, 0.0);
       if (!f) continue;
-      const p = this.draw(f, () => F.sideTable(k, this.pal.wood)) as F.Piece;
-      const lamp = this.kit.at(f.x, 0, f.z, 0, () => F.tableLamp(k, r, 0, p.h, 0));
-      void lamp;
+      const stId = r.chance(0.5) ? 'side_table_01' : null;
+      const p = this.libPiece(f, stId, (kk) => F.sideTable(kk, this.pal.wood)) as F.Piece;
+      const ph = stId ? LIB[stId][1] : p.h;
+      this.kit.at(f.x, 0, f.z, 0, () => F.tableLamp(k, r, 0, ph, 0));
+      p.h = ph;
       this.group.add(glow('#ffd59a', 0.55, f.x, p.h + 0.4, f.z, 0.3));
     }
     // a painting over the sofa (if it stands against a wall)
@@ -1020,7 +1098,9 @@ export class InteriorLevel implements Level {
       const t = bf.t + sgn * ((bw + 0.12) / 2 + 0.3);
       const f = this.onWall(c, bside, 0.5, 0.4, 0.58, t, 0.02, 0.0) as (Frame & { t: number }) | null;
       if (!f || Math.abs(f.t - t) > 0.1) continue;
-      const p = this.draw(f, () => F.nightstand(k, this.pal.wood)) as F.Piece;
+      const nsId = r.chance(0.5) ? pickLib('nightstand', r) : null;
+      const p = this.libPiece(f, nsId, (kk) => F.nightstand(kk, this.pal.wood)) as F.Piece;
+      if (nsId) p.h = LIB[nsId][1];
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -0.08, p.h, -0.04);
         if (r.chance(0.6)) F.bookStack(k, r, 0.12, p.h, 0.05);
@@ -1031,10 +1111,14 @@ export class InteriorLevel implements Level {
     // dresser on another wall, a picture or mirror over it
     for (const s of this.sidesByFreeLength(c, 1.2)) {
       if (s.sd === bside) continue;
-      const f = this.onWall(c, s.sd, 1.2, 0.5, 0.86, 'any', 0.02) as (Frame & { t: number }) | null;
+      const drId = r.chance(0.5) ? pickLib('dresser', r) : null;
+      const ds = drId ? LIB[drId] : [1.2, 0.86, 0.5];
+      const f = this.onWall(c, s.sd, ds[0], ds[2], ds[1], 'any', 0.02) as (Frame & { t: number }) | null;
       if (!f) continue;
-      const p = this.draw(f, () => F.dresser(k, r, this.pal.wood)) as F.Piece;
-      this.decorateTop(r, f, p.tops[0], ['lamp', 'tableware', 'toy', 'plant', 'electronics'], [1, 2], 0.45);
+      const p = this.libPiece(f, drId, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
+      const dtop = drId ? { x: 0, z: 0, y: ds[1], w: ds[0] - 0.1, d: ds[2] - 0.12 } : p.tops[0];
+      this.decorateTop(r, f, { ...dtop, x: -dtop.w / 4, w: dtop.w / 2 }, ['lamp', 'tableware', 'toy', 'plant', 'electronics'], [1, 1], 0.45);
+      this.libTop(r, f, { ...dtop, x: dtop.w / 4, w: dtop.w / 2 }, 'table', 2, 0.45);
       if (r.chance(0.6)) {
         const [mx, mz] = this.at(s.sd, f.t, 0.0);
         this.kit.at(mx, 0, mz, this.rotOf(s.sd), () => {
@@ -1084,7 +1168,10 @@ export class InteriorLevel implements Level {
           ceilingH: this.H,
         }),
       ) as F.Piece;
-      for (const tp of p.tops) this.decorateTop(r, f, tp, ['tableware', 'food', 'appliance', 'tableware', 'plant'], [1, 2], 0.45);
+      for (const tp of p.tops) {
+        this.decorateTop(r, f, { ...tp, w: tp.w / 2, x: tp.x - tp.w / 4 }, ['tableware', 'food', 'appliance', 'tableware'], [1, 1], 0.45);
+        this.libTop(r, f, { ...tp, w: tp.w / 2, x: tp.x + tp.w / 4 }, 'kitchen', 2, 0.4);
+      }
       for (const tp of p.tops) if (r.chance(0.5)) this.kit.at(f.x, 0, f.z, f.rot, () => F.bowl(k, r, tp.x + tp.w * 0.3, tp.y, tp.z));
       used.push(s.sd);
     }
@@ -1389,7 +1476,9 @@ export class InteriorLevel implements Level {
       c.occ.push(fp);
       this.cols.push(shrink(fp, 0.08));
       if (what === 'plant') {
-        if (r.chance(0.5)) this.kit.at(x, 0, z, r.range(0, 6), () => F.plant(k, r, r.range(0.9, 1.7)));
+        const pid = r.chance(0.45) ? pickLib('bigplant', r) : null;
+        if (pid) this.libPiece({ x, z, rot: r.range(0, 6) }, pid, () => undefined);
+        else if (r.chance(0.5)) this.kit.at(x, 0, z, r.range(0, 6), () => F.plant(k, r, r.range(0.9, 1.7)));
         else {
           const e = pickModel('plant', r);
           if (e) {
