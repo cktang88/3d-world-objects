@@ -294,11 +294,11 @@ export async function harness(name, scriptUrl) {
   const results = [];
   let errors = [];
   let step = 'boot';
-  let peakMb = 0;
+  let peakMb = 0, peakBy = '';
   const finish = (code) => {
     const failed = results.filter((r) => !r.ok);
     const errCount = results.reduce((s, r) => s + r.errors.length, 0) + errors.length;
-    log(`DONE ${results.length - failed.length}/${results.length} checks passed, ${errCount} page errors, browser peak ${peakMb.toFixed(0)} MB`);
+    log(`DONE ${results.length - failed.length}/${results.length} checks passed, ${errCount} page errors, browser peak ${peakMb.toFixed(0)} MB (${peakBy})`);
     for (const f of failed) log(`  FAIL [${f.step}] ${f.what}${f.detail ? ' — ' + f.detail : ''}`);
     fs.writeFileSync(path.join(outDir, 'result.json'), JSON.stringify({ name, results, trailingErrors: errors, seconds: (Date.now() - t0) / 1000 }, null, 1));
     process.exit(code ?? (failed.length || errCount ? 1 : 0));
@@ -318,17 +318,26 @@ export async function harness(name, scriptUrl) {
   const rootPid = process.pid; // playwright's browser processes are children of this one
   const rss = () => {
     if (!rootPid) return 0;
-    const r = spawnSync('ps', ['-eo', 'pid=,ppid=,rss='], { encoding: 'utf8' });
-    const rows = (r.stdout ?? '').trim().split('\n').map((l) => l.trim().split(/\s+/).map(Number));
+    const r = spawnSync('ps', ['-eo', 'pid=,ppid=,rss=,args='], { encoding: 'utf8' });
+    const rows = (r.stdout ?? '').trim().split('\n').map((l) => { const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*(.*)$/.exec(l); return m ? [+m[1], +m[2], +m[3], m[4]] : [0, 0, 0, '']; });
     const tree = new Set([rootPid]);
     for (let grew = true; grew; ) {
       grew = false;
       for (const [pid, ppid] of rows) if (tree.has(ppid) && !tree.has(pid)) { tree.add(pid); grew = true; }
     }
+    // per process kind, for the peak report (this node harness itself counts as 'harness')
+    rssBy = {};
+    for (const [pid, , kb, a] of rows) {
+      if (!tree.has(pid)) continue;
+      const k = pid === rootPid ? 'harness' : /--type=([\w-]+)/.exec(a)?.[1] ?? 'browser';
+      rssBy[k] = (rssBy[k] ?? 0) + kb / 1024;
+    }
     return rows.reduce((s, [pid, , kb]) => s + (tree.has(pid) ? kb : 0), 0) / 1024;
   };
+  let rssBy = {};
   setInterval(() => {
     const mb = rss();
+    if (mb > peakMb) peakBy = Object.entries(rssBy).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ');
     peakMb = Math.max(peakMb, mb);
     if (mb > MAXMB) {
       log(`MEMORY: browser at ${mb.toFixed(0)} MB (> ${MAXMB}) in step "${step}": killing it`);

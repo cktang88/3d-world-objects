@@ -46,6 +46,8 @@ const busy: boolean[] = [];
 let reqId = 0;
 const pending = new Map<number, { resolve: (p: ParsedObject) => void; reject: (e: Error) => void }>();
 const queue: { url: string; resolve: (p: ParsedObject) => void; reject: (e: Error) => void; prio: number }[] = [];
+/** [memory] queued (not started) parses and how many callers still want each (loadRemote with a signal) */
+const queuedJob = new Map<string, { job: (typeof queue)[number]; wanted: number; anyone: boolean }>();
 
 function makeWorker(i: number) {
   const w = new Worker(new URL('./usda/worker.ts', import.meta.url), { type: 'module' });
@@ -79,21 +81,60 @@ function pump() {
 const parsedCache = new Map<string, Promise<ParsedObject>>();
 const CACHE_MAX = 220;
 
-function loadParsed(e: RemoteEntry, prio: number): Promise<ParsedObject> {
+function loadParsed(e: RemoteEntry, prio: number, signal?: AbortSignal): Promise<ParsedObject> {
   let p = parsedCache.get(e.id);
   if (p) {
     parsedCache.delete(e.id);
     parsedCache.set(e.id, p); // LRU bump
+  } else {
+    p = new Promise<ParsedObject>((resolve, reject) => {
+      const job = { url: usdaUrl(e), resolve, reject, prio };
+      queue.push(job);
+      queuedJob.set(e.id, { job, wanted: 0, anyone: false });
+      pump();
+    });
+    parsedCache.set(e.id, p);
+    p.catch(() => parsedCache.delete(e.id)).finally(() => queuedJob.delete(e.id));
+    while (parsedCache.size > CACHE_MAX) parsedCache.delete(parsedCache.keys().next().value!);
+  }
+  const q = queuedJob.get(e.id);
+  if (!q) return p;
+  if (!signal) {
+    q.anyone = true; // a caller that cannot cancel: the parse stays queued
     return p;
   }
-  p = new Promise<ParsedObject>((resolve, reject) => {
-    queue.push({ url: usdaUrl(e), resolve, reject, prio });
-    pump();
+  return wanted(p, signal, e.id, q);
+}
+
+const aborted = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+/**
+ * [memory] p for one caller that may give up (signal): an aborted caller is rejected at once (its
+ * continuation, which may hold a whole evicted level, is released), and a queued parse nobody wants
+ * any more is taken off the queue, so no reactions pile up on a parse that will not run soon.
+ */
+function wanted<T>(p: Promise<T>, signal: AbortSignal, id: string, q: { job: (typeof queue)[number]; wanted: number; anyone: boolean }): Promise<T> {
+  if (signal.aborted) return Promise.reject(aborted());
+  q.wanted++;
+  return new Promise<T>((res, rej) => {
+    let done = false;
+    const onAbort = () => {
+      if (done) return;
+      done = true;
+      rej(aborted());
+      if (--q.wanted <= 0 && !q.anyone && queuedJob.get(id) === q) {
+        const i = queue.indexOf(q.job);
+        if (i >= 0) {
+          queue.splice(i, 1);
+          q.job.reject(aborted());
+        }
+      }
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then(
+      (v) => { if (!done) { done = true; signal.removeEventListener('abort', onAbort); res(v); } },
+      (err) => { if (!done) { done = true; signal.removeEventListener('abort', onAbort); rej(err); } },
+    );
   });
-  parsedCache.set(e.id, p);
-  p.catch(() => parsedCache.delete(e.id));
-  while (parsedCache.size > CACHE_MAX) parsedCache.delete(parsedCache.keys().next().value!);
-  return p;
 }
 
 /** while n > 0, clearQueue() does nothing (seamless.ts disposing a cached level in the background) */
@@ -268,7 +309,9 @@ function loadRebuilt(e: RemoteEntry) {
   return p;
 }
 
-export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: boolean } = {}): Promise<RemoteModel> {
+/** opts.signal: abort when the caller (a level) is gone: its continuation is dropped and a queued parse only it wanted is cancelled */
+export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: boolean; signal?: AbortSignal } = {}): Promise<RemoteModel> {
+  if (opts.signal?.aborted) return Promise.reject(aborted());
   // prefer the UV-mapped rebuild (static objects only: joints come from the USD)
   if (rebuilt.has(e.id) && !e.joints && gltf()) {
     const p = loadRebuilt(e);
@@ -279,14 +322,14 @@ export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: bool
       if (want && !checkSize(r.size.toArray(), want, 1.5).ok) {
         console.warn('rebuilt GLB disagrees with its USDA, using the USDA:', e.id, r.size.toArray(), want);
         rebuilt.delete(e.id);
-        return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));
+        return loadParsed(e, opts.prio ?? 0, opts.signal).then((p) => buildModel(p, opts.shadows ?? true));
       }
       const object = r.scene.clone(true);
       glbCopies.add(e.id, object);
       return { object, size: r.size.clone(), animator: null, tris: r.tris };
     });
   }
-  return loadParsed(e, opts.prio ?? 0).then((p) => buildModel(p, opts.shadows ?? true));
+  return loadParsed(e, opts.prio ?? 0, opts.signal).then((p) => buildModel(p, opts.shadows ?? true));
 }
 
 const tmpM = new THREE.Matrix4();

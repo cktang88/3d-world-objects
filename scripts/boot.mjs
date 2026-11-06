@@ -13,6 +13,8 @@
  * --frames N: after the first frame, log N frames (interval, draw CPU, programs).
  * --steady S: CPU profile of S seconds after the first frame (steady-state frames).
  * --profile: V8 CPU profile from navigation to first frame; prints self time by function and by file.
+ * RSS: the browser's processes are sampled every second; the summary has the peak and the RSS at
+ * the first frame per process type (gpu, renderer, browser, ...) and window.__mem() (src/dispose.ts).
  * Hard cap: --max seconds (default 240, at most 600), then the browser is killed and it exits 124.
  * Full-game URLs take the world lock (flock -w 300) like perf.mjs; labs (?lab=) do not.
  */
@@ -47,6 +49,27 @@ setTimeout(() => {
 }, MAX * 1000).unref();
 
 const curl = (u) => new Promise((res) => execFile('curl', ['-sSL', '--max-time', '60', '-D', '-', u], { encoding: 'buffer', maxBuffer: 256 << 20 }, (_e, o) => res(o)));
+
+// ---- RSS per Chrome process type (children of this node process), sampled every second
+const rssNow = () => {
+  const r = spawnSync('ps', ['-eo', 'pid=,ppid=,rss=,args='], { encoding: 'utf8' });
+  const rows = (r.stdout ?? '').trim().split('\n').map((l) => { const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(l); return m ? [+m[1], +m[2], +m[3], m[4]] : null; }).filter(Boolean);
+  const tree = new Set([process.pid]);
+  for (let grew = true; grew; ) { grew = false; for (const [pid, ppid] of rows) if (tree.has(ppid) && !tree.has(pid)) { tree.add(pid); grew = true; } }
+  const by = {};
+  for (const [pid, , kb, a] of rows) {
+    if (!tree.has(pid) || pid === process.pid) continue;
+    const t = /--type=([\w-]+)/.exec(a)?.[1] ?? (/chrom/i.test(a) ? 'browser' : 'other');
+    const k = t === 'utility' ? `utility:${/--utility-sub-type=[\w.]*?(\w+)\b/.exec(a)?.[1] ?? ''}` : t;
+    by[k] = (by[k] ?? 0) + kb / 1024;
+  }
+  by.total = Object.values(by).reduce((s, v) => s + v, 0);
+  return by;
+};
+const rssPeak = {};
+const rssTimer = setInterval(() => { for (const [k, v] of Object.entries(rssNow())) rssPeak[k] = Math.max(rssPeak[k] ?? 0, v); }, 1000);
+rssTimer.unref();
+const fmtRss = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ');
 
 browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
@@ -114,6 +137,9 @@ const first = await page.waitForFunction(() => {
 log(`FIRST FRAME (${first})`);
 const info = await page.evaluate(() => ({ boot: window.__boot ?? null, programs: window.__world?.renderer?.info?.programs?.length ?? null, perf: window.__world?.perf?.last ?? null }));
 log(`programs ${info.programs}  calls ${info.perf?.calls}  tris ${info.perf?.tris}`);
+log(`RSS MB at first frame: ${fmtRss(rssNow())}`);
+log(`RSS MB peak so far:    ${fmtRss(rssPeak)}`);
+log(`__mem(): ${JSON.stringify(await page.evaluate(() => window.__mem?.() ?? null).catch(() => null))}`);
 if (info.boot) console.log('stage marks (s):', JSON.stringify(info.boot));
 if (args.frames) {
   // steady state after the first frame: per-frame draw CPU vs whole-frame interval, and program growth

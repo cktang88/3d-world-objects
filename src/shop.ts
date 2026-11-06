@@ -101,6 +101,8 @@ export class ShopLevel implements Level {
   private alive = true;
   /** dispose(): stop waiting for stock models */
   private stopWaiting: (() => void) | null = null;
+  /** [memory] aborted on dispose: in-flight stock loads drop their continuation (which holds this shop) */
+  private loads = new AbortController();
   /** originals (detail.ts cache) in use here */
   private originals: THREE.Object3D[] = [];
   private models: RemoteModel[] = [];
@@ -481,7 +483,7 @@ export class ShopLevel implements Level {
       timer = setTimeout(() => res(null), 20000);
       this.stopWaiting = () => { clearTimeout(timer); res(null); };
     });
-    const all2 = await Promise.all(picks.map((e, i) => Promise.race([loadRemote(e, { prio: i, shadows: false }).catch(() => null), timeout])));
+    const all2 = await Promise.all(picks.map((e, i) => Promise.race([loadRemote(e, { prio: i, shadows: false, signal: this.loads.signal }).catch(() => null), timeout])));
     clearTimeout(timer);
     this.stopWaiting = null;
     const loaded = all2.flatMap((m, i): Loaded[] => {
@@ -950,6 +952,7 @@ export class ShopLevel implements Level {
     for (const c of this.cases) c.obj.userData.disposed = true;
     clearQueue();
     this.stopWaiting?.();
+    this.loads.abort();
     disposeTree(this.group); // owned geometry, instance buffers, owned materials; marks the tree disposed
     for (const m of this.models) disposeModel(m.object);
     this.models.length = 0;

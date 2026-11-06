@@ -32,7 +32,7 @@ test('memory: shop enter -> exit 10x through the seamless cache frees the shop',
     const other = seam.take(desc(100 + i));
     const leaks = leaksOf(lv.group, () => { seam.setActive(other); seam.clear(); });
     if (i >= 2 && leaks.size) first = leaks;
-    await settle(60); // its queued model parses finish (they hold the shop until then)
+    // (no wait: its in-flight stock loads are aborted with it, ShopLevel.loads)
     lazy.update(0, cam, other.level); // main.ts runs it every frame: forgets evicted shops' containers
     return refs;
   });
