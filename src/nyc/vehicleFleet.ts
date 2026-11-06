@@ -131,20 +131,30 @@ export interface Prepared {
   wheels: Wheel[];
   /** the rear red lamp lenses, slightly proud of the body: lit while braking */
   brake: THREE.BufferGeometry | null;
+  /** the near LOD (lod0, wheels, brake) has loaded */
+  nearReady: boolean;
   /** head/tail lamp glow cards (front white, rear red) and the front/rear z of the body */
   lamps?: { headGeo: THREE.BufferGeometry; tailGeo: THREE.BufferGeometry; front: number; rear: number };
 }
 
+// Loading order: every model's far LOD, then every mid LOD, then the near LODs. Cars swap their stand-in for
+// the instanced mid/far as soon as their model's small files are in; the near meshes follow (nearReady).
+const files = new Map<string, Promise<{ scene: THREE.Object3D }>>();
+function file(id: string, lod: 0 | 1 | 2) {
+  const url = `${import.meta.env.BASE_URL}assets/vehicles/${id}${lod ? '_lod' + lod : ''}.glb`;
+  let f = files.get(url);
+  if (!f) files.set(url, (f = gltf()!.loadAsync(url)));
+  return f;
+}
 const prepared = new Map<string, Promise<Prepared | null>>();
+/** a model's mid and far LODs (enough to draw it beyond FLEET_LOD.NEAR) */
 export function loadFleet(id: string): Promise<Prepared | null> {
   let p = prepared.get(id);
   if (!p) {
-    const base = `${import.meta.env.BASE_URL}assets/vehicles/${id}`;
-    p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`), gltf()!.loadAsync(`${base}_lod2.glb`)])
-      .then(([a, b, c]) => {
-        const lod0 = prepare(a.scene, id);
+    p = Promise.all([file(id, 1), file(id, 2)])
+      .then(([b, c]) => {
         const lod1 = prepare(b.scene, id);
-        return { id, lod0, lod1, lod2: prepare(c.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0), brake: brakeLenses(lod0), lamps: lampCards(lod1) };
+        return { id, lod0: [], lod1, lod2: prepare(c.scene, id), wheels: [], brake: null, lamps: lampCards(lod1), nearReady: false } as Prepared;
       })
       .catch((e) => {
         console.warn('vehicle', id, e);
@@ -154,10 +164,45 @@ export function loadFleet(id: string): Promise<Prepared | null> {
   }
   return p;
 }
-/** already-loaded models, for synchronous use */
+const nearP = new Map<string, Promise<Prepared | null>>();
+/** add the near LOD (with its cut-out wheels and brake lenses) to a loaded model */
+export function loadNear(id: string): Promise<Prepared | null> {
+  let n = nearP.get(id);
+  if (!n) {
+    n = loadFleet(id).then((p) =>
+      !p
+        ? null
+        : file(id, 0)
+            .then((a) => {
+              const lod0 = prepare(a.scene, id);
+              p.wheels = cutWheels(lod0, FLEET[id]?.wheelR ?? 0);
+              p.brake = brakeLenses(lod0);
+              p.lod0 = lod0;
+              p.nearReady = true;
+              return p;
+            })
+            .catch((e) => {
+              console.warn('vehicle near', id, e);
+              return null;
+            }),
+    );
+    nearP.set(id, n);
+  }
+  return n;
+}
+/** already-loaded models (mid/far at least), for synchronous use */
 export const ready = new Map<string, Prepared>();
+/** request every far LOD, then every mid LOD; resolves when all models can be drawn at a distance */
 export function preloadFleet() {
-  return Promise.all(Object.keys(FLEET).map((id) => loadFleet(id).then((p) => p && ready.set(id, p))));
+  const ids = Object.keys(FLEET);
+  for (const id of ids) file(id, 2);
+  for (const id of ids) file(id, 1);
+  return Promise.all(ids.map((id) => loadFleet(id).then((p) => p && ready.set(id, p))));
+}
+/** everything, near LODs included (labs) */
+export async function preloadAll() {
+  await preloadFleet();
+  await Promise.all(Object.keys(FLEET).map(loadNear));
 }
 
 const tmpC = new THREE.Color();
@@ -646,7 +691,8 @@ interface Entry {
   obj: THREE.Object3D;
   id: string;
   color: THREE.Color;
-  near: THREE.Object3D;
+  /** null until the model's near LOD has loaded: the car stays on the instanced mid LOD up close */
+  near: THREE.Object3D | null;
 }
 /** a growable InstancedMesh for one (model, level, paint|rest) */
 class Batch {
@@ -707,8 +753,10 @@ export class FleetInstances {
   constructor() {
     this.root.name = 'fleet-instances';
   }
-  register(obj: THREE.Object3D, id: string, color: THREE.Color, near: THREE.Object3D) {
-    this.cars.add({ obj, id, color, near });
+  register(obj: THREE.Object3D, id: string, color: THREE.Color, near: THREE.Object3D | null) {
+    const e: Entry = { obj, id, color, near };
+    this.cars.add(e);
+    return e;
   }
   private set(id: string) {
     let b = this.batches.get(id);
@@ -755,9 +803,9 @@ export class FleetInstances {
       e.obj.updateWorldMatrix(true, false);
       pos.setFromMatrixPosition(e.obj.matrixWorld);
       const d = pos.distanceTo(eye);
-      const isNear = d < FLEET_LOD.NEAR;
-      e.near.visible = isNear;
-      if (isNear) {
+      const isNear = d < FLEET_LOD.NEAR && !!e.near;
+      if (e.near) e.near.visible = isNear;
+      if (isNear && e.near) {
         const spin = !!e.obj.userData.spin;
         if (e.near.userData.wheelsSpin) e.near.userData.wheelsSpin.visible = spin;
         if (e.near.userData.wheelsStill) e.near.userData.wheelsStill.visible = !spin;

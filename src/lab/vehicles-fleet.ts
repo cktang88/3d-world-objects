@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
-import { FLEET, FLEET_LOD, fleetInstances, nearObject, paintMat, preloadFleet, ready } from '../nyc/vehicleFleet';
+import { FLEET, FLEET_LOD, fleetInstances, nearObject, paintMat, preloadAll, ready } from '../nyc/vehicleFleet';
 
 /**
  * ?lab=vehicles-fleet — every fleet model in a row, noses toward -z.
@@ -16,7 +16,7 @@ const scene: LabScene = {
   env: 'nyc',
   async build({ group, params, camera }) {
     cam = camera;
-    await preloadFleet();
+    await preloadAll();
     const only = params.get('only')?.split(',');
     const ids = Object.keys(FLEET).filter((id) => !only || only.includes(id));
     const forced = params.get('lod');

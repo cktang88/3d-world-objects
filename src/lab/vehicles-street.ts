@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { carMesh } from '../nyc/vehicles';
-import { fleetInstances, preloadFleet } from '../nyc/vehicleFleet';
+import { fleetInstances, preloadAll } from '../nyc/vehicleFleet';
 import { Rng } from '../rng';
 
 /**
@@ -18,7 +18,7 @@ const scene: LabScene = {
   env: 'nyc',
   ground: true,
   async build({ group, renderer, params, camera }) {
-    await preloadFleet();
+    await preloadAll();
     cam = camera;
     group.add(fleetInstances.root);
     const r = new Rng(Number(params.get('seed') ?? 7));

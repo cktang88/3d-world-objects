@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { Traffic } from '../nyc/vehicles';
-import { fleetInstances, preloadFleet } from '../nyc/vehicleFleet';
+import { fleetInstances, preloadAll } from '../nyc/vehicleFleet';
 import { SPAWN } from '../nyc/districts';
 
 /**
@@ -22,7 +22,7 @@ const scene: LabScene = {
   ground: false,
   async build({ group, renderer, params, camera }) {
     cam = camera;
-    await preloadFleet();
+    await preloadAll();
     clock = Number(params.get('t') ?? 0);
     // plain asphalt for the avenues and streets around the spawn (the lab has no city)
     const road = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: '#3a3b3d', roughness: 0.9 }));

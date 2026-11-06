@@ -110,7 +110,8 @@ async function main() {
           for (const p of m.listPrimitives()) {
             p.setAttribute('NORMAL', null);
             const mt = p.getMaterial();
-            if (!mt?.getBaseColorTexture()) for (const s of p.listSemantics()) if (s !== 'POSITION') p.setAttribute(s, null);
+            // the far LOD is drawn vertex-coloured (texture averages), so it needs no uvs at all: weld across seams
+            if (lod === 2 || !mt?.getBaseColorTexture()) for (const s of p.listSemantics()) if (s !== 'POSITION') p.setAttribute(s, null);
           }
         await doc.transform(weld({}));
         const now = count(root);

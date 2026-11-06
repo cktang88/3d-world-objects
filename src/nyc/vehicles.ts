@@ -4,7 +4,7 @@ import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST, CYCLE, SIGNAL } from './common';
 import { laneOpen } from './districts'; // [districts]
-import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
+import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, loadNear, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
 import { truckMesh } from './vehicleTruck';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
@@ -44,37 +44,43 @@ function startLoading() {
   });
 }
 
-/** put the real model into a car object (replacing the stand-in) */
+/**
+ * Put the real model into a car object (replacing the stand-in): first the instanced mid/far LODs (small files,
+ * in within seconds), then the near-LOD meshes once that model's near file has loaded.
+ */
 function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean) {
   const p = ready.get(id);
   if (!p) return;
   for (const c of [...obj.children]) if (c.userData.standin) obj.remove(c);
-  // near LOD as real meshes (shown within FLEET_LOD.NEAR); mid/far are drawn by the shared instance batches
-  const { near, wheels, wheelR, brake } = nearObject(p, paint);
-  obj.add(near);
-  if (wheels.length) {
-    obj.userData.wheels = wheels;
-    obj.userData.wheelR = wheelR;
-  }
-  if (brake) {
-    obj.add(brake);
-    obj.userData.brake = brake;
-  }
-  fleetInstances.register(obj, id, (paint as THREE.MeshStandardMaterial).color, near);
+  const entry = fleetInstances.register(obj, id, (paint as THREE.MeshStandardMaterial).color, null);
   if (cab && id !== 'taxi_cv') {
-    let top = 0, zc = 0;
-    for (const part of p.lod0) {
-      const bb = part.geo.boundingBox!;
-      if (bb.max.y > top) top = bb.max.y;
-    }
-    zc = id === 'prius' ? 0.15 : 0.25;
+    let top = 0;
+    for (const part of p.lod1) top = Math.max(top, part.geo.boundingBox!.max.y);
     const sign = roofSign();
-    sign.position.set(0, top - 0.02, zc);
+    sign.position.set(0, top - 0.02, id === 'prius' ? 0.15 : 0.25);
     obj.add(sign);
-    for (const d of taxiDecals(id, p)) near.add(d);
   }
-  // the Crown Vic's texture carries a generic "Yellow Cab" livery: paint the NYC one over it
-  if (id === 'taxi_cv') for (const d of crownVicLivery(p)) near.add(d);
+  const addNear = (q: Prepared | null) => {
+    if (!q?.nearReady) return;
+    // near LOD as real meshes (shown within FLEET_LOD.NEAR); mid/far are drawn by the shared instance batches
+    const { near, wheels, wheelR, brake } = nearObject(q, paint);
+    near.visible = false;
+    obj.add(near);
+    if (wheels.length) {
+      obj.userData.wheels = wheels;
+      obj.userData.wheelR = wheelR;
+    }
+    if (brake) {
+      obj.add(brake);
+      obj.userData.brake = brake;
+    }
+    if (cab && id !== 'taxi_cv') for (const d of taxiDecals(id, q)) near.add(d);
+    // the Crown Vic's texture carries a generic "Yellow Cab" livery: paint the NYC one over it
+    if (id === 'taxi_cv') for (const d of crownVicLivery(q)) near.add(d);
+    entry.near = near;
+  };
+  if (p.nearReady) addNear(p);
+  else loadNear(id).then(addNear);
 }
 
 /**
@@ -152,6 +158,7 @@ function bodyYellow(t: THREE.Texture): THREE.Color {
   }
   return c;
 }
+
 
 /** door livery for painted cabs: the black "T" roundel + NYC on the front doors, medallion number on the rear quarter */
 const decalCache = new Map<string, THREE.Mesh[]>();
