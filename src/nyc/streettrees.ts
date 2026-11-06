@@ -36,9 +36,9 @@ interface Spec {
 }
 
 const SPECS: Record<Species, Spec> = {
-  plane: { height: 14, clear: 3.0, r0: 0.27, limbs: [3, 5], limbTilt: [0.55, 0.85], depth: 3, childPer: [4, 5], childAngle: [0.6, 1.05], lenRatio: 0.6, upward: 0.06, card: 1.35, cardsPerTip: 9, bark: 'plane', leaf: 'plane', leader: 0.78 },
-  locust: { height: 12, clear: 2.7, r0: 0.21, limbs: [4, 5], limbTilt: [0.55, 0.9], depth: 3, childPer: [3, 5], childAngle: [0.6, 1.0], lenRatio: 0.64, upward: 0.05, card: 1.25, cardsPerTip: 7, bark: 'locust', leaf: 'locust', leader: 0.55 },
-  pear: { height: 9, clear: 2.3, r0: 0.16, limbs: [5, 6], limbTilt: [0.3, 0.5], depth: 3, childPer: [3, 4], childAngle: [0.45, 0.8], lenRatio: 0.6, upward: 0.12, card: 1.0, cardsPerTip: 9, bark: 'pear', leaf: 'pear', leader: 0.85 },
+  plane: { height: 14, clear: 3.0, r0: 0.27, limbs: [3, 5], limbTilt: [0.55, 0.85], depth: 3, childPer: [4, 5], childAngle: [0.6, 1.05], lenRatio: 0.6, upward: 0.06, card: 1.5, cardsPerTip: 10, bark: 'plane', leaf: 'plane', leader: 0.78 },
+  locust: { height: 12, clear: 2.7, r0: 0.21, limbs: [4, 5], limbTilt: [0.55, 0.9], depth: 3, childPer: [3, 5], childAngle: [0.6, 1.0], lenRatio: 0.64, upward: 0.05, card: 1.35, cardsPerTip: 8, bark: 'locust', leaf: 'locust', leader: 0.55 },
+  pear: { height: 9, clear: 2.3, r0: 0.19, limbs: [5, 6], limbTilt: [0.3, 0.5], depth: 3, childPer: [3, 4], childAngle: [0.45, 0.8], lenRatio: 0.6, upward: 0.12, card: 1.1, cardsPerTip: 10, bark: 'pear', leaf: 'pear', leader: 0.85 },
 };
 
 // ---------------------------------------------------------------- textures
@@ -175,7 +175,7 @@ function leafAtlas(kind: Spec['leaf']) {
           }
         }
       } else {
-        const n = kind === 'plane' ? 9 : 16;
+        const n = kind === 'plane' ? 13 : 18;
         for (let i = 0; i < n; i++) {
           const t = 0.18 + (i / n) * 0.82;
           const [bx, by] = twig[Math.round(t * 10)];
@@ -189,7 +189,7 @@ function leafAtlas(kind: Spec['leaf']) {
           g.moveTo(bx, by);
           g.lineTo(lx, ly);
           g.stroke();
-          const size = kind === 'plane' ? r.range(85, 125) : r.range(55, 75);
+          const size = kind === 'plane' ? r.range(95, 135) : r.range(60, 80);
           g.save();
           g.translate(lx, ly);
           g.rotate(ang + Math.PI / 2 + r.range(-0.3, 0.3));
@@ -245,9 +245,9 @@ function barkCanvas(kind: Spec['bark']) {
   };
   if (kind === 'plane') {
     // London plane: exfoliating camouflage of olive, grey-brown and cream patches
-    g.fillStyle = '#7a775c';
+    g.fillStyle = '#66654c';
     g.fillRect(0, 0, S, S);
-    const cols = ['#6a6650', '#8f8a6c', '#b3ad8c', '#6d6b52', '#9c9776', '#c4bd9a', '#55523f', '#87896a', '#7a7e5c'];
+    const cols = ['#5e5b47', '#7f7b60', '#a19b7b', '#615f49', '#8a8669', '#ada789', '#4b4938', '#76785c', '#6b6f50'];
     for (let i = 0; i < 260; i++) wrapBlob(r.range(0, S), r.range(0, S), r.range(10, 46), r.range(14, 60), r.range(0, 6.28), cols[r.int(0, cols.length - 1)]);
     // fine flecks
     for (let i = 0; i < 4000; i++) {
@@ -359,6 +359,8 @@ function grow(spec: Spec, r: Rng, out: Branch[], tips: { p: THREE.Vector3; d: TH
     tips.push({ p: pts[Math.floor(segs * 0.5)].clone(), d: d.clone(), s: 0.8 });
     return;
   }
+  // inner foliage on the last structural branches too
+  if (level === spec.depth - 1) tips.push({ p: p.clone(), d: d.clone(), s: 0.7 });
   const n = r.int(spec.childPer[0], spec.childPer[1]);
   let az = r.range(0, Math.PI * 2);
   for (let k = 0; k < n; k++) {
