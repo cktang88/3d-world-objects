@@ -389,6 +389,35 @@ export function loadPeopleAssets(): Promise<PeopleAssets> {
       const b0 = sk.skeleton.bones[0];
       const geo = sk.matrixWorld.clone().multiply(sk.bindMatrixInverse).multiply(b0.matrixWorld).multiply(sk.skeleton.boneInverses[0]).multiply(sk.bindMatrix);
       const geoScale = new THREE.Vector3().setFromMatrixScale(geo).x;
+      // eyes and brows were quantized separately (their own inverse bind matrices): re-express
+      // their vertices in the body geometry's space so every mesh of a person can share the
+      // body's skeleton (one bone update per person instead of three)
+      {
+        const geoInv = geo.clone().invert();
+        scene.traverse((o) => {
+          const m = o as THREE.SkinnedMesh;
+          if (!m.isSkinnedMesh || m === sk || /Body_LOD/.test(m.name) || m.userData.inBodySpace) return;
+          const b0m = m.skeleton.bones[0];
+          const own = m.matrixWorld.clone().multiply(m.bindMatrixInverse).multiply(b0m.matrixWorld).multiply(m.skeleton.boneInverses[0]).multiply(m.bindMatrix);
+          const toBody = geoInv.clone().multiply(own);
+          const g2 = m.geometry.clone();
+          for (const name of ['position', 'normal'] as const) {
+            const a = g2.attributes[name] as THREE.BufferAttribute;
+            if (!a) continue;
+            const f = new Float32Array(a.count * 3);
+            for (let i = 0; i < a.count; i++) {
+              _tv.fromBufferAttribute(a, i);
+              if (name === 'position') _tv.applyMatrix4(toBody);
+              else _tv.transformDirection(toBody);
+              _tv.toArray(f, i * 3);
+            }
+            g2.setAttribute(name, new THREE.BufferAttribute(f, 3));
+          }
+          m.geometry = g2;
+          m.bind(sk.skeleton, sk.bindMatrix);
+          m.userData.inBodySpace = true;
+        });
+      }
       const bindInv = new Map<string, THREE.Matrix4>();
       scene.traverse((o) => {
         if ((o as THREE.Bone).isBone) bindInv.set(o.name, o.matrixWorld.clone().invert());
@@ -799,6 +828,15 @@ export class Person {
       m.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.3);
       this.meshes.push(m);
     });
+    // one skeleton per person: SkeletonUtils.clone gives every skinned mesh (body, LOD, eyes,
+    // brows) its own copy of the same 65-bone skin; share the body's so it updates once a frame
+    {
+      const full = this.fullMesh as THREE.SkinnedMesh | null;
+      if (full) model.traverse((x) => {
+        const m = x as THREE.SkinnedMesh;
+        if (m.isSkinnedMesh && m !== full && m.skeleton.bones.length === full.skeleton.bones.length) m.bind(full.skeleton, m.bindMatrix);
+      });
+    }
     // hair (static meshes riding the head bone)
     const styles = gender === 'male' ? ['Hair_SimpleParted', 'Hair_SimpleParted', 'Hair_Buzzed', 'Hair_Buzzed', ''] : ['Hair_Long', 'Hair_Long', 'Hair_Buns', 'Hair_BuzzedFemale'];
     const style = r.pick(styles);
@@ -1272,7 +1310,7 @@ const LOWQ = (() => {
 const COUNT = (() => {
   try {
     const n = new URLSearchParams(location.search).get('people');
-    return n !== null && isFinite(Number(n)) ? Number(n) : LOWQ ? 70 : 110;
+    return n !== null && isFinite(Number(n)) ? Number(n) : LOWQ ? 90 : 160;
   } catch {
     return 110;
   }
@@ -1362,6 +1400,8 @@ class ColliderGrid {
   }
 }
 const _rects: Rect[] = [];
+const _dir = new THREE.Vector3();
+const _tv = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
 const _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const _m4 = new THREE.Matrix4();
@@ -1406,6 +1446,20 @@ export class Pedestrians {
     pd.line = this.clampLine(pd, pd.c + pd.s * (sideHalf(pd.axis) + inSw));
     // half of them start near a corner, where Midtown sidewalks are busiest
     const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+    // the player's own sidewalk (and the one across the road), in view: 10-80 m ahead
+    const own = this.ownSidewalk(p);
+    if (r.chance(ahead ? 0.5 : 0.35) && !pd.lead) {
+      pd.axis = own.axis;
+      const a2 = pd.axis === 'x' ? p.x : p.z;
+      pd.c = own.c;
+      pd.s = r.chance(0.7) ? own.s : -own.s;
+      pd.line = this.clampLine(pd, pd.c + pd.s * (sideHalf(pd.axis) + inSw));
+      pd.dir = r.chance(0.5) ? 1 : -1;
+      if (ahead) pd.t = a2 + (this.viewSign(pd.axis) || r.pick([-1, 1])) * r.range(10, 80);
+      else pd.t = a2 - pd.dir * r.range(45, 70); // walks into view
+      // the place logic below works in this axis' coordinates
+      return this.finishPlace(pd, p, true, pd.axis === 'x' ? p.x : p.z, pd.axis === 'x' ? p.z : p.x);
+    }
     if (ahead) {
       pd.t = along + r.range(-50, 50);
       if (r.chance(0.5)) {
@@ -1413,6 +1467,27 @@ export class Pedestrians {
         pd.t = (kc + 0.5) * CP + r.pick([-1, 1]) * (ch + r.range(0.5, 14));
       }
     } else pd.t = along - pd.dir * r.range(40, 60);
+    this.finishPlace(pd, p, ahead, along, across);
+  }
+  /** the sidewalk the player stands on (or is closest to): its axis, road centre and side */
+  private ownSidewalk(p: THREE.Vector3): { axis: 'x' | 'z'; c: number; s: number } {
+    const ca = (Math.round(p.x / AX - 0.5) + 0.5) * AX, cs = (Math.round(p.z / SZ - 0.5) + 0.5) * SZ;
+    const da = Math.abs(p.x - ca) - AVE / 2, ds = Math.abs(p.z - cs) - ST / 2;
+    return da <= ds ? { axis: 'z', c: ca, s: Math.sign(p.x - ca) || 1 } : { axis: 'x', c: cs, s: Math.sign(p.z - cs) || 1 };
+  }
+  /** which way the camera looks along an axis (+1 / -1), or 0 before the first frame */
+  private viewSign(axis: 'x' | 'z') {
+    const c = this.probeCam;
+    if (!c) return 0;
+    c.getWorldDirection(_dir);
+    const v = axis === 'x' ? _dir.x : _dir.z;
+    return Math.abs(v) > 0.3 ? Math.sign(v) : 0;
+  }
+  /** the shared tail of place(): out of roads, the player's clear zone and furniture; walk or loiter */
+  private finishPlace(pd: Ped, p: THREE.Vector3, ahead: boolean, along: number, across: number) {
+    const r = this.rng;
+    const CP = crossPeriod(pd.axis), ch = crossHalf(pd.axis);
+    void p;
     {
       // never start in a roadway: step back onto the sidewalk before it
       const kc = Math.round(pd.t / CP - 0.5), cc = (kc + 0.5) * CP;
