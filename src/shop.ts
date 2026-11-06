@@ -38,7 +38,7 @@ interface Loaded {
 }
 
 /** product triangle budget per shop (the lab lowers it for software rendering) */
-export const SHOP_BUDGET = { tris: 3_500_000 };
+export const SHOP_BUDGET = { tris: 2_500_000 };
 
 export class ShopLevel implements Level {
   name: string;
