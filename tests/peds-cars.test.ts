@@ -7,16 +7,17 @@ import { test, expect, fmt } from './qa';
 import { allowModels, setSearch, settle } from './env';
 import { BX, BZ } from '../src/nyc/common';
 
-async function simulate(seconds: number, seed = 1, people = 60) {
+async function simulate(seconds: number, seed = 1, people = 60, at?: [number, number], pfar = false) {
   allowModels(/assets\/people\//);
-  setSearch(`people=${people}&pfar=0`);
+  setSearch(`people=${people}&pfar=${pfar ? 1 : 0}`);
   const { Pedestrians, loadPeopleAssets } = await import('../src/nyc/people');
   const { Traffic } = await import('../src/nyc/vehicles');
   await loadPeopleAssets();
   const tr = new Traffic(new THREE.Group(), seed);
   const P = new Pedestrians(new THREE.Group(), seed);
   await settle(0);
-  const player = new THREE.Vector3(BX - 2.6, 1.7, BZ - 3.2);
+  // at: the player's position (another block: a district, the park edge, an avenue corner)
+  const player = at ? new THREE.Vector3(at[0], 1.7, at[1]) : new THREE.Vector3(BX - 2.6, 1.7, BZ - 3.2);
   const D = 0.1;
   const hits: string[] = [];
   let frames = 0;
@@ -60,4 +61,24 @@ test('nobody is ever inside a car (60 s of the spawn block, people and traffic t
   const r = { frames: all.reduce((n, x) => n + x.frames, 0), hits: all.flatMap((x) => x.hits), kinds: new Map(all.flatMap((x) => [...x.kinds])), people: all[0].people, cars: all[0].cars };
   console.log(`   ${r.people} people, ${r.cars} cars; frames with a person inside a car: ${r.frames} ${JSON.stringify(Object.fromEntries(r.kinds))}`);
   expect(r.frames === 0, `${r.frames} frames with a person inside a car:\n${r.hits.join('\n')}`);
+});
+
+// more of the city: Auto Row (showroom lots), the park edge (dead-end roads), an avenue corner
+// (both traffic directions and crossings at once), and right after a teleport (people placed before cars)
+const BLOCKS: [string, [number, number]][] = [
+  ['Auto Row', [529.8, -320]],
+  ['park edge', [20, -384]],
+  ['avenue corner', [3 * 120 + BX - 0.6, 2 * 64 + BZ - 0.6]],
+];
+test('nobody is inside a car on Auto Row, at the park edge, at an avenue corner, or after a teleport (far crowd on)', async () => {
+  const out: string[] = [];
+  let frames = 0;
+  for (const [name, at] of BLOCKS) {
+    const r = await simulate(Number(process.env.QA_SECS ?? 40), 3, 80, at, true);
+    frames += r.frames;
+    out.push(`${name}: ${r.people} people, ${r.cars} cars, ${r.frames} frames`);
+    if (r.frames) out.push(...r.hits);
+  }
+  console.log(`   ${out.filter((l) => !l.startsWith('t=')).join('; ')}`);
+  expect(frames === 0, out.join('\n'));
 });
