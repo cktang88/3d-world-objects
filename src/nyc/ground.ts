@@ -194,7 +194,7 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   // block style: standard grey, dark tinted (silicon-carbide) or sand-coloured concrete
   float st = gH(cid * 1.37 + .5);
   bool tinted = st < .16;
-  vec3 base = tinted ? vec3(.085, .085, .09) : st < .24 ? vec3(.37, .31, .22) : vec3(.37, .345, .3);
+  vec3 base = tinted ? vec3(.085, .085, .09) : st < .24 ? vec3(.37, .31, .22) : vec3(.46, .43, .375);
   float tone = mix(.88, 1.06, h1);
   vec3 tint = vec3(1.);
   if (h2 < .1 || ramp) { tone = 1.1; tint = vec3(.98, 1., 1.03); }      // a replaced flag: newer, cleaner
@@ -277,7 +277,7 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   vec4 t1 = texture2D(gAsp, w / 2.08);
   vec4 t2 = texture2D(gAsp, mat2(.8, .6, -.6, .8) * w / 2.71 + .37);
   vec4 t = mix(vec4(.5, .7, .5, .5), mix(t1, t2, smoothstep(.3, .7, gN(w * .23))), gReady);
-  alb = vec3(.06, .06, .064) * mix(1., t.r * 2., .8);
+  alb = vec3(.08, .079, .08) * mix(1., t.r * 2., .95);
   rough = mix(.92, t.g, .35);
   vec2 tn = t.ba * 2. - 1.;
   float nk = 1.;
@@ -403,7 +403,7 @@ vGUv = uv;`,
 
 const mats: Record<string, THREE.MeshStandardMaterial> = {};
 export const GM = {
-  sidewalk: () => (mats.sw ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.45 }), 'sw', GLSL_SIDEWALK), 0.55)),
+  sidewalk: () => (mats.sw ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.35 }), 'sw', GLSL_SIDEWALK), 0.55)),
   road: () => (mats.rd ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'rd', GLSL_ROAD))),
   cobbleRoad: () => (mats.rc ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'rc', GLSL_ROAD, { G_COBBLE: '1' }))),
   curb: () => (mats.cb ??= wetSurface(hook(new THREE.MeshStandardMaterial({ envMapIntensity: 0.6 }), 'cb', GLSL_CURB), 0.5)),
@@ -476,7 +476,7 @@ vGUv = uv;`,
 float gWear() {
   vec2 w = vGW.xz;
   // thermoplastic crazes into plates
-  vec2 p = w / .17;
+  vec2 p = w / .26;
   vec2 i = floor(p), fp = fract(p);
   float d1 = 8., d2 = 8.;
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
@@ -484,7 +484,7 @@ float gWear() {
     float d = length(g + gH2(i + g) - fp);
     if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
   }
-  float craze = gLine((d2 - d1) * .17, .002);
+  float craze = gLine((d2 - d1) * .26, .003) * smoothstep(.35, .6, gN(w * .8 + 2.));
   float tr = gLanes(w).x;
   float chip = max(smoothstep(.7, .75, gFbm(w * 5.3 + 5.)), smoothstep(.62, .7, gFbm(w * 2.7 + 9.)) * tr * .8);
   return (1. - craze * .8) * (1. - chip) * (.72 + .28 * gN(w * .6));
