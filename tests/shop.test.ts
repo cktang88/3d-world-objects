@@ -1,6 +1,6 @@
 /** Shop interiors, one per SHOPS type: room scale, entrance clear, fixtures reachable, lazy stock, budgets, determinism. */
 import * as THREE from 'three';
-import { test, expect, between, none, stats, sceneHash, insideRect, rectOverlap, Grid, fmt, soft } from './qa';
+import { test, expect, between, none, stats, sceneHash, insideRect, rectOverlap, Grid, fmt } from './qa';
 import './env';
 import { ShopLevel } from '../src/shop';
 import { SHOPS } from '../src/nyc';
@@ -15,7 +15,6 @@ const shop = (type: string) => {
   return s;
 };
 const TYPES = SHOPS.map((s) => s.type);
-const known = (msg: string) => soft(false, `KNOWN ${msg}`);
 const inner = (s: ShopLevel): Rect => ({ minX: -s.room.W / 2, maxX: s.room.W / 2, minZ: -s.room.D / 2, maxZ: s.room.D / 2 });
 /** the big wall colliders the shell adds (they reach 1 m outside the room) */
 const isWall = (s: ShopLevel, r: Rect) => r.minX < -s.room.W / 2 - 0.5 || r.maxX > s.room.W / 2 + 0.5 || r.minZ < -s.room.D / 2 - 0.5 || r.maxZ > s.room.D / 2 + 0.5;
@@ -40,15 +39,13 @@ test('shop rooms are real scale: 4-20 m wide, 6-30 m deep, 2.7-4.6 m high; door 
   }
 });
 
-// KNOWN (qa-findings): small collider overlaps, fixtures 0.2 m into the side wall, and these
-const KNOWN_FIXTURE = /^(deli|toys|garden|electronics|hardware):/;
 test('the entrance is clear: nothing within 1.5 m inside the door', () => {
   const bad: string[] = [];
   for (const t of TYPES) {
     const s = shop(t);
     const d = s.door.pos;
     const zone: Rect = { minX: d.x - 0.7, maxX: d.x + 0.7, minZ: d.z - 1.5, maxZ: d.z - 0.05 };
-    for (const r of s.colliders()) if (rectOverlap(zone, r)) (t === 'deli' ? known : bad.push.bind(bad))(`${t}: ${fmt(r.maxX - r.minX)}x${fmt(r.maxZ - r.minZ)} at (${fmt((r.minX + r.maxX) / 2)}, ${fmt((r.minZ + r.maxZ) / 2)})`);
+    for (const r of s.colliders()) if (rectOverlap(zone, r)) bad.push(`${t}: ${fmt(r.maxX - r.minX)}x${fmt(r.maxZ - r.minZ)} at (${fmt((r.minX + r.maxX) / 2)}, ${fmt((r.minZ + r.maxZ) / 2)})`);
     expect(!s.colliders().some((r) => insideRect(r, s.spawn.pos.x, s.spawn.pos.z, 0.25)), `${t}: spawn inside a collider`);
   }
   none(bad, 'colliders blocking the entrance');
@@ -67,8 +64,7 @@ test('fixtures stay inside the room and do not overlap each other', () => {
       if (ix > 0.05 && iz > 0.05) bad.push(`${t}: ${fmt(a.maxX - a.minX)}x${fmt(a.maxZ - a.minZ)} @(${fmt((a.minX + a.maxX) / 2)}, ${fmt((a.minZ + a.maxZ) / 2)}) overlaps ${fmt(b.maxX - b.minX)}x${fmt(b.maxZ - b.minZ)} @(${fmt((b.minX + b.maxX) / 2)}, ${fmt((b.minZ + b.maxZ) / 2)}) by ${fmt(ix)}x${fmt(iz)}`);
     }
   }
-  for (const b of bad.filter((x) => KNOWN_FIXTURE.test(x))) known(b);
-  none(bad.filter((x) => !KNOWN_FIXTURE.test(x)), 'fixture problems', String, 10);
+  none(bad, 'fixture problems', String, 10);
 });
 
 test('every case, cooler and drawer can be walked up to (flood fill from the door)', () => {

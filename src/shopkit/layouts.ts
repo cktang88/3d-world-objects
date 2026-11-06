@@ -133,13 +133,13 @@ const deli: Layout = {
     k.at(-xi + 0.86, coolZ0 + cLen / 2 + 0.06, Math.PI / 2);
     F.cooler(k, doors, { header: r.pick(['COLD BEER', 'COLD DRINKS', 'BEER • SODA • WATER']), headerColor: r.pick(['#c62828', '#1565c0', '#2e7d32']) });
     yield;
-    const shelfZ0 = coolZ0 + cLen + 0.2, shelfZ1 = zf - 2.2;
+    const shelfZ0 = coolZ0 + cLen + 0.2, shelfZ1 = zf - 3.0;
     if (shelfZ1 - shelfZ0 > 0.8) {
       k.at(-xi + 0.02, (shelfZ0 + shelfZ1) / 2, Math.PI / 2);
       F.gondola(k, shelfZ1 - shelfZ0, { double: false, height: 2.1, shelves: 6, color: '#e8e8e4', strip: '#c62828', messy: 0.4 });
       yield;
     }
-    k.at(-xi + 0.35, zf - 1.3, Math.PI / 2);
+    k.at(-xi + 0.35, zf - 2.6, Math.PI / 2); // ATM at the end of the wall shelving, clear of the door
     F.atm(k);
     yield;
     // centre gondolas
@@ -151,6 +151,8 @@ const deli: Layout = {
       k.at(x, (gz0 + gz1) / 2, Math.PI / 2);
       F.gondola(k, gz1 - gz0, { height: 1.65, shelves: 5, color: r.pick(['#e8e8e4', '#2a2b2e']), strip: r.pick(['#c62828', '#f2c400']), messy: 0.45 });
       yield;
+      // no endcap where it would run into the counter's back bar
+      if (x + 0.5 > xi - 1.45 - 0.45) continue;
       k.at(x, gz1 + 0.24);
       F.endcap(k, 0.9, { height: 1.3, shelves: 3, color: '#e8e8e4', messy: 0.6 });
       yield;
@@ -314,7 +316,7 @@ const hardware: Layout = {
     F.binCabinet(k, Math.min(14, Math.floor((W - 1.5) / 0.3)), 6, { cell: 0.3 });
     yield;
     // behind the counter: a cabinet of small-parts drawers (open them: E)
-    k.at(xi - 0.02, zf - 2.2, -Math.PI / 2);
+    k.at(xi - 0.44, zf - 2.2, -Math.PI / 2);
     F.drawerChest(k, 3, 6, { w: 1.1, h: 1.25, d: 0.42, wood: '#6a6e72', knob: '#d8d8d8', label: 'parts drawer' });
     yield;
     // front: glass showcase counter and register, a bin of bargains
@@ -365,11 +367,11 @@ const electronics: Layout = {
     k.at(-1, zb + 0.02);
     F.gondola(k, W - 4, { double: false, height: 2.0, shelves: 5, color: '#2a2b2e', strip: '#1565c0' });
     yield;
-    k.at(xi - 1.4, zb + 1.6);
+    k.at(xi - 2.0, zb + 1.6);
     F.showcase(k, 1.8, { frame: '#2a2b2e' });
     yield;
     k.at(0, 0);
-    F.register(k, xi - 1.1, 1.0, zb + 1.55, Math.PI);
+    F.register(k, xi - 1.7, 1.0, zb + 1.55, Math.PI);
     yield;
     // centre: demo tables
     for (let i = 0; i < 2; i++)
@@ -414,7 +416,7 @@ const toys: Layout = {
       k.at(-2.2 + i * 4.4 - 0.4, zb + 4.2, 0);
       F.tiered(k, 1.8, { color: cols[(i * 2) % cols.length] });
       yield;
-      k.at(-2.2 + i * 4.4 - 0.4, zb + 4.2 - 1.2, Math.PI);
+      k.at(-2.2 + i * 4.4 - 0.4, zb + 4.2 - 1.9, Math.PI);
       F.tiered(k, 1.8, { color: cols[(i * 2 + 1) % cols.length] });
       yield;
     }
@@ -753,7 +755,7 @@ const garden: Layout = {
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     // slatted tiered benches along the walls and in the middle
     for (const s of [-1, 1])
-      for (let z = zb + 1.6; z < zf - 3; z += 2.3) {
+      for (let z = zb + 1.75; z < zf - 3.9; z += 2.3) {
         k.at(s * (xi - 1.2), z, -s * Math.PI / 2);
         F.tiered(k, 2.1, { color: '#8a6a44', slats: true, messy: 0.2 });
         yield;
