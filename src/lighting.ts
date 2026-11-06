@@ -64,7 +64,7 @@ export const PRESETS: Record<TimeOfDay, Preset> = {
   },
   dusk: {
     label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
-    sky: 0.12, clampMul: 30, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.42, wet: 0.35,
+    sky: 0.12, clampMul: 30, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.3, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
   },
@@ -145,11 +145,11 @@ vWinUv = uv;`,
 {
   float on = step(vWinLit.x, uLit) * uNight;
   // warm incandescent / LED rooms, a few blue TV-lit ones; brighter towards the ceiling
-  vec3 warm = mix(vec3(1.0, 0.55, 0.22), vec3(1.0, 0.78, 0.5), vWinLit.y);
+  vec3 warm = mix(vec3(1.0, 0.45, 0.14), vec3(1.0, 0.7, 0.4), vWinLit.y);
   vec3 tint = vWinLit.z > 0.88 ? vec3(0.45, 0.6, 1.0) : warm;
   float grad = 0.55 + 0.45 * smoothstep(0.0, 1.0, vWinUv.y);
   float blind = vWinLit.z < 0.25 ? 0.55 : 1.0;
-  totalEmissiveRadiance += tint * on * grad * blind * (0.35 + 0.8 * vWinLit.y);
+  totalEmissiveRadiance += tint * on * grad * blind * (0.18 + 0.5 * vWinLit.y);
   diffuseColor.rgb *= 1.0 - 0.7 * on;
 }`,
     );
@@ -808,7 +808,7 @@ export class Lighting {
     for (const m of this.emissives) {
       const base = m.userData.baseEI as number;
       const lamp = m.emissive.getHex() === 0xffe2b0;
-      m.emissiveIntensity = base * (1 + night * (lamp ? 9 : 1.2));
+      m.emissiveIntensity = base * (1 + night * (lamp ? 4 : 1.2));
     }
   }
 }
