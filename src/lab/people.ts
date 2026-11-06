@@ -84,7 +84,10 @@ const scene: LabScene = {
     const face = params.get('face');
     people = [];
     for (let i = 0; i < n; i++) {
-      const p = new Person(assets, r, i % 2 ? 'female' : 'male');
+      // &want=dog|stroller|carry|slow: re-roll until the person has it (lab only)
+      const want = params.get('want');
+      let p = new Person(assets, r, i % 2 ? 'female' : 'male');
+      for (let k = 0; k < 200 && want && !(want === 'dog' ? p.dog : want === 'stroller' ? p.noPhone && !p.dog : want === 'slow' ? p.slow : !!p.pose); k++) p = new Person(assets, r, i % 2 ? 'female' : 'male');
       p.root.position.set((i - (n - 1) / 2) * 0.9, 0, 0);
       p.root.rotation.y = face === 'back' ? Math.PI : face === 'side' ? Math.PI / 2 : 0;
       p.setActivity(act, i * 0.37);

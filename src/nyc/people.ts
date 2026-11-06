@@ -3,6 +3,7 @@ import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { gltf } from '../detail';
+import { Dog, coffeeGeo, handBagGeo, propVcMat, strollerGeo } from './peopleProps';
 import { Rng, hashN } from '../rng';
 import { CURB, AX, SZ, AVE, ST, SW, CYCLE, lightFor } from './common';
 import type { Rect } from '../level';
@@ -364,6 +365,7 @@ function shoeGeo(upper: string, sole: string, len: number, boot: boolean) {
   shoeGeos.set(k, g);
   return g;
 }
+const leashMat = new THREE.LineBasicMaterial({ color: '#1a1a1a' });
 const shoeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
 
 /** the lower half of a long coat: an elliptical skirt from the waist to below the knee, skinned
@@ -554,10 +556,89 @@ export class Person {
     // a phone, shown for phone-users
     this.phone = attach('hand_r', new THREE.Mesh(propGeo.phone, propMat('#0c0c0e', 0.25)), at(-b.wristX - 0.075, b.armY - 0.035, b.armZ + 0.02, Math.PI / 2, 0, Math.PI / 2));
     this.phone.visible = false;
+    // things carried or walked with (one each): stroller, dog, coffee, a bag in the hand
+    const carry = r.next();
+    const holder = (bone: string, x: number, y: number, z: number) => {
+      // a grip point on the hand whose orientation is kept upright every frame
+      const h = new THREE.Object3D();
+      new THREE.Matrix4().multiplyMatrices(A.bindInv.get(bone)!, at(x, y, z)).decompose(h.position, h.quaternion, h.scale);
+      this.bones.get(bone)!.add(h);
+      return h;
+    };
+    if (carry < 0.03 && !this.slow) {
+      // pushing a stroller: both hands on the bar, slower
+      this.noPhone = true;
+      this.walkSpeed = Math.min(this.walkSpeed, r.range(0.95, 1.15));
+      const st = new THREE.Mesh(strollerGeo(r.pick(['#1d2433', '#2a2c30', '#3b4232', '#151517', '#6b6e72'])), propVcMat);
+      st.position.set(0, 1.0, 0.5);
+      st.castShadow = true;
+      this.root.add(st);
+      this.meshes.push(st);
+      this.pose = (p) => {
+        p.aim('upperarm_r', 'lowerarm_r', _v3.set(0.05, -0.75, 0.55));
+        p.aim('lowerarm_r', 'hand_r', _v3.set(0.12, 0.05, 1));
+        p.aim('upperarm_l', 'lowerarm_l', _v3.set(-0.05, -0.75, 0.55));
+        p.aim('lowerarm_l', 'hand_l', _v3.set(-0.12, 0.05, 1));
+      };
+    } else if (carry < 0.075) {
+      // walking a dog on a leash held in the left hand
+      this.noPhone = true;
+      this.walkSpeed = Math.min(this.walkSpeed, r.range(1.0, 1.25));
+      const dog = new Dog(r.int(0, 5), r.range(0.75, 1.15));
+      const dh = new THREE.Group();
+      dh.position.set(0.45, 0, 1.0);
+      dh.add(dog.root);
+      this.root.add(dh);
+      this.dog = dog;
+      const grip = holder('hand_l', b.wristX + 0.06, b.armY - 0.03, b.armZ);
+      const leash = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9 * 3), 3)), leashMat);
+      leash.frustumCulled = false;
+      this.root.add(leash);
+      const pa = leash.geometry.attributes.position as THREE.BufferAttribute;
+      const h = new THREE.Vector3(), c = new THREE.Vector3();
+      this.pose = (p) => {
+        grip.getWorldPosition(h);
+        p.root.worldToLocal(h);
+        c.copy(dog.collar).add(dh.position);
+        for (let i = 0; i <= 8; i++) {
+          const f = i / 8;
+          pa.setXYZ(i, h.x + (c.x - h.x) * f, h.y + (c.y - h.y) * f - Math.sin(f * Math.PI) * 0.12, h.z + (c.z - h.z) * f);
+        }
+        pa.needsUpdate = true;
+      };
+    } else if (carry < 0.19) {
+      // a takeaway coffee in the left hand, forearm up
+      const grip = holder('hand_l', b.wristX + 0.075, b.armY - 0.02, b.armZ + 0.045);
+      const cup = new THREE.Mesh(coffeeGeo(), propVcMat);
+      cup.position.y = -0.05;
+      grip.add(cup);
+      this.meshes.push(cup);
+      this.pose = (p) => {
+        p.aim('upperarm_l', 'lowerarm_l', _v3.set(-0.1, -1, 0.08));
+        p.aim('lowerarm_l', 'hand_l', _v3.set(-0.25, 0.3, 1));
+        p.upright(grip);
+      };
+    } else if (carry < 0.36) {
+      // a shopping bag or handbag hanging from the left hand
+      const kind = r.chance(0.55) ? 'shopping' : 'handbag';
+      const col = kind === 'shopping' ? r.pick(['#f2efe6', '#1a1a1a', '#c8a878', '#b8282e', '#e8e0d0', '#2a4a7a']) : r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c']);
+      const grip = holder('hand_l', b.wristX + 0.06, b.armY - 0.03, b.armZ);
+      const bag = new THREE.Mesh(handBagGeo(kind, col), propVcMat);
+      grip.add(bag);
+      this.meshes.push(bag);
+      this.pose = (p) => p.upright(grip);
+    }
     this.setActivity('walk', r.range(0, 10));
   }
+  /** pushes a stroller or walks a dog: never stops to look at a phone */
+  noPhone = false;
+  dog: Dog | null = null;
+  /** current walking speed (m/s), 0 when standing */
+  speed = 0;
   setActivity(a: Activity, phase = 0) {
+    if (a === 'phone' && this.noPhone) a = 'idle';
     this.activity = a;
+    if (a !== 'walk') this.speed = 0;
     const clip = a === 'walk' ? this.walkClip : a === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop';
     for (const [n, act] of this.actions) {
       if (n === clip) {
@@ -571,6 +652,7 @@ export class Person {
   }
   /** walking speed in m/s drives the cadence (clip walks ~0.98 m/s) */
   setSpeed(v: number) {
+    this.speed = this.activity === 'walk' ? v : 0;
     const w = this.actions.get(this.walkClip);
     if (w) w.timeScale = Math.max(0.5, v / (0.98 * this.model().scale.x * (BODY[this.gender].height / 1.83)));
   }
@@ -582,6 +664,7 @@ export class Person {
   }
   update(dt: number) {
     this.mixer.update(dt);
+    this.dog?.update(dt, this.speed);
     const phone = this.activity === 'phone';
     if (!phone && !this.slow && !this.pose) return;
     this.model().updateMatrixWorld(true);
