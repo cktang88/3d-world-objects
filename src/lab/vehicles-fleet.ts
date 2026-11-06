@@ -28,6 +28,8 @@ const scene: LabScene = {
         o.levels.forEach((l, k) => (l.object.visible = k === Number(forced)));
       }
       o.position.x = (i - (ids.length - 1) / 2) * 2.8;
+      // &spin=<rad> turns the cut-out wheels, to check they were cut cleanly
+      for (const w of (o.userData.wheels ?? []) as THREE.Object3D[]) w.rotation.x = Number(params.get('spin') ?? 0);
       group.add(o);
     });
     let tris = 0;
@@ -36,6 +38,7 @@ const scene: LabScene = {
       if (mesh.isMesh && mesh.visible) tris += (mesh.geometry.index?.count ?? 0) / 3;
     });
     (window as any).__fleetTris = tris;
+    (window as any).__fleet = ready;
   },
 };
 export default scene;

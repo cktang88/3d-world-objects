@@ -13,6 +13,8 @@ export interface FleetModel {
   /** real length/width (m) for traffic spacing and colliders */
   len: number;
   wid: number;
+  /** tyre radius (m), to cut the wheels out so they can spin */
+  wheelR: number;
   /** body paint can be tinted */
   paint: boolean;
   /** fixed paint colour when the model is used as a cab */
@@ -20,14 +22,14 @@ export interface FleetModel {
 }
 
 export const FLEET: Record<string, FleetModel> = {
-  taxi_cv: { id: 'taxi_cv', len: 5.38, wid: 2.0, paint: false },
-  prius: { id: 'prius', len: 4.54, wid: 1.76, paint: true },
-  accord: { id: 'accord', len: 4.93, wid: 1.85, paint: true },
-  charger: { id: 'charger', len: 5.08, wid: 1.9, paint: true },
-  suburban: { id: 'suburban', len: 5.7, wid: 2.0, paint: true },
-  escalade: { id: 'escalade', len: 5.14, wid: 2.05, paint: false },
-  explorer: { id: 'explorer', len: 5.05, wid: 2.0, paint: true },
-  sprinter: { id: 'sprinter', len: 5.9, wid: 2.0, paint: false },
+  taxi_cv: { id: 'taxi_cv', len: 5.38, wid: 2.0, wheelR: 0.34, paint: false },
+  prius: { id: 'prius', len: 4.54, wid: 1.76, wheelR: 0.31, paint: true },
+  accord: { id: 'accord', len: 4.93, wid: 1.85, wheelR: 0.33, paint: true },
+  charger: { id: 'charger', len: 5.08, wid: 1.9, wheelR: 0.36, paint: true },
+  suburban: { id: 'suburban', len: 5.7, wid: 2.0, wheelR: 0.39, paint: true },
+  escalade: { id: 'escalade', len: 5.14, wid: 2.05, wheelR: 0.4, paint: false },
+  explorer: { id: 'explorer', len: 5.05, wid: 2.0, wheelR: 0.38, paint: true },
+  sprinter: { id: 'sprinter', len: 5.9, wid: 2.0, wheelR: 0.35, paint: false },
 };
 
 /** NYC taxi yellow (Dupont M6284 "taxi yellow", close to Pantone 116) */
@@ -111,10 +113,18 @@ export interface Part {
   /** source was double-sided (inside-out panels are common in these models) */
   double: boolean;
 }
+export interface Wheel {
+  /** wheel triangles (vertex-coloured), centred on the hub */
+  geo: THREE.BufferGeometry;
+  center: THREE.Vector3;
+  r: number;
+}
 export interface Prepared {
   id: string;
   lod0: Part[];
   lod1: Part[];
+  /** the four near-LOD wheels, cut out of the body so moving cars can spin them */
+  wheels: Wheel[];
 }
 
 const prepared = new Map<string, Promise<Prepared | null>>();
@@ -123,7 +133,10 @@ export function loadFleet(id: string): Promise<Prepared | null> {
   if (!p) {
     const base = `${import.meta.env.BASE_URL}assets/vehicles/${id}`;
     p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`)])
-      .then(([a, b]) => ({ id, lod0: prepare(a.scene, id), lod1: prepare(b.scene, id) }))
+      .then(([a, b]) => {
+        const lod0 = prepare(a.scene, id);
+        return { id, lod0, lod1: prepare(b.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0) };
+      })
       .catch((e) => {
         console.warn('vehicle', id, e);
         return null;
@@ -267,6 +280,93 @@ function prepare(root: THREE.Object3D, id: string): Part[] {
   return parts;
 }
 
+/**
+ * Find the four wheels from the tyre rubber (low, at the corners) and move every non-paint triangle inside each
+ * wheel's cylinder (tyre, rim, hub, brake) into its own vertex-coloured geometry centred on the hub.
+ */
+function cutWheels(parts: Part[], r: number): Wheel[] {
+  if (!r) return [];
+  let zmin = Infinity, zmax = -Infinity;
+  for (const p of parts) {
+    zmin = Math.min(zmin, p.geo.boundingBox!.min.z);
+    zmax = Math.max(zmax, p.geo.boundingBox!.max.z);
+  }
+  const zc = (zmin + zmax) / 2;
+  // the tyres are what touches the ground: one contact patch per corner gives the hub's x span and z
+  const boxes = [0, 1, 2, 3].map(() => new THREE.Box3());
+  const v = new THREE.Vector3();
+  for (const p of parts) {
+    if (p.mat === 'paint') continue;
+    const pos = p.geo.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      if (v.y > 0.035 || Math.abs(v.x) < 0.4) continue;
+      boxes[(v.x > 0 ? 1 : 0) + (v.z > zc ? 2 : 0)].expandByPoint(v);
+    }
+  }
+  const wheels: { c: THREE.Vector3; r: number; x0: number; x1: number; tris: Map<Part, number[]> }[] = [];
+  for (const b of boxes) {
+    if (b.isEmpty() || b.max.z - b.min.z > r * 1.6) return [];
+    wheels.push({ c: new THREE.Vector3((b.min.x + b.max.x) / 2, r, (b.min.z + b.max.z) / 2), r, x0: b.min.x - 0.04, x1: b.max.x + 0.04, tris: new Map() });
+  }
+  const inWheel = (w: (typeof wheels)[number], p: THREE.Vector3) =>
+    p.x >= w.x0 && p.x <= w.x1 && (p.y - w.c.y) ** 2 + (p.z - w.c.z) ** 2 <= (w.r * 1.01) ** 2;
+  const a = new THREE.Vector3(), b2 = new THREE.Vector3(), c2 = new THREE.Vector3();
+  for (const part of parts) {
+    if (part.mat === 'paint' || (part.mat as THREE.Material).name === 'car-glass') continue;
+    const pos = part.geo.getAttribute('position');
+    const idx = part.geo.index!.array;
+    const keep: number[] = [];
+    for (let i = 0; i < idx.length; i += 3) {
+      a.fromBufferAttribute(pos, idx[i]);
+      b2.fromBufferAttribute(pos, idx[i + 1]);
+      c2.fromBufferAttribute(pos, idx[i + 2]);
+      const w = wheels.find((w) => inWheel(w, a) && inWheel(w, b2) && inWheel(w, c2));
+      if (w) {
+        let t = w.tris.get(part);
+        if (!t) w.tris.set(part, (t = []));
+        t.push(idx[i], idx[i + 1], idx[i + 2]);
+      } else keep.push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    if (keep.length !== idx.length) part.geo.setIndex(keep);
+  }
+  return wheels.map((w) => {
+    const geos: THREE.BufferGeometry[] = [];
+    for (const [part, tris] of w.tris) {
+      const src = part.geo;
+      const g = new THREE.BufferGeometry();
+      const n = tris.length;
+      const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3);
+      const col = src.getAttribute('color');
+      const m = part.mat as THREE.MeshStandardMaterial;
+      const base = m.color ? m.color.clone() : new THREE.Color(0.5, 0.5, 0.5);
+      if (m.map) base.multiply(textureAverage(m.map));
+      for (let k = 0; k < n; k++) {
+        const i = tris[k];
+        P[k * 3] = src.getAttribute('position').getX(i) - w.c.x;
+        P[k * 3 + 1] = src.getAttribute('position').getY(i) - w.c.y;
+        P[k * 3 + 2] = src.getAttribute('position').getZ(i) - w.c.z;
+        N[k * 3] = src.getAttribute('normal').getX(i);
+        N[k * 3 + 1] = src.getAttribute('normal').getY(i);
+        N[k * 3 + 2] = src.getAttribute('normal').getZ(i);
+        if (col) {
+          C[k * 3] = col.getX(i);
+          C[k * 3 + 1] = col.getY(i);
+          C[k * 3 + 2] = col.getZ(i);
+        } else base.toArray(C, k * 3);
+      }
+      g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(C, 3));
+      geos.push(g);
+    }
+    const geo = mergeGeometries(geos, false) ?? new THREE.BufferGeometry();
+    geo.computeBoundingSphere();
+    return { geo, center: w.c, r: w.r };
+  });
+}
+const WHEEL_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.45, roughness: 0.45, side: THREE.DoubleSide, name: 'car-wheel' });
+
 /** average colour of a texture (for the single-material distant LOD) */
 const avgCache = new WeakMap<THREE.Texture, THREE.Color>();
 function textureAverage(t: THREE.Texture): THREE.Color {
@@ -337,7 +437,21 @@ export function fleetObject(p: Prepared, paint: THREE.Material, far = 26, farthe
     }
     return g;
   };
-  lod.addLevel(level(p.lod0, true), 0);
+  const near = level(p.lod0, true);
+  const wheels: THREE.Object3D[] = [];
+  for (const w of p.wheels) {
+    const m = new THREE.Mesh(w.geo, WHEEL_MAT);
+    m.position.copy(w.center);
+    m.castShadow = true;
+    m.userData.owned = false;
+    near.add(m);
+    wheels.push(m);
+  }
+  if (wheels.length) {
+    lod.userData.wheels = wheels;
+    lod.userData.wheelR = p.wheels[0].r;
+  }
+  lod.addLevel(near, 0);
   lod.addLevel(level(p.lod1, true), far);
   const m2 = new THREE.Mesh(lod2Geometry(p, paint), LOD2_MAT);
   m2.castShadow = true;

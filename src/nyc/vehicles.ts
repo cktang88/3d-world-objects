@@ -50,6 +50,10 @@ function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean
   for (const c of [...obj.children]) if (c.userData.standin) obj.remove(c);
   const lod = fleetObject(p, paint);
   obj.add(lod);
+  if (lod.userData.wheels) {
+    obj.userData.wheels = lod.userData.wheels;
+    obj.userData.wheelR = lod.userData.wheelR;
+  }
   if (cab && id !== 'taxi_cv') {
     let top = 0, zc = 0;
     for (const part of p.lod0) {
