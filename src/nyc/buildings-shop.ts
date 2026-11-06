@@ -431,8 +431,9 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
     // internally lit box sign, white face with coloured letters
     const p = B(G, litPanelMat(), signW, 0.72, 0.22, uc, sb0 + 0.12, 0.27);
     p.userData.tint = rng.pick(['#f4f1ea', '#fff8e0', color]);
-    const face = p.userData.tint === color ? '#ffffff' : color;
-    T.add(F.m, name, uc, sb0 + 0.48, 0.385, 0.48, signW - 0.4, face, font);
+    const lum = new THREE.Color(color).getHSL({ h: 0, s: 0, l: 0 }).l;
+    const face = p.userData.tint === color ? '#ffffff' : lum > 0.45 ? '#1a1a1a' : color;
+    T.add(F.m, name, uc, sb0 + 0.48, 0.395, 0.48, signW - 0.4, face, font);
   } else if (signKind === 'letters') {
     // individual letters on the fascia
     T.add(F.m, name, uc, sb0 + 0.48, 0.17, 0.56, signW, rng.pick(['#f4efe2', '#d9b25a', '#ffffff', '#e8d9b0']), font);
