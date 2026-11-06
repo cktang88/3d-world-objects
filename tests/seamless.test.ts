@@ -88,7 +88,7 @@ test('lazy containers: contents only after opening; closed ones beyond capacity 
   lazy.update(0.1, cam, lv);
   expect(made === 0, `${made} containers generated before anyone opened them`);
   for (const c of cs) { lazy.toggle(c); lazy.update(0.5, cam, lv); }
-  expect(made === 5 && cs.every((c) => c.contents), 'opening did not generate contents');
+  expect((made as number) === 5 && cs.every((c) => c.contents), 'opening did not generate contents');
   for (const c of cs) lazy.toggle(c); // close all (oldest first)
   for (let i = 0; i < 10; i++) lazy.update(0.5, cam, lv);
   const kept = cs.filter((c) => c.contents);

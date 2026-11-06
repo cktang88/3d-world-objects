@@ -2,7 +2,7 @@
  * Pedestrians (src/nyc/people.ts), simulated at a fixed dt with no renderer: they keep off
  * street furniture, ease up/down the kerb, are deterministic per seed, dress for the weather,
  * and the merged-mesh / far-crowd budgets hold. Sidewalk, crosswalk and WALK rules are in
- * streetlife.test.ts.
+ * crossing.test.ts (and vehicles in vehicles.test.ts).
  */
 import * as THREE from 'three';
 import { test, expect, none, fmt, between } from './qa';

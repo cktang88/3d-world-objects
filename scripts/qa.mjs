@@ -4,7 +4,9 @@
  * no WebGL, no textures). See .claude/skills/fast-3d-testing/SKILL.md.
  *
  *   npm run qa                    all test files
- *   npm run qa -- museum shop     files whose path matches any pattern
+ *   npm run qa -- museum shop     areas (AREAS below: nyc ground people vehicles shop interior
+ *                                 museum seamless districts vertical ...) or test-file patterns
+ *   npm run qa:changed            only the tests covering files changed vs origin/main (SRC_MAP)
  *   npm run qa -- -t "door"       only tests whose name matches (QA_TEST)
  *   QA_VERBOSE=1 npm run qa       show passing tests, KNOWN notes and the shim's suppressed warnings
  *
@@ -16,7 +18,7 @@
  * tests/shim.ts preloaded via --import.
  */
 import { build } from 'esbuild';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import { readdirSync, statSync, mkdirSync, rmSync } from 'fs';
 import { join, relative, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -26,18 +28,60 @@ const OUT = join(ROOT, '.qa-cache', `run-${process.pid}`);
 const argv = process.argv.slice(2);
 const patterns = [];
 let testFilter = '';
+let changed = false;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '-t') testFilter = argv[++i] ?? '';
+  else if (argv[i] === '--changed') changed = true;
   else patterns.push(argv[i]);
 }
 const t0 = performance.now();
 
+/** areas -> test files (tests/<name>.test.ts): `npm run qa -- people` runs tests/people.test.ts */
+const AREAS = {
+  nyc: ['nyc', 'ground'], ground: ['ground'], streets: ['nyc', 'ground'], buildings: ['nyc'],
+  districts: ['districts', 'districts-blocks', 'districts-open'],
+  people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
+  shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
+  museum: ['museum'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['seamless', 'museum'],
+};
+/** changed file -> areas (first match wins; '*' = every test file). Add a line when you add a test file. */
+const SRC_MAP = [
+  [/^tests\/(qa|shim|env|world)\.ts$|^scripts\/qa\.mjs$|^src\/(level|build|rng|detail)\.ts$/, ['*']],
+  [/^tests\/(.+)\.test\.ts$/, (m) => [m[1]]],
+  [/^src\/nyc\/people/, ['people']],
+  [/^src\/nyc\/ground/, ['ground']],
+  [/^src\/rooms\/vertical/, ['vertical']],
+  [/^src\/nyc\/vehicle/, ['vehicles']],
+  [/^src\/nyc\/district/, ['districts']],
+  [/^src\/nyc\/common\.ts$/, ['nyc', 'people', 'vehicles', 'districts']],
+  [/^src\/nyc\/buildings-shop\.ts$/, ['nyc', 'shop']],
+  [/^src\/(nyc\.ts|nyc\/)/, ['nyc']],
+  [/^src\/(shop\.ts|shopkit\/)/, ['shop']],
+  [/^src\/(interior\.ts|rooms\/)/, ['interior']],
+  [/^src\/(museum\.ts|museumData\.ts|museum\/|libraries\.ts)/, ['museum']],
+  [/^src\/(seamless|lazy)\.ts$/, ['seamless', 'lazy']],
+  [/^src\/realscale\.ts$/, ['realscale']],
+  [/^src\/(assets|remote|materials|textures|pbr)\.ts$/, ['nyc', 'interior', 'shop']],
+];
 const walk = (d) => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : [p]; });
-const files = walk(join(ROOT, 'tests')).filter((f) => f.endsWith('.test.ts')).filter((f) => !patterns.length || patterns.some((p) => relative(ROOT, f).includes(p)));
-if (!files.length) { console.log('qa: no test files match', patterns.join(' ')); process.exit(1); }
+const all = walk(join(ROOT, 'tests')).filter((f) => f.endsWith('.test.ts'));
+const nameOf = (f) => relative(join(ROOT, 'tests'), f).replace(/\.test\.ts$/, '');
+if (changed) {
+  // files changed against origin/main (committed or not), mapped to the tests that cover them
+  const sh = (a) => { try { return execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean); } catch { return []; } };
+  const base = sh(['merge-base', 'HEAD', 'origin/main'])[0] ?? 'origin/main';
+  const list = [...new Set([...sh(['diff', '--name-only', base]), ...sh(['ls-files', '--others', '--exclude-standard', 'src', 'tests'])])];
+  const areas = new Set();
+  for (const f of list) for (const [re, a] of SRC_MAP) { const m = re.exec(f); if (m) { for (const x of typeof a === 'function' ? a(m) : a) areas.add(x); break; } }
+  console.log(`qa --changed: ${list.length} changed file(s) -> ${areas.size ? [...areas].join(', ') : 'no tests cover them'}`);
+  if (!areas.size) process.exit(0);
+  if (!areas.has('*')) patterns.push(...areas);
+}
+const want = new Set(patterns.flatMap((p) => AREAS[p] ?? [p]));
+const files = all.filter((f) => !patterns.length || want.has(nameOf(f)) || patterns.some((p) => !AREAS[p] && relative(ROOT, f).includes(p)));
+if (!files.length) { console.log(`qa: no test files match ${patterns.join(' ')} (areas: ${Object.keys(AREAS).join(', ')}; files: ${all.map(nameOf).join(', ')})`); process.exit(1); }
 
-// esbuild resolves into a per-run dir inside node_modules (a symlink in worktrees) so that the
-// bundles' bare `three` imports resolve to the same node_modules
+// bundles go to .qa-cache/run-<pid> (gitignored); their bare `three` imports resolve to node_modules
 mkdirSync(OUT, { recursive: true });
 const common = {
   bundle: true, platform: 'node', format: 'esm', target: 'node22', sourcemap: 'inline', logLevel: 'error',
