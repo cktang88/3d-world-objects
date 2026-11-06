@@ -611,7 +611,7 @@ async function startMode(m: Mode) {
   document.body.dataset.mode = m;
   hud.help.innerHTML = m === 'museum'
     ? '<kbd>WASD</kbd> walk · walk through a doorway to go on · <kbd>E</kbd> inspect · <kbd>Q</kbd> previous room'
-    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>C</kbd> credits';
+    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>T</kbd> time of day · <kbd>C</kbd> credits';
   if (m === 'museum') currentDesc = { kind: 'atrium' };
   else {
     const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;

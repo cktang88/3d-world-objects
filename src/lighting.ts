@@ -63,7 +63,7 @@ export const PRESETS: Record<TimeOfDay, Preset> = {
     grade: { gain: '#fff1e0', lift: '#060812', sat: 1.08, contrast: 1.06, vignette: 0.28 },
   },
   dusk: {
-    label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: false, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
+    label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
     sky: 0.12, clampMul: 30, exposure: 1.3, fog: 0.002, fogTint: '#6f7fa8', night: 0.75, lit: 0.42, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
@@ -723,7 +723,8 @@ export class Lighting {
     u.near.value = this.camera.near;
     u.far.value = Math.min(this.camera.far, csm.maxFar);
     const fade = csm.fade;
-    this.scene.traverse((o) => {
+    // only what will be drawn this frame needs it (hidden things are wrapped when they show up)
+    this.scene.traverseVisible((o) => {
       const mats = (o as THREE.Mesh).material;
       if (!mats) return;
       for (const m of Array.isArray(mats) ? mats : [mats]) {
