@@ -152,3 +152,10 @@ test('nobody spawns within 6 m of the player at load', async () => {
   const near = (P.peds as unknown as PedView[]).filter((pd) => !pd.lead && Math.hypot(pd.pos.x - player.x, pd.pos.z - player.z) < 5.5);
   none(near.map((pd) => `(${fmt(pd.pos.x)}, ${fmt(pd.pos.z)})`), 'people spawned next to the player');
 });
+
+test("the first view is populated: people on the player's sidewalk 8-82 m along it", async () => {
+  const P = await run(17, 3, []);
+  const all = P.peds as unknown as PedView[];
+  const own = all.filter((pd) => Math.abs(pd.pos.x - (BX - 2)) < 3 && Math.abs(pd.pos.z - player.z) > 8 && Math.abs(pd.pos.z - player.z) < 82);
+  expect(own.length >= all.length * 0.3, `only ${own.length} people on the spawn sidewalk 8-82 m away (of ${all.length})`);
+});

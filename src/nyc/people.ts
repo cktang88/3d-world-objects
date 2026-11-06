@@ -1675,7 +1675,10 @@ export class Pedestrians {
       g.setDrawRange(0, 0);
       this.probe = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
       this.probe.frustumCulled = false;
-      this.probe.onBeforeRender = (_r, _s, c) => (this.probeCam = c);
+      // only the player's view: other passes (the weather's top-down occlusion camera...) render us too
+      this.probe.onBeforeRender = (_r, _s, c) => {
+        if ((c as THREE.PerspectiveCamera).isPerspectiveCamera) this.probeCam = c;
+      };
       this.group.add(this.probe);
     }
     const c = this.probeCam;
