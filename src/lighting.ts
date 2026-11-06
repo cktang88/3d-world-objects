@@ -7,6 +7,7 @@ import type { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBl
 import type { Env } from './level';
 import { skyTex } from './textures';
 import { hashStr } from './rng';
+import { sidewalkMat } from './nyc/common';
 
 /**
  * Global lighting: image-based lighting from CC0 Poly Haven HDRIs, cascaded sun shadows,
@@ -758,6 +759,8 @@ export class Lighting {
   // ------------------------------------------------------------ street lights and glowing things
 
   private scanMarkers() {
+    // NYC sidewalks get a lighter version of the wet-road sheen
+    if (sidewalkMat && !sidewalkMat.userData.wet) wetSurface(sidewalkMat, 0.55);
     const found: THREE.Object3D[] = [];
     this.scene.traverse((o) => {
       if (o.userData.streetLight) found.push(o);
