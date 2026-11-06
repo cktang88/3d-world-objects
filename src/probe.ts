@@ -12,13 +12,15 @@ import type { Level } from './level';
 const box = new THREE.Box3();
 const near = new THREE.Box3();
 let last = -1;
-const tally = { checks: 0, hits: 0, log: [] as string[] };
+const tally = { checks: 0, hits: 0, people: 0, vehicles: 0, log: [] as string[] };
 
 export function probePedCar(level: Level, time: number) {
   if (time - last < 1) return;
   last = time;
-  const peds = (level as unknown as { peds?: { peds?: { pos: THREE.Vector3; state: string; axis: string }[] } }).peds?.peds;
-  if (!peds?.length) return;
+  (window as unknown as { __probe: { pedcar: typeof tally } }).__probe = { pedcar: tally };
+  const peds = (level as unknown as { peds?: { peds?: { pos: THREE.Vector3; state: string; axis: string }[] } }).peds?.peds ?? [];
+  tally.people = peds.length;
+  if (!peds.length) return;
   const vehicles: { name: string; box: THREE.Box3 }[] = [];
   level.group.traverse((o) => {
     const u = o.userData;
@@ -29,6 +31,7 @@ export function probePedCar(level: Level, time: number) {
     vehicles.push({ name: String(u.model ?? u.kind ?? o.name ?? 'vehicle'), box: box.clone() });
   });
   tally.checks++;
+  tally.vehicles = vehicles.length;
   for (const pd of peds) {
     for (const v of vehicles) {
       near.copy(v.box).expandByScalar(0.3);
@@ -41,5 +44,4 @@ export function probePedCar(level: Level, time: number) {
       console.warn(line);
     }
   }
-  (window as unknown as { __probe: { pedcar: typeof tally } }).__probe = { pedcar: tally };
 }
