@@ -74,6 +74,9 @@ export async function cycles(name: string, n: number, cycle: (i: number) => Prom
   for (let i = 0; i < n; i++) {
     const refs = await cycle(i);
     await collect();
+    // a busy machine: timers / microtasks of the last frames can hold an evicted room for a few more
+    // ms (a heap snapshot then finds no path to it). Collect again a few times before calling it alive.
+    for (let k = 0; k < 4 && refs.some((r) => r.deref()); k++) { await settle(50); await collect(); }
     const alive = refs.filter((r) => r.deref()).length;
     // an async load still finishing can hold an evicted room for a moment; one cycle later it must be gone
     const stale = prev.filter((r) => r.deref()).length;
