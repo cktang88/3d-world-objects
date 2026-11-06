@@ -77,3 +77,23 @@ hall_of_mammals, decor_shop, comfy_cafe, gear_store.
   wet roughness + env reflections + real lamp speculars gets most of the look.
 - **Light probes / lightmaps**: interiors are procedural and change per visit, so baking is not
   practical; indoor HDRIs give believable ambient + reflections, GTAO adds contact darkening.
+
+## What was built (src/lighting.ts) and how it compares
+
+- Presets live in `PRESETS` (day / golden / dusk / night): HDRI, sun azimuth (235° day, so shadows
+  cut diagonally across streets and avenues), sun colour/intensity, sky radiance after
+  normalisation, HDRI saturation (`envSat`), exposure, a warm **bounce** hemisphere fill (stands in
+  for light reflected off sunlit facades; without it shaded sidewalks read sky-blue instead of the
+  grey of the photos), fog density/tint, night factor, lit-window share, wetness, bloom, grade.
+- `T` cycles time of day (Shift+T backwards), `?tod=day|golden|dusk|night` sets it, `?tm=` picks
+  the tone mapper, `?notex=1`/`?nohdri=1` skip HDRI downloads.
+- Hooks other modules use: `getNight()`, `getTimeOfDay()`, `onTimeChange()`,
+  `litWindows(material)` (nyc.ts window glass), `wetSurface(material, k)` (nyc.ts road;
+  sidewalks are wrapped by lighting.ts itself), `streetLightMarker()` (streetprops.ts lamp posts),
+  `setWeather({ sunMul, skyMul, fogMul, fogColor, fogMix, wet, cloud })` for src/weather.ts.
+- Cascades re-render staggered (near every frame, middle every 2nd, far every 3rd).
+- Compared with the references: golden hour matches the low-sun / long-shadow / warm-sky look
+  (street level in shade, sun glow down the grid); dusk gives the blue-hour sky with pink cloud and
+  warm window grids; night gives dark blue-grey sky, ~35 % lit warm windows, glowing shop fronts,
+  lamp pools and streaked wet asphalt. Still missing vs the wet-night photos: true mirror
+  reflections of storefront colours in puddles (needs SSR or a planar reflector).
