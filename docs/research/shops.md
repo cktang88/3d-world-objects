@@ -91,3 +91,29 @@ Lab: `/?lab=shop-interior&type=<type>&seed=<n>&budget=<tris>&containers=closed`.
 | ![hardware](img/shop-hardware.jpg) hardware: pegboard, tall shelving + ladder, pressed tin (cf. hw2) | |
 
 Screenshots are software-rendered at `--quality low` with a reduced product budget.
+
+## Round 2: build slices, containers, fixes
+
+- **Staged build** (`Level.staging`, `shop.step(ms)`, `shop.ready`): shell in parts, one fixture
+  per slice, a sliceable indexed bake (`shopkit/bake.ts`). Shop canvases are CPU-backed
+  (`willReadFrequently`): reading GPU canvases back had made the first shell take seconds. A
+  deli builds in ~120 ms total in the lab, slices 1–20 ms. Details in `docs/research/seamless.md`.
+- **Containers** (lazy.ts `registerContainer`): glass coolers, showcases, curios and deli cases
+  stock when near and looked at; drawers (hardware parts cabinet, antique dresser), an armoire and
+  a **stockroom** behind an EMPLOYEES ONLY door (bodega, pharmacy, hardware, toys) generate only
+  when opened with E. The stockroom (walls, a wire rack of cases, carton stacks, a mop bucket) is
+  built in slices on first opening; its doorway collider lifts when the door is open.
+- **Fixes:** pegboard hooks under every hung item; all-white sand3d products take the material
+  their title suggests (wood, steel, brass, leather, ceramic, fabric, rubber, stone) or a plastic
+  colour; antiques stock books/jars/bottles; kitchen supply stockpots and saucepans; model shops
+  show shrunken vehicles and aircraft as scale models; wood floors matte; QA fixture overlaps and
+  the deli entrance fixed (`tests/shop.test.ts` strict, `tests/shopseeds.test.ts` over 8 seeds).
+- **Perf:** a fixed rig of 4 point lights per shop (unused dark) so shaders don't recompile between
+  shops; no shadow-casting lights indoors; products swapped to their originals show the original
+  within ~9 m and the sand3d version beyond.
+
+| | |
+|---|---|
+| ![cooler](img/shop-cooler.jpg) cooler close-up (cf. cstore2) | ![stockroom](img/shop-stockroom.jpg) stockroom, opened |
+| ![armoire](img/shop-armoire.jpg) antique armoire, opened | ![pegboard](img/shop-pegboard.jpg) pegboard with hooks |
+| ![sports](img/shop-sports.jpg) sports: bat bins, slatwall | ![machines](img/shop-machines.jpg) industrial supply: pallet racking |
