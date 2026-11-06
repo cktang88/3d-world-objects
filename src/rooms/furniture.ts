@@ -25,6 +25,22 @@ export interface Piece {
   lamps?: THREE.Vector3[];
   /** closed compartments (centre of base, local; front toward +z) */
   boxes?: { kind: 'cabinet' | 'upper' | 'fridge' | 'dresser' | 'closet'; x: number; y: number; z: number; w: number; h: number; d: number; doors?: 'left' | 'right' | 'pair' }[];
+  /** moving fronts drawn separately so they can open: a drawer slides out, a door swings on its hinge */
+  parts?: Part[];
+}
+export interface Part {
+  move: 'drawer' | 'door';
+  /** what is behind it (selects the contents) */
+  kind: 'dresser' | 'nightstand' | 'cabinet' | 'upper';
+  /** front face centre-bottom (local) and size of the compartment behind it */
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+  h: number;
+  d: number;
+  hinge?: 'left' | 'right';
+  mat: THREE.Material;
 }
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -187,24 +203,25 @@ export function bed(k: Kit, r: Rng, w: number, wood: THREE.Material, linen: THRE
 export function nightstand(k: Kit, wood: THREE.Material): Piece {
   const w = 0.5, d = 0.4, h = 0.58;
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(wood, 0.035, 0.12, 0.035, sx * (w / 2 - 0.03), 0, sz * (d / 2 - 0.03));
-  k.box(wood, w, h - 0.12, d, 0, 0.12, 0);
-  k.box(M.black(), w - 0.04, 0.005, 0.004, 0, 0.42, d / 2);
-  k.sphere(M.brass(), 0.015, 0, 0.49, d / 2 + 0.012);
-  return { w, d, h, tops: [{ x: 0, z: 0, y: h, w: w - 0.06, d: d - 0.06 }] };
+  // carcass with an open shelf below and a drawer (separate, it slides out) on top
+  k.box(wood, w, 0.02, d, 0, 0.12, 0);
+  k.box(wood, w, 0.1, d, 0, 0.40, -0.01);
+  k.box(wood, w, h - 0.54, d, 0, 0.54, 0);
+  for (const sx of [-1, 1]) k.box(wood, 0.02, h - 0.12, d, sx * (w / 2 - 0.01), 0.12, 0);
+  k.box(wood, w, h - 0.12, 0.015, 0, 0.12, -d / 2 + 0.008);
+  return { w, d, h, tops: [{ x: 0, z: 0, y: h, w: w - 0.06, d: d - 0.06 }], parts: [{ move: 'drawer', kind: 'nightstand', x: 0, y: 0.415, z: d / 2 - 0.02, w: w - 0.05, h: 0.12, d: d - 0.06, mat: wood }] };
 }
 
 export function dresser(k: Kit, r: Rng, wood: THREE.Material): Piece {
   const w = r.range(1.0, 1.4), d = 0.5, h = 0.86;
   k.box(wood, w, 0.08, d - 0.04, 0, 0, -0.02);
-  k.box(wood, w, h - 0.08, d, 0, 0.08, 0);
+  k.box(wood, w, h - 0.08, d - 0.02, 0, 0.08, -0.01);
   k.box(wood, w + 0.03, 0.03, d + 0.02, 0, h - 0.03, 0);
   const rows = 3;
-  for (let i = 0; i < rows; i++) {
-    const y = 0.1 + ((h - 0.14) * (i + 0.5)) / rows;
-    k.box(M.black(), w - 0.04, 0.005, 0.004, 0, 0.1 + ((h - 0.14) * i) / rows, d / 2);
-    for (const sx of [-1, 1]) k.box(M.brass(), 0.1, 0.014, 0.018, sx * w * 0.25, y, d / 2 + 0.008);
-  }
-  return { w, d, h, tops: [{ x: 0, z: 0, y: h, w: w - 0.08, d: d - 0.1 }] };
+  const parts: Part[] = [];
+  const rh = (h - 0.14) / rows;
+  for (let i = 0; i < rows; i++) parts.push({ move: 'drawer', kind: 'dresser', x: 0, y: 0.1 + rh * i + 0.003, z: d / 2 + 0.002, w: w - 0.04, h: rh - 0.006, d: d - 0.06, mat: wood });
+  return { w, d, h, tops: [{ x: 0, z: 0, y: h, w: w - 0.08, d: d - 0.1 }], parts };
 }
 
 export function bookcase(k: Kit, r: Rng, w: number, h: number, wood: THREE.Material, seed: number): Piece {
@@ -459,7 +476,12 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
   const cx = (x0 + x1) / 2;
   // toe kick and carcass
   k.box(M.matte('#2a2724'), run, 0.1, d - 0.08, cx, 0, -0.04);
-  k.box(o.cab, run, ch - 0.1 - 0.035, d - 0.02, cx, 0.1, -0.01);
+  const inside = M.matte('#ece8de');
+  // drawer row (solid) on top; below it a hollow carcass: back, bottom, partitions (doors are separate)
+  k.box(o.cab, run, 0.2, d - 0.02, cx, ch - 0.235, -0.01);
+  k.box(inside, run, 0.02, d - 0.04, cx, 0.1, -0.02);
+  k.box(inside, run, ch - 0.335, 0.015, cx, 0.12, -d / 2 + 0.008);
+  const parts: Part[] = [];
   // counter
   k.box(o.counter, run + 0.02, 0.035, d + 0.03, cx, ch - 0.035, 0.015);
   // range and sink positions
@@ -471,18 +493,19 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
   const hasSink = run > 2.2 || !hasRange;
   // base cabinets either side of the range
   const baseSegs: [number, number][] = hasRange ? [[x0, rx - rw / 2], [rx + rw / 2, x1]] : [[x0, x1]];
-  for (const [a, b] of baseSegs) if (b - a > 0.3) boxes.push({ kind: 'cabinet', x: (a + b) / 2, y: 0.1, z: -0.01, w: b - a, h: ch - 0.135, d: d - 0.02 });
-  // doors: shaker panels every ~0.5 m, a drawer row on top
-  const n = Math.max(1, Math.round(run / 0.5));
-  const dw = run / n;
-  for (let i = 0; i < n; i++) {
-    const x = x0 + dw * (i + 0.5);
-    if (hasRange && Math.abs(x - rx) < rw / 2) continue;
-    // drawer front, door front with a recessed panel
-    k.box(o.cab, dw - 0.006, 0.16, 0.02, x, ch - 0.035 - 0.18, d / 2);
-    shaker(k, o.cab, dw - 0.006, 0.56, x, 0.12, d / 2);
-    k.box(M.brass(), 0.12, 0.012, 0.02, x, ch - 0.035 - 0.1, d / 2 + 0.02);
-    k.box(M.brass(), 0.012, 0.12, 0.02, x + (i % 2 ? -1 : 1) * (dw / 2 - 0.05), 0.55, d / 2 + 0.02);
+  // doors: shaker doors every ~0.5 m in each stretch beside the range, a drawer row on top
+  let di = 0;
+  for (const [a, b] of baseSegs) {
+    if (b - a < 0.25) continue;
+    const n = Math.max(1, Math.round((b - a) / 0.5));
+    const dw = (b - a) / n;
+    for (let i = 0; i <= n; i++) k.box(inside, 0.018, ch - 0.335, d - 0.04, a + dw * i + (i === 0 ? 0.009 : i === n ? -0.009 : 0), 0.12, -0.02);
+    for (let i = 0; i < n; i++, di++) {
+      const x = a + dw * (i + 0.5);
+      k.box(o.cab, dw - 0.006, 0.16, 0.02, x, ch - 0.035 - 0.18, d / 2);
+      k.box(M.brass(), 0.12, 0.012, 0.02, x, ch - 0.035 - 0.1, d / 2 + 0.02);
+      parts.push({ move: 'door', kind: 'cabinet', x, y: 0.12, z: d / 2 - 0.01, w: dw - 0.006, h: 0.56, d: d - 0.06, hinge: di % 2 ? 'right' : 'left', mat: o.cab });
+    }
   }
   if (hasRange) {
     k.box(steel, rw, ch - 0.02, d, rx, 0, 0);
@@ -524,13 +547,15 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
     } else segs.push([x0, x1]);
     for (const [a, b] of segs) {
       const w = b - a, m = (a + b) / 2;
-      k.box(o.cab, w, uh, ud, m, uy, -d / 2 + ud / 2);
-      boxes.push({ kind: 'upper', x: m, y: uy, z: -d / 2 + ud / 2, w, h: uh, d: ud });
+      // hollow wall cabinet: back, top, bottom, partitions; doors are separate
+      k.box(inside, w, uh, 0.015, m, uy, -d / 2 + 0.008);
+      k.box(o.cab, w, 0.02, ud, m, uy, -d / 2 + ud / 2);
+      k.box(o.cab, w, 0.02, ud, m, uy + uh - 0.02, -d / 2 + ud / 2);
       const nn = Math.max(1, Math.round(w / 0.45));
+      for (let i = 0; i <= nn; i++) k.box(o.cab, 0.018, uh, ud, a + (w * i) / nn + (i === 0 ? 0.009 : i === nn ? -0.009 : 0), uy, -d / 2 + ud / 2);
       for (let i = 0; i < nn; i++) {
         const x = a + (w * (i + 0.5)) / nn;
-        shaker(k, o.cab, w / nn - 0.006, uh - 0.02, x, uy + 0.01, -d / 2 + ud + 0.01);
-        k.box(M.brass(), 0.012, 0.1, 0.02, x + (i % 2 ? -1 : 1) * (w / nn / 2 - 0.04), uy + 0.04, -d / 2 + ud + 0.03);
+        parts.push({ move: 'door', kind: 'upper', x, y: uy + 0.01, z: -d / 2 + ud, w: w / nn - 0.006, h: uh - 0.02, d: ud - 0.03, hinge: i % 2 ? 'right' : 'left', mat: o.cab });
       }
       // under-cabinet light strip
       k.box(M.diffuser(), w - 0.04, 0.006, 0.03, m, uy - 0.006, -d / 2 + ud - 0.06);
@@ -545,11 +570,11 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
     if (c0 - a > 0.3) tops.push({ x: (a + c0) / 2, z: -0.05, y: ch, w: c0 - a - 0.04, d: d - 0.2 });
     a = Math.max(a, c1 + 0.02);
   }
-  return { w: L, d, h: ch, tops, boxes };
+  return { w: L, d, h: ch, tops, boxes, parts };
 }
 
 /** a shaker door: flat recessed panel inside a proud frame of rails and stiles, base-centre at x,y on face z */
-function shaker(k: Kit, m: THREE.Material, w: number, h: number, x: number, y: number, z: number) {
+export function shaker(k: Kit, m: THREE.Material, w: number, h: number, x: number, y: number, z: number) {
   const f = 0.065;
   k.box(m, w, h, 0.012, x, y, z);
   k.box(m, w, f, 0.022, x, y, z + 0.004);

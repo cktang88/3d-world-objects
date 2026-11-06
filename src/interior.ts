@@ -83,6 +83,7 @@ export interface Container {
   room: Room;
   generate: () => THREE.Object3D;
   door?: THREE.Object3D;
+  drawer?: THREE.Object3D;
   open?: (t: number) => void;
 }
 interface Frame {
@@ -1126,6 +1127,57 @@ export class InteriorLevel implements Level {
     this.containers.push(entry);
   }
 
+  /**
+   * Drawers and cabinet doors as separate meshes registered as containers (lazy.ts): a drawer slides
+   * out with its contents, a door swings on its hinge; contents are generated only when opened.
+   */
+  private movingParts(f: Frame, parts: F.Part[] | undefined) {
+    if (!parts) return;
+    const c = Math.cos(f.rot), s = Math.sin(f.rot);
+    for (const pt of parts) {
+      const obj = new THREE.Group();
+      obj.position.set(f.x + pt.x * c + pt.z * s, pt.y, f.z - pt.x * s + pt.z * c);
+      obj.rotation.y = f.rot;
+      obj.name = `container:${pt.kind}`;
+      this.cur.group.add(obj);
+      const seed = hashN(this.desc.seed, Math.round(obj.position.x * 100), Math.round(obj.position.z * 100), Math.round(pt.y * 100));
+      const k = new Kit();
+      const mover = new THREE.Group();
+      let open: ((t: number) => void) | undefined;
+      if (pt.move === 'drawer') {
+        // front with a pull, and the drawer box behind it
+        k.box(pt.mat, pt.w, pt.h, 0.02, 0, 0, -0.01);
+        if (pt.w > 0.6) for (const sx of [-1, 1]) k.box(M.brass(), 0.1, 0.014, 0.018, sx * pt.w * 0.25, pt.h / 2, 0.008);
+        else k.sphere(M.brass(), 0.016, 0, pt.h / 2, 0.012);
+        const inner = M.matte('#d9cdb8');
+        k.box(inner, pt.w - 0.04, 0.01, pt.d - 0.04, 0, 0.02, -0.02 - (pt.d - 0.04) / 2);
+        for (const sx of [-1, 1]) k.box(inner, 0.012, pt.h - 0.04, pt.d - 0.04, sx * (pt.w / 2 - 0.026), 0.02, -0.02 - (pt.d - 0.04) / 2);
+        k.box(inner, pt.w - 0.04, pt.h - 0.04, 0.012, 0, 0.02, -pt.d + 0.026);
+      } else {
+        // a shaker door hinged at one edge; local +x runs from the hinge across the door
+        const sign = pt.hinge === 'right' ? -1 : 1;
+        mover.position.set((-sign * pt.w) / 2, 0, 0);
+        k.at((sign * pt.w) / 2, 0, 0, 0, () => F.shaker(k, pt.mat, pt.w, pt.h, 0, 0, 0));
+        k.box(M.brass(), 0.012, 0.11, 0.02, sign * (pt.w - 0.045), pt.kind === 'upper' ? 0.05 : pt.h - 0.16, 0.03);
+        open = (t: number) => (mover.rotation.y = -sign * 1.85 * t);
+      }
+      k.finish(mover, true);
+      obj.add(mover);
+      const gen = () => {
+        const g = new THREE.Group();
+        const inner =
+          pt.kind === 'cabinet' ? cabinetContents(seed, pt.w, pt.h, pt.d) : pt.kind === 'upper' ? upperContents(seed, pt.w, pt.h, pt.d) : drawerContents(seed, pt.w - 0.06, pt.h, pt.d - 0.02, 1, 0.03);
+        inner.position.z = -pt.d / 2 - 0.01;
+        g.add(inner);
+        return g;
+      };
+      const entry: Container = { kind: pt.kind, obj, size: new THREE.Vector3(pt.w, pt.h, pt.d), room: this.cur.room, generate: gen };
+      if (pt.move === 'drawer') entry.drawer = mover;
+      else entry.open = open;
+      this.containers.push(entry);
+    }
+  }
+
   /** a small library object (no stand-in) */
   private libDecor(id: string, x: number, y: number, z: number, rot: number) {
     const holder = new THREE.Group();
@@ -1350,7 +1402,8 @@ export class InteriorLevel implements Level {
       const nsId = r.chance(0.5) ? pickLib('nightstand', r) : null;
       const p = this.libPiece(f, nsId, (kk) => F.nightstand(kk, this.pal.wood)) as F.Piece;
       if (nsId) p.h = LIB[nsId][1];
-      this.container('nightstand', f, { x: 0, y: 0.12, z: 0, w: 0.44, h: p.h - 0.16, d: 0.34 });
+      if (nsId) this.container('nightstand', f, { x: 0, y: 0.12, z: 0, w: 0.44, h: p.h - 0.16, d: 0.34 });
+      else this.movingParts(f, p.parts);
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -0.08, p.h, -0.04);
         if (r.chance(0.6)) F.bookStack(k, r, 0.12, p.h, 0.05);
@@ -1377,7 +1430,8 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, drId, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const dtop = drId ? { x: 0, z: 0, y: ds[1], w: ds[0] - 0.1, d: ds[2] - 0.12 } : p.tops[0];
-      this.container('dresser', f, { x: 0, y: 0.08, z: 0, w: ds[0] - 0.08, h: dtop.y - 0.12, d: ds[2] - 0.08 });
+      if (drId) this.container('dresser', f, { x: 0, y: 0.08, z: 0, w: ds[0] - 0.08, h: dtop.y - 0.12, d: ds[2] - 0.08 });
+      else this.movingParts(f, p.parts);
       this.decorateTop(r, f, { ...dtop, x: -dtop.w / 4, w: dtop.w / 2 }, ['lamp', 'tableware', 'toy', 'plant', 'electronics'], [1, 1], 0.45);
       this.libTop(r, f, { ...dtop, x: dtop.w / 4, w: dtop.w / 2 }, 'table', 2, 0.45);
       if (r.chance(0.6)) {
@@ -1439,6 +1493,7 @@ export class InteriorLevel implements Level {
       }
       for (const tp of p.tops) if (r.chance(0.5)) this.kit.at(f.x, 0, f.z, f.rot, () => F.bowl(k, r, tp.x + tp.w * 0.3, tp.y, tp.z));
       for (const b of p.boxes ?? []) this.container(b.kind as Container['kind'], f, b);
+      this.movingParts(f, p.parts);
       used.push(s.sd);
       runFrames.push(f);
     }
@@ -1844,6 +1899,8 @@ export class InteriorLevel implements Level {
       if (!f) continue;
       const p = this.libPiece(f, id, (kk) => F.dresser(kk, r, this.pal.wood)) as F.Piece;
       const top = id ? { x: 0, z: 0, y: s[1], w: s[0] - 0.12, d: s[2] - 0.12 } : p.tops[0];
+      if (id) this.container('dresser', f, { x: 0, y: 0.08, z: 0, w: s[0] - 0.08, h: top.y - 0.12, d: s[2] - 0.08 });
+      else this.movingParts(f, p.parts);
       this.kit.at(f.x, 0, f.z, f.rot, () => {
         F.tableLamp(k, r, -top.w / 2 + 0.18, top.y, 0);
         F.bookStack(k, r, 0.05, top.y, 0.02);
