@@ -175,7 +175,10 @@ export function lodChain(m: MeshArrays, ratios: number[], o: Omit<SimplifyOption
   for (const r of ratios) {
     if (r >= 1) continue;
     const prev = levels[levels.length - 1];
-    const res = simplifyMesh({ ...m, index: prev.index }, { ...o, targetTris: full * r, error: o.maxError ?? 0.25, absolute: false });
+    let res = simplifyMesh({ ...m, index: prev.index }, { ...o, targetTris: full * r, error: o.maxError ?? 0.25, absolute: false });
+    // stuck on normal seams (faceted export): allow collapses across them, uv seams stay protected
+    if (res.index.length / 3 > prev.tris * (o.minGain ?? 0.7) && !o.permissive)
+      res = simplifyMesh({ ...m, index: prev.index }, { ...o, permissive: true, targetTris: full * r, error: o.maxError ?? 0.25, absolute: false });
     const tris = res.index.length / 3;
     if (tris > prev.tris * (o.minGain ?? 0.7) || tris < 4) continue;
     acc += res.error;

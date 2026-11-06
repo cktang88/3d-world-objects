@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { addLods, lodTris } from './meshlod'; // mesh-simplification: screen-space LOD chains for heavy originals
 
 /**
  * Original, textured Objaverse models. Every sand3d-objaverse object was rebuilt from one;
@@ -133,11 +134,9 @@ async function fetchOriginal(id: string, og: number, prio: number, texMax: numbe
         }
       }
     });
-    let tris = 0;
-    scene.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
-    });
+    // mesh-simplification: heavy originals (often 0.3-1.5M tris) get 25 % / 6 % levels switched by screen-space error
+    await addLods(scene).catch(() => 0);
+    const tris = lodTris(scene);
     return { scene, size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()), minY: box.min.y, users: 0, bytes: buf.byteLength, tris };
   } catch {
     return null;
@@ -255,11 +254,7 @@ export function updateDetail(player: THREE.Vector3, radius: number) {
         if (g) releaseOriginal(g);
         return;
       }
-      let tris = 0;
-      g.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
-      });
+      const tris = lodTris(g); // finest level only (mesh-simplification)
       if (shownTris + tris > MAX_TRIS_TOTAL) {
         releaseOriginal(g);
         t.state = 'none'; // over budget: keep the sand3d version rather than retrying every frame

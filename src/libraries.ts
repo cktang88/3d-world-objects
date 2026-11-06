@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gltf, disposeDeep } from './detail';
+import { addLods } from './meshlod'; // mesh-simplification: LOD chains for heavy scans
 
 /**
  * Third-party 3D model libraries: catalogs in public/libraries/ (built by
@@ -310,7 +311,9 @@ export async function loadLibraryModel(e: LibraryEntry, opts: LoadOptions = {}):
   const key = cacheKey(e, opts);
   let p = modelCache.get(key);
   if (!p) {
-    p = fetchModel(e, opts).then((scene) => {
+    p = fetchModel(e, opts).then(async (scene) => {
+      // mesh-simplification: full-quality scans (up to ~1M tris) get 25 % / 6 % screen-space-error levels
+      if (opts.quality !== 'low') await addLods(scene).catch(() => 0);
       scene.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(scene);
       const shadows = opts.shadows !== false;

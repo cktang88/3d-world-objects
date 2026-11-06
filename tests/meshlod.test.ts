@@ -11,6 +11,8 @@ import { MeshoptDecoder } from 'meshoptimizer';
 import { test, expect, between, fmt } from './qa';
 import { simplifierReady, lodChain, viewError, surfaceDistance, switchDistance, simplifyMesh, uvSeamLock } from '../src/meshlod-core';
 import { FLEET } from '../src/nyc/vehicleFleet';
+import * as THREE from 'three';
+import { addLods, lodTris, ScreenLOD } from '../src/meshlod';
 
 function bumpy(n = 120) {
   const P: number[] = [], UV: number[] = [], I: number[] = [];
@@ -104,4 +106,47 @@ test('vehicle LODs: near <=16k tris (accord19 <=32k), mid/far ratios, shape kept
       if (p.textured) expect(p.sems.includes('TEXCOORD_0'), `${id} textured near primitive lost its uvs`);
     }
   }
+});
+
+test('runtime LODs (originals/scans): heavy mesh -> ScreenLOD 100/25/6 %, shared vertex buffers, switch by screen error, clone keeps it', async () => {
+  const m = bumpy(160); // 51k tris, uvs
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(m.position, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(m.uv, 2));
+  g.setIndex(new THREE.BufferAttribute(m.index, 1));
+  g.computeVertexNormals();
+  const root = new THREE.Group();
+  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial());
+  mesh.position.set(1, 2, 3);
+  root.add(mesh);
+  const light = new THREE.Mesh(new THREE.BoxGeometry(), mesh.material);
+  root.add(light);
+  const n = await addLods(root, { minTris: 40_000 });
+  expect(n === 1, `one heavy mesh gets LODs (${n})`);
+  const lod = root.children.find((c) => c instanceof ScreenLOD) as ScreenLOD;
+  expect(!!lod && lod.levels.length === 3, `ScreenLOD with 3 levels (${lod?.levels.length})`);
+  expect(lod.position.equals(new THREE.Vector3(1, 2, 3)), 'LOD takes the mesh transform');
+  const full = m.index.length / 3;
+  const tris = lod.levels.map((l) => ((l.object as THREE.Mesh).geometry.index!.count / 3) / full);
+  between(tris[1], 0.2, 0.3, 'level 1 ratio');
+  between(tris[2], 0.04, 0.08, 'level 2 ratio');
+  expect((lod.levels[1].object as THREE.Mesh).geometry.getAttribute('position') === g.getAttribute('position'), 'levels share the vertex buffers');
+  expect(lodTris(root) === full + 12, `budget counts the finest level only (${lodTris(root)})`);
+  // a 2 m object, 1080 px, 60 deg: near shows the original, far the coarsest
+  const cam = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 1000);
+  root.updateMatrixWorld(true);
+  const at = (d: number) => {
+    cam.position.set(1, 2, 3 + d);
+    cam.updateMatrixWorld();
+    lod.update(cam);
+    return lod.getCurrentLevel();
+  };
+  expect(at(1.0) === 0, `level 0 at the surface (errors ${lod.levels.map((l) => fmt(l.distance))})`);
+  expect(at(400) === 2, `coarsest level far away (got ${at(400)})`);
+  const mid = [5, 10, 20, 40, 80, 160].map(at);
+  expect(mid.every((v, i) => i === 0 || v >= mid[i - 1]), `levels only coarsen with distance: ${mid}`);
+  expect(lod.levels.filter((l) => l.object.visible).length === 1, 'exactly one level visible');
+  const copy = root.clone(true);
+  const lc = copy.children.find((c) => c instanceof ScreenLOD) as ScreenLOD;
+  expect(!!lc && lc.levels.length === 3 && lc.levels[2].distance === lod.levels[2].distance, 'clone(true) keeps the chain and its errors');
 });
