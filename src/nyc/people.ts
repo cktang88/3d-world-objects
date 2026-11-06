@@ -53,6 +53,8 @@ interface Outfit {
   hair: string;
   /** knee-length coat skirt (open coats only): extra length below the knee, or -1 */
   coatLen: number;
+  /** body type: 0 slim, 1 average, 2 heavier */
+  build: number;
 }
 
 /** 'cold' (late autumn to early spring: puffers, long coats, beanies) or 'mild' (tees, light
@@ -116,6 +118,7 @@ function pickOutfit(r: Rng, gender: Gender): Outfit {
     sole: light || r.chance(0.4) ? '#ecebe6' : '#1a1a1a',
     skin: r.pick(SKIN_TINT),
     hair: r.pick(HAIR),
+    build: r.pick([0, 0, 0, 1, 1, 1, 1, 2, 2, 2]),
     coatLen: topStyle === 3 && !mild && r.chance(0.65) ? r.pick([0.0, 0.08, 0.15]) : -1,
   };
 }
@@ -126,7 +129,10 @@ uniform mat4 uGeo, uGeoInv;
 uniform float uGeoScale;
 uniform vec4 uSlimA; // arm thickness factor, arm axis y, arm axis z, shoulder |x|
 uniform vec4 uSlimB; // leg thickness factor, leg axis |x|, shoulder pull-in (m), leg axis z
-uniform vec4 uSlimC; // torso depth factor
+uniform vec4 uSlimC; // (unused), neck y
+uniform vec4 uShape;  // arm radius at the shoulder, thigh radius, hip half-width, smoothing on bare skin
+uniform vec4 uShape2; // chest half-width, hip half-depth, chest half-depth
+uniform vec4 uB2;     // wrist |x|
 uniform vec4 uCut;   // waist y, neckline y, sleeve end |x|, trouser hem y
 uniform vec4 uBody;  // shoulder |x|, ankle y, jacket bottom y, top style
 uniform vec4 uInfl;  // top, bottom, shoes, bottom style
@@ -144,6 +150,12 @@ float pedRegion(vec3 p) {
 
 function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number, r: Rng) {
   const m = base.clone();
+  // ordinary proportions (m): arm radius at the shoulder, thigh radius, hip half-width, chest
+  // half-width, hip half-depth, chest half-depth; scaled per body type (slim / average / heavier)
+  const base6 = g === 'male' ? [0.05, 0.083, 0.165, 0.168, 0.108, 0.118] : [0.044, 0.086, 0.178, 0.148, 0.112, 0.122];
+  const mul = o.build === 0 ? [0.9, 0.92, 0.93, 0.92, 0.9, 0.9] : o.build === 2 ? [1.15, 1.1, 1.12, 1.1, 1.32, 1.22] : [1, 1, 1, 1, 1, 1];
+  const sh = base6.map((v, i) => v * mul[i]);
+  const j = () => r.range(0.96, 1.04);
   // soften the sculpted muscle relief of the skin (women most)
   m.normalScale.multiplyScalar(g === 'female' ? 0.3 : 0.6);
   const b = BODY[g];
@@ -156,8 +168,11 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
     uGeoScale: { value: geoScale },
     uGeoInv: { value: geo.clone().invert() },
     uSlimA: { value: new THREE.Vector4(g === 'female' ? r.range(0.7, 0.8) : r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
-    uSlimB: { value: new THREE.Vector4(o.coatLen >= 0 ? 0.76 : r.range(0.82, 0.93), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
-    uSlimC: { value: new THREE.Vector4(r.range(0.8, 0.95), b.neck, 0, 0) },
+    uSlimB: { value: new THREE.Vector4(0, b.legX, g === 'male' ? r.range(0.03, 0.05) : r.range(0.0, 0.012), b.legZ) },
+    uSlimC: { value: new THREE.Vector4(0, b.neck, 0, 0) },
+    uShape: { value: new THREE.Vector4(sh[0] * j(), sh[1] * j(), sh[2] * j(), 0.65) },
+    uShape2: { value: new THREE.Vector4(sh[3] * j(), sh[4] * j(), sh[5] * j(), 0) },
+    uB2: { value: new THREE.Vector4(b.wristX, 0, 0, 0) },
     uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
     uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
     uInfl: { value: new THREE.Vector4(infl[0], infl[1], infl[2], o.bottomStyle) },
@@ -173,34 +188,78 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
     s.vertexShader = s.vertexShader
       .replace('#include <common>', `#include <common>\n${REGION_GLSL}\nvarying vec3 vBody;`)
       .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        // ---- pedestrian shape, in bind (body) space before skinning. The base meshes are
+        // bodybuilders: limbs become smooth tubes and the torso a smooth ellipse of ordinary
+        // proportions (per body type), fully under clothes and partly on bare skin, and the
+        // normals follow the smoothed shape so no muscle relief shows through.
         vBody = (uGeo * vec4(position, 1.0)).xyz;
-        // the base meshes are superheroes: slim limbs, narrow shoulders and flatten the chest
         vec3 bp = vBody;
+        vec3 bn = normalize(mat3(uGeo) * objectNormal);
         float bax = abs(bp.x);
-        float wa = smoothstep(uSlimA.w - 0.02, uSlimA.w + 0.09, bax) * smoothstep(uCut.x + 0.15, uCut.x + 0.25, bp.y);
-        vec2 ac = uSlimA.yz;
-        bp.yz = ac + (bp.yz - ac) * mix(1.0, uSlimA.x, wa);
-        bp.x -= sign(bp.x) * uSlimB.z * smoothstep(0.04, uSlimA.w + 0.04, bax) * smoothstep(uCut.x + 0.05, uCut.x + 0.2, bp.y);
-        float wl = (1.0 - smoothstep(uCut.x - 0.14, uCut.x - 0.02, bp.y)) * smoothstep(0.0, 0.05, bax) * step(uBody.y, bp.y);
-        vec2 lc = vec2(sign(bp.x) * uSlimB.y, uSlimB.w);
-        bp.xz = lc + (bp.xz - lc) * mix(1.0, uSlimB.x, wl);
-        float wt = smoothstep(uCut.x - 0.12, uCut.x, bp.y) * (1.0 - wa) * (1.0 - smoothstep(uCut.y - 0.06, uCut.y + 0.02, bp.y));
-        bp.z = mix(bp.z, -0.03 + (bp.z + 0.03) * uSlimC.x, wt);
+        float pr = pedRegion(vBody);
+        float clothed = (pr > 0.5 && pr < 2.5) ? 1.0 : 0.0;
+        float k = mix(uShape.w, 1.0, clothed);
+        float waist = uCut.x, neckY = uSlimC.y;
+        float wa = smoothstep(uSlimA.w - 0.03, uSlimA.w + 0.06, bax) * smoothstep(waist + 0.15, waist + 0.25, bp.y);
+        float wl = (1.0 - smoothstep(waist - 0.16, waist - 0.04, bp.y)) * step(uBody.y + 0.01, bp.y);
+        // up to the neck line on the shoulders (trapezius / deltoid tops), stopping short at the neck column
+        float top = mix(neckY - 0.01, neckY + 0.05, smoothstep(0.06, 0.11, bax));
+        float wt = (1.0 - wa) * (1.0 - wl) * smoothstep(waist - 0.22, waist - 0.06, bp.y) * (1.0 - smoothstep(top - 0.07, top, bp.y));
+        // arms: a tube around the T-pose arm axis, tapering to the wrist (hands untouched)
+        {
+          float f = smoothstep(uSlimA.w, uB2.x, bax);
+          float rt = mix(uShape.x, uShape.x * 0.62, f);
+          vec2 d = bp.yz - uSlimA.yz;
+          vec2 dir = d / max(length(d), 1e-4);
+          float kk = wa * k * (1.0 - smoothstep(uB2.x - 0.05, uB2.x - 0.01, bax));
+          bp.yz = mix(bp.yz, uSlimA.yz + dir * rt, kk);
+          bn = normalize(mix(bn, vec3(0.0, dir), kk));
+        }
+        // legs: a tube around each leg axis, thigh to ankle
+        {
+          vec2 lc = vec2(sign(bp.x) * uSlimB.y, uSlimB.w);
+          float f = smoothstep(waist - 0.1, uBody.y + 0.05, bp.y);
+          float rt = mix(uShape.y, uShape.y * 0.55, f);
+          vec2 d = bp.xz - lc;
+          vec2 dir = d / max(length(d), 1e-4);
+          float kk = wl * k * smoothstep(0.0, 0.05, bax);
+          bp.xz = mix(bp.xz, lc + dir * rt, kk);
+          bn = normalize(mix(bn, vec3(dir.x, 0.0, dir.y), kk));
+        }
+        // torso: an ellipse from the hips to the chest
+        {
+          float hgt = smoothstep(waist - 0.1, waist + 0.3, bp.y);
+          vec2 R = vec2(mix(uShape.z, uShape2.x, hgt), mix(uShape2.y, uShape2.z, hgt));
+          // shoulders slope in towards the neck
+          R.x *= 1.0 - 0.3 * smoothstep(neckY - 0.12, neckY + 0.04, bp.y);
+          R.y *= 1.0 - 0.25 * smoothstep(neckY - 0.1, neckY + 0.04, bp.y);
+          vec2 c = vec2(0.0, -0.02);
+          vec2 e = (bp.xz - c) / R;
+          vec2 dir = e / max(length(e), 1e-4);
+          float kk = wt * k;
+          bp.xz = mix(bp.xz, c + dir * R, kk);
+          vec2 nn = normalize(dir / R);
+          bn = normalize(mix(bn, vec3(nn.x, 0.0, nn.y), kk));
+        }
+        // narrower shoulders: arms move in a little
+        bp.x -= sign(bp.x) * uSlimB.z * smoothstep(0.04, uSlimA.w + 0.04, bax) * smoothstep(waist + 0.05, waist + 0.2, bp.y);
         // thinner neck and lower trapezius
-        float wn = smoothstep(uSlimC.y - 0.14, uSlimC.y - 0.06, bp.y) * (1.0 - smoothstep(uSlimC.y + 0.03, uSlimC.y + 0.1, bp.y)) * (1.0 - smoothstep(0.07, 0.12, bax));
+        float wn = smoothstep(neckY - 0.14, neckY - 0.06, bp.y) * (1.0 - smoothstep(neckY + 0.03, neckY + 0.1, bp.y)) * (1.0 - smoothstep(0.07, 0.12, bax));
         bp.xz = vec2(0.0, -0.035) + (bp.xz - vec2(0.0, -0.035)) * mix(1.0, 0.86, wn);
-        bp.y -= 0.018 * smoothstep(uSlimC.y - 0.16, uSlimC.y - 0.04, bp.y) * smoothstep(0.05, 0.1, bax) * (1.0 - smoothstep(uSlimA.w - 0.02, uSlimA.w + 0.04, bax)) * (1.0 - smoothstep(uSlimC.y, uSlimC.y + 0.06, bp.y));
+        bp.y -= 0.03 * smoothstep(neckY - 0.16, neckY - 0.04, bp.y) * smoothstep(0.05, 0.1, bax) * (1.0 - smoothstep(uSlimA.w - 0.02, uSlimA.w + 0.04, bax)) * (1.0 - smoothstep(neckY, neckY + 0.06, bp.y));
         // bare feet shrink inside the shoe meshes riding the foot bones
         float wf = 1.0 - smoothstep(uBody.y - 0.03, uBody.y + 0.005, bp.y);
         vec3 fc = vec3(sign(bp.x) * uSlimB.y, 0.045, 0.0);
         bp = mix(bp, fc + (bp - fc) * vec3(0.75, 0.8, 0.85), wf);
-        transformed = (uGeoInv * vec4(bp, 1.0)).xyz;
-        float pr = pedRegion(vBody);
+        // clothing bulk along the smoothed normal
         float inf = pr == 1.0 ? uInfl.x : pr == 2.0 ? uInfl.y : pr == 3.0 ? uInfl.z : 0.0;
-        transformed += normalize(normal) * (inf / uGeoScale);`,
-      );
+        bp += bn * inf;
+        vec3 pedPos = (uGeoInv * vec4(bp, 1.0)).xyz;
+        objectNormal = normalize(mat3(uGeoInv) * bn);`,
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = pedPos;');
     s.fragmentShader = s.fragmentShader
       .replace(
         '#include <common>',
@@ -266,7 +325,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nvec3 pedGeoNormal = normal;')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, pedGeoNormal, cloth));');
   };
-  m.customProgramCacheKey = () => 'ped-body-v5';
+  m.customProgramCacheKey = () => 'ped-body-v6';
   return m;
 }
 
