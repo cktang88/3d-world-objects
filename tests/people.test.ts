@@ -110,14 +110,16 @@ test('rain: most people with a free hand open an umbrella and walk faster; snow 
   m.setPeopleWeather({ rain: 0, snow: 0 });
 });
 
-test('a near person is at most 8 drawables (merged props)', async () => {
+test('a near person is at most 8 drawables (merged props; a dog on a leash not counted)', async () => {
   const P = await run(11, 1, []);
   const bad: string[] = [];
   for (const pd of P.peds as unknown as PedView[]) {
     let n = 0;
     pd.p.root.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && m.visible && !/Body_LOD/.test(m.name)) n++;
+      let dog = false;
+      for (let q: THREE.Object3D | null = o; q; q = q.parent) if (q.name === 'dog') dog = true;
+      if (m.isMesh && m.visible && !/Body_LOD/.test(m.name) && !dog) n++;
     });
     if (n > 8) bad.push(`${n} drawables`);
   }
@@ -143,4 +145,10 @@ test('on a real NYC block: nobody walks into stoops, shopfronts, trees or kiosks
   });
   expect(checked > 300, `only ${checked} person-frames on block 0`);
   expect(hits.length <= checked * 0.005, `${hits.length} of ${checked} person-frames inside colliders: ${hits.slice(0, 4).join('; ')}`);
+});
+
+test('nobody spawns within 6 m of the player at load', async () => {
+  const P = await run(13, 0.5, []);
+  const near = (P.peds as unknown as PedView[]).filter((pd) => !pd.lead && Math.hypot(pd.pos.x - player.x, pd.pos.z - player.z) < 5.5);
+  none(near.map((pd) => `(${fmt(pd.pos.x)}, ${fmt(pd.pos.z)})`), 'people spawned next to the player');
 });

@@ -1302,6 +1302,13 @@ export class Pedestrians {
     }
     pd.v = pd.p.walkSpeed * r.range(0.9, 1.1);
     pd.yaw = yawOf(pd.axis, pd.dir);
+    // keep the view in front of the player clear at load: nobody spawns within 6 m of them
+    if (Math.abs(pd.line - across) < 6 && Math.abs(pd.t - along) < 6) {
+      const sgn = pd.t >= along ? 1 : -1;
+      pd.t = along + sgn * r.range(6, 12);
+      const kc = Math.round(pd.t / CP - 0.5), cc = (kc + 0.5) * CP;
+      if (Math.abs(pd.t - cc) < ch + 0.3) pd.t = cc + sgn * (ch + r.range(0.5, 3));
+    }
     // never start inside a newsstand, tree pit or stoop
     for (let i = 0; i < 6 && this.blocked(pd, pd.t, pd.line); i++) pd.line = this.clampLine(pd, pd.line + r.range(-1.2, 1.2));
     pd.state = 'walk';

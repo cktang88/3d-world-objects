@@ -84,7 +84,7 @@ export function strollerGeo(fabric: string) {
 const DOG_COATS = ['#b5824a', '#1e1a18', '#e8e2d8', '#c9a060', '#7a7672', '#5a3a22'];
 /** a medium dog (≈0.45 m at the shoulder): merged body + four swinging legs, a trot from speed */
 export class Dog {
-  root = new THREE.Group();
+  root = Object.assign(new THREE.Group(), { name: 'dog' });
   private legs: THREE.Mesh[] = [];
   private tail: THREE.Object3D;
   private ph = Math.random() * 6;
