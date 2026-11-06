@@ -134,7 +134,7 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
     }
     // cars on the showroom floor, angled toward the glass
     const spots: [number, number][] = [[-15, 0.5], [-6.5, -0.4], [6.5, 0.4], [15, -0.5]];
-    for (const [z, a] of spots) slot({ kind: ['carShow', 'car'], x: s * (LX - 6.5), y: CURB + 0.02, z, rot: a, w: 6.2, d: 2.6, h: 2.6, min: 3.4, radius: 120, maxTris: 300_000 });
+    for (const [z, a] of spots) slot({ fallback: () => streetCar(r), kind: ['carShow', 'car'], x: s * (LX - 6.5), y: CURB + 0.02, z, rot: a, w: 6.2, d: 2.6, h: 2.6, min: 3.4, radius: 120, maxTris: 300_000 });
     for (const z of [-11, 11]) slot({ kind: ['car', 'bike'], x: s * (LX - 14.5), y: CURB + 0.02, z, rot: Math.PI / 2, w: 6, d: 2.6, h: 2.6, min: 1.6, radius: 110, maxTris: 250_000 });
   }
   // ---- the dealer lot on the other avenue end
@@ -201,9 +201,16 @@ function lot(ctx: BCtx, slot: CSlot, x0: number, x1: number, z0: number, z1: num
       l.userData.owned = true;
       ctx.stat.add(l);
       if (r.chance(0.12)) continue; // an empty bay
-      slot({ kind: i === 0 ? ['carShow', 'car'] : ['car', 'car', 'truck', 'bike'], x, y: CURB + 0.02, z, rot: (e > 0) === (i === 0) ? 0 : Math.PI, w: 5.8, d: 2.75, h: 3.2, min: i === 0 ? 3.4 : 1.6, radius: 90, maxTris: 150_000 });
+      slot({ fallback: () => streetCar(r), kind: i === 0 ? ['carShow', 'car'] : ['car', 'car', 'truck', 'bike'], x, y: CURB + 0.02, z, rot: (e > 0) === (i === 0) ? 0 : Math.PI, w: 5.8, d: 2.75, h: 3.2, min: i === 0 ? 3.4 : 1.6, radius: 90, maxTris: 150_000 });
     }
   }
+}
+
+/** a fleet car (nyc/vehicles.ts) for a bay whose showcase car could not load */
+function streetCar(r: Rng) {
+  const car = carMesh('sedan', new Rng(hashN(Math.floor(r.next() * 1e9), 5)));
+  car.rotation.y = Math.PI / 2; // slots run their long side along x
+  return car;
 }
 
 /** a string of coloured triangular pennants between two points */

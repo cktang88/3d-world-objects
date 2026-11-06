@@ -36,6 +36,8 @@ export interface SlotSpec {
   radius?: number;
   /** triangle cap for this one object */
   maxTris?: number;
+  /** shown instead when no candidate fits (a lot never has an empty bay) */
+  fallback?: () => THREE.Object3D;
   /** random yaw jitter (radians) and whether the object may face either way */
   jitter?: number;
   flip?: boolean;
@@ -292,6 +294,10 @@ async function load(s: Slot) {
     return;
   }
   s.state = 'failed';
+  if (s.spec.fallback && !s.holder.userData.disposed && !s.holder.userData.fellBack) {
+    s.holder.userData.fellBack = true;
+    s.holder.add(s.spec.fallback());
+  }
 }
 
 function unload(s: Slot) {
