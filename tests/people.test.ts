@@ -123,3 +123,24 @@ test('a near person is at most 8 drawables (merged props)', async () => {
   }
   none(bad, 'people over the draw-call budget');
 });
+
+test('on a real NYC block: nobody walks into stoops, shopfronts, trees or kiosks (60 s)', async () => {
+  const { nycChunk } = await import('./world');
+  const cols = nycChunk(1, 0, 0).colliders; // block 0 sits at the origin: block-local = world
+  const hits: string[] = [];
+  let checked = 0;
+  await run(4, 60, cols, (peds, time) => {
+    if (time < 3) return;
+    for (const pd of peds) {
+      if (pd.lead || Math.abs(pd.pos.x) > BX || Math.abs(pd.pos.z) > BZ) continue;
+      checked++;
+      for (const r of cols)
+        if (pd.pos.x > r.minX + 0.12 && pd.pos.x < r.maxX - 0.12 && pd.pos.z > r.minZ + 0.12 && pd.pos.z < r.maxZ - 0.12) {
+          hits.push(`t=${fmt(time)} (${fmt(pd.pos.x)}, ${fmt(pd.pos.z)}) in a ${fmt(r.maxX - r.minX)}x${fmt(r.maxZ - r.minZ)} m collider`);
+          break;
+        }
+    }
+  });
+  expect(checked > 300, `only ${checked} person-frames on block 0`);
+  expect(hits.length <= checked * 0.005, `${hits.length} of ${checked} person-frames inside colliders: ${hits.slice(0, 4).join('; ')}`);
+});
