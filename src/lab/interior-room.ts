@@ -9,6 +9,7 @@ import { InteriorLevel } from '../interior';
  * across it. &view=plan looks straight down with the ceiling hidden.
  */
 let level: InteriorLevel | null = null;
+const eye = new THREE.Vector3();
 const scene: LabScene = {
   name: 'interior-room',
   description: 'one generated building interior: &style=apartment|house|office|... &seed= &room=<index|type> &corner=0-3 &view=plan',
@@ -38,10 +39,11 @@ const scene: LabScene = {
       group.userData.cam = new THREE.Vector3(cx + sx * ((room.x1 - room.x0) / 2 - 0.4), 1.6, cz + sz * ((room.z1 - room.z0) / 2 - 0.4));
       group.userData.look = new THREE.Vector3(cx - sx * 0.8, 1.05, cz - sz * 0.8);
     }
+    eye.copy(group.userData.cam);
     (window as unknown as { __interior: unknown }).__interior = { level, room, rooms: sorted.map((r) => `${r.type} ${(r.x1 - r.x0).toFixed(1)}x${(r.z1 - r.z0).toFixed(1)}`) };
   },
   update(dt, time) {
-    level?.update(dt, new THREE.Vector3(), time);
+    level?.update(dt, eye, time);
   },
 };
 export default scene;

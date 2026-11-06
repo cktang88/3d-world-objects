@@ -1,0 +1,73 @@
+import * as THREE from 'three';
+import { mat } from '../build';
+import { surface } from '../pbr';
+import { subwayTex, hexTex, checkerTex, dropCeilingTex, carpetTileTex, spinesTex, leafTex } from './tex';
+
+/** Interior materials. Tiled ones expect world-metre UVs (see Kit). */
+
+const cache = new Map<string, THREE.Material>();
+function memo<T extends THREE.Material>(key: string, make: () => T): T {
+  let m = cache.get(key);
+  if (!m) cache.set(key, (m = make()));
+  return m as T;
+}
+/** a canvas texture repeating every `metres` */
+function tiled(key: string, t: THREE.Texture, metres: number, opts: { rough?: number; color?: string; metal?: number } = {}) {
+  return memo(`tiled:${key}:${metres}:${opts.color ?? ''}`, () => {
+    const c = t.clone();
+    c.repeat.set(1 / metres, 1 / metres);
+    c.needsUpdate = true;
+    return new THREE.MeshStandardMaterial({ map: c, roughness: opts.rough ?? 0.5, metalness: opts.metal ?? 0, color: opts.color ?? '#ffffff' });
+  });
+}
+
+export const M = {
+  paint: (color: string) => mat(color, { rough: 0.88 }),
+  trim: () => mat('#f5f2ea', { rough: 0.38 }),
+  trimDark: () => mat('#3a2a20', { rough: 0.45 }),
+  ceiling: () => mat('#f4f2ec', { rough: 0.95 }),
+  parquet: () => surface('floor_parquet', [1, 1], { roughness: 1, color: '#d8c4ae' }),
+  plank: () => surface('floor_laminate', [1, 1], { roughness: 1 }),
+  oak: (color = '#ffffff') => surface('oak', [1, 1], { color, roughness: 0.55 }),
+  walnut: (color = '#ffffff') => surface('walnut', [1, 1], { color, roughness: 0.5 }),
+  pine: (color = '#ffffff') => surface('pine', [1, 1], { color, roughness: 0.6 }),
+  marble: (color = '#ffffff') => surface('marble', [1, 1], { color, roughness: 0.25 }),
+  fabric: (color: string) => surface('fabric', [1, 1], { color, roughness: 0.95 }),
+  velvet: (color: string) => surface('velvet', [1, 1], { color, roughness: 0.85 }),
+  leather: (color: string) => surface('leather', [1, 1], { color, roughness: 0.55 }),
+  carpet: (color: string) => surface('floor_carpet', [1, 1], { color, roughness: 1 }),
+  painted: (color: string) => mat(color, { rough: 0.45 }),
+  matte: (color: string) => mat(color, { rough: 0.85 }),
+  brass: () => mat('#b8925a', { metal: 1, rough: 0.32 }),
+  chrome: () => mat('#dfe2e5', { metal: 1, rough: 0.12 }),
+  steel: () => mat('#c3c6c9', { metal: 1, rough: 0.35 }),
+  iron: () => mat('#26262a', { metal: 0.6, rough: 0.5 }),
+  radiator: () => mat('#cfd0cc', { metal: 0.55, rough: 0.45 }),
+  porcelain: () => mat('#f8f8f5', { rough: 0.12 }),
+  enamel: (color: string) => mat(color, { rough: 0.2 }),
+  black: () => mat('#141416', { rough: 0.5 }),
+  screen: () => mat('#07090c', { rough: 0.08, metal: 0.3 }),
+  screenOn: () => mat('#20324a', { rough: 0.1, emissive: '#3b5f8c', ei: 0.35 }),
+  mirror: () => mat('#e9eef2', { metal: 1, rough: 0.03 }),
+  shade: (color = '#f1e4c8') => mat(color, { rough: 0.9, emissive: '#ffcf8f', ei: 0.75 }),
+  bulb: () => mat('#fff3dc', { emissive: '#ffe2b0', ei: 2.2 }),
+  diffuser: () => mat('#fbf7ee', { emissive: '#fff0d6', ei: 1.6, rough: 0.6 }),
+  troffer: () => mat('#f7fbff', { emissive: '#f4f8ff', ei: 1.8, rough: 0.6 }),
+  fire: () => mat('#ff8a2a', { emissive: '#ff7a1a', ei: 2.5 }),
+  soil: () => mat('#3a2a1e', { rough: 1 }),
+  terracotta: () => mat('#b5643f', { rough: 0.85 }),
+  glass: () =>
+    memo('glass', () => new THREE.MeshStandardMaterial({ color: '#dfeef2', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide })),
+  frosted: () => memo('frosted', () => new THREE.MeshStandardMaterial({ color: '#f4f7f8', roughness: 0.6, transparent: true, opacity: 0.55, depthWrite: false })),
+  subway: (color = '#f4f2ec') => tiled(`subway${color}`, subwayTex(color), 0.3, { rough: 0.12 }),
+  hex: () => tiled('hex', hexTex(), 0.3, { rough: 0.35 }),
+  checker: () => tiled('checker', checkerTex(), 0.6, { rough: 0.3 }),
+  dropCeiling: () => tiled('drop', dropCeilingTex(), 1.2, { rough: 0.95 }),
+  carpetTile: (color = '#4a4d52') => tiled(`ctile${color}`, carpetTileTex(color), 1, { rough: 1 }),
+  spines: (seed: number) =>
+    memo(`spines${seed % 6}`, () => new THREE.MeshStandardMaterial({ map: spinesTex(seed % 6), roughness: 0.8, alphaTest: 0.5, side: THREE.DoubleSide })),
+  leaf: () => memo('leaf', () => new THREE.MeshStandardMaterial({ map: leafTex(), roughness: 0.6, alphaTest: 0.5, side: THREE.DoubleSide })),
+  mapped: (key: string, t: THREE.Texture, rough = 0.9) => memo(`mapped:${key}`, () => new THREE.MeshStandardMaterial({ map: t, roughness: rough })),
+  emissiveMap: (key: string, t: THREE.Texture, ei = 1) =>
+    memo(`emap:${key}`, () => new THREE.MeshStandardMaterial({ map: t, emissiveMap: t, emissive: new THREE.Color('#ffffff'), emissiveIntensity: ei, roughness: 0.9 })),
+};
