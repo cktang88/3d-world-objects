@@ -51,10 +51,31 @@ interface Outfit {
   coatLen: number;
 }
 
+/** 'cold' (late autumn to early spring: puffers, long coats, beanies) or 'mild' (tees, light
+ *  jackets and blazers, shorts). Set with setPeopleSeason() before the crowd spawns, or ?season=mild. */
+export type Season = 'cold' | 'mild';
+let season: Season = (() => {
+  try {
+    return new URLSearchParams(location.search).get('season') === 'mild' ? 'mild' : 'cold';
+  } catch {
+    return 'cold';
+  }
+})();
+export function setPeopleSeason(s: Season) {
+  season = s;
+}
+export function peopleSeason() {
+  return season;
+}
+const SUMMER = ['#f2f0ea', '#e6e2d6', '#c9d6e3', '#9cb4cc', '#2a2c30', '#d8b4a0', '#8fa58a', '#e8d9a8', '#b03a3a', '#3a6a9a', '#f0c8c8', '#5a5a60'];
+
 function pickOutfit(r: Rng, gender: Gender): Outfit {
-  const topStyle = r.pick([0, 1, 1, 2, 2, 3, 3, 3, 4]);
-  const top = topStyle === 2 ? r.pick(PUFFER) : topStyle === 3 ? r.pick(COAT) : topStyle === 4 ? r.pick([...COAT, '#7a7f86', '#8a2a2a']) : r.pick(SHIRT);
-  const bottomStyle = gender === 'female' ? r.pick([0, 0, 1, 3, 3]) : r.pick([0, 0, 0, 1, 1, topStyle === 0 ? 2 : 1]);
+  const mild = season === 'mild';
+  const topStyle = mild ? r.pick([0, 0, 0, 0, 1, 1, 3, 4]) : r.pick([0, 1, 1, 2, 2, 3, 3, 3, 4]);
+  const top = topStyle === 2 ? r.pick(PUFFER) : topStyle === 3 ? r.pick(COAT) : topStyle === 4 ? r.pick([...COAT, '#7a7f86', '#8a2a2a']) : r.pick(mild ? SUMMER : SHIRT);
+  const bottomStyle = mild
+    ? gender === 'female' ? r.pick([0, 0, 1, 2, 3]) : r.pick([0, 0, 1, 1, 2, 2])
+    : gender === 'female' ? r.pick([0, 0, 1, 3, 3]) : r.pick([0, 0, 0, 1, 1, topStyle === 0 ? 2 : 1]);
   // re-pick trousers that would read as a onesie with the top (same hue and brightness)
   const near = (a: string, b: string) => {
     const ca = new THREE.Color(a), cb = new THREE.Color(b);
@@ -71,7 +92,7 @@ function pickOutfit(r: Rng, gender: Gender): Outfit {
     sole: light || r.chance(0.4) ? '#ecebe6' : '#1a1a1a',
     skin: r.pick(SKIN_TINT),
     hair: r.pick(HAIR),
-    coatLen: topStyle === 3 && r.chance(0.65) ? r.pick([0.0, 0.08, 0.15]) : -1,
+    coatLen: topStyle === 3 && !mild && r.chance(0.65) ? r.pick([0.0, 0.08, 0.15]) : -1,
   };
 }
 
@@ -99,6 +120,8 @@ float pedRegion(vec3 p) {
 
 function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, geo: THREE.Matrix4, geoScale: number, r: Rng) {
   const m = base.clone();
+  // soften the sculpted muscle relief of the skin (women most)
+  m.normalScale.multiplyScalar(g === 'female' ? 0.3 : 0.6);
   const b = BODY[g];
   const sleeve = o.topStyle === 0 ? b.shoulderX + 0.13 : b.wristX - 0.035;
   const hem = o.bottomStyle === 2 ? b.knee + 0.07 : b.ankle;
@@ -108,7 +131,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
     uGeo: { value: geo },
     uGeoScale: { value: geoScale },
     uGeoInv: { value: geo.clone().invert() },
-    uSlimA: { value: new THREE.Vector4(r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
+    uSlimA: { value: new THREE.Vector4(g === 'female' ? r.range(0.7, 0.8) : r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
     uSlimB: { value: new THREE.Vector4(o.coatLen >= 0 ? 0.76 : r.range(0.82, 0.93), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
     uSlimC: { value: new THREE.Vector4(r.range(0.8, 0.95), b.neck, 0, 0) },
     uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
@@ -471,7 +494,7 @@ export class Person {
       if ((obj as THREE.Mesh).isMesh) this.meshes.push(obj as THREE.Mesh);
       return obj;
     };
-    const hat = r.chance(0.22);
+    const hat = r.chance(season === 'mild' ? 0.04 : 0.22);
     if (style && !hat) {
       const h = assets.hair.get(style);
       if (h) attach('Head', new THREE.Mesh(h.geo, hm), h.matrix);
