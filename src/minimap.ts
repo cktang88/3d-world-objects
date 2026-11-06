@@ -50,6 +50,8 @@ export interface MinimapSource {
   describe?(x: number, z: number): string;
   /** the large map's legend: [colour or 'dot', text] */
   legend?: [string, string][];
+  /** the part of the world worth showing (the large map opens fitted to it, with a margin) */
+  extent?(): { minX: number; minZ: number; maxX: number; maxZ: number } | null;
   hidden?: boolean;
 }
 type Resolver = (level: unknown) => MinimapSource | null;
@@ -205,6 +207,16 @@ export class Minimap {
     if (this.mode === 'large') {
       this.view.x = this.pos.x;
       this.view.z = this.pos.z;
+      // a source with a known extent (the museum's explored rooms) opens fitted to it
+      const e = this.src?.extent?.();
+      if (e) {
+        const W = this.headless?.width ?? (typeof innerWidth === 'number' ? innerWidth : 1280);
+        const H = this.headless?.height ?? (typeof innerHeight === 'number' ? innerHeight : 720);
+        const m = 8;
+        this.view.x = (e.minX + e.maxX) / 2;
+        this.view.z = (e.minZ + e.maxZ) / 2;
+        this.view.ppm = Math.min(4, Math.max(0.12, Math.min(W / (e.maxX - e.minX + 2 * m), H / (e.maxZ - e.minZ + 2 * m))));
+      }
       if (typeof document !== 'undefined') document.exitPointerLock?.();
     }
     this.show();

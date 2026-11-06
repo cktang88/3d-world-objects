@@ -29,6 +29,8 @@ export interface PlanRoom {
   /** room -> plan */
   world: THREE.Matrix4;
   visited: boolean;
+  /** plan version at this room's last change (its map tiles repaint when it changes) */
+  rev: number;
 }
 
 export const descKeyOf = (d: LevelDesc) => JSON.stringify(d);
@@ -67,10 +69,10 @@ function childMatrix(door: { pos: THREE.Vector3; yaw: number }) {
 }
 
 /** a room has been built: put it on the plan (and place the rooms behind its doorways) */
-export function registerRoom(r: Omit<PlanRoom, 'world' | 'visited'>) {
+export function registerRoom(r: Omit<PlanRoom, 'world' | 'visited' | 'rev'>) {
   const old = rooms.get(r.key);
   const world = old?.world ?? placements.get(r.key) ?? new THREE.Matrix4();
-  const rec: PlanRoom = { ...r, world, visited: old?.visited || visitedKeys.has(r.key) };
+  const rec: PlanRoom = { ...r, world, visited: old?.visited || visitedKeys.has(r.key), rev: version + 1 };
   rooms.set(r.key, rec);
   r.doors.forEach((d, i) => {
     const to = r.exits[i];
@@ -89,13 +91,15 @@ export function markVisited(key: string) {
   const r = rooms.get(key);
   if (r && !r.visited) {
     r.visited = true;
-    version++;
+    r.rev = ++version;
   }
 }
 
 // ---------------------------------------------------------------- the minimap source
 
 const FLOOR = '#d9d2c4', WALL = '#3a342c', DOT = '#7a2e2e', STUB = '#8a8478';
+/** metres per map tile: big tiles, few of them (a room is 10-60 m) */
+const TILE = 128;
 
 /** the plan as seen from room `key` (its own coordinates), or null outside the museum */
 export function museumSource(key: string, enter?: (desc: LevelDesc) => void): MinimapSource {
@@ -113,17 +117,39 @@ export function museumSource(key: string, enter?: (desc: LevelDesc) => void): Mi
     }
     return null;
   };
+  // each room's matrix and bounds in this room's frame, recomputed when the plan changes
+  let cache: { ver: number; list: { r: PlanRoom; m: THREE.Matrix4; minX: number; maxX: number; minZ: number; maxZ: number }[] } = { ver: -1, list: [] };
+  const boxes = () => {
+    if (cache.ver === version) return cache.list;
+    const inv = toLocal();
+    const list = [...rooms.values()].map((r) => {
+      const m = inv.clone().multiply(r.world);
+      const c = corners(r, m);
+      // a little extra for the '?' stubs beyond the doorways
+      const pad = 5;
+      return { r, m, minX: Math.min(...c.map((p) => p.x)) - pad, maxX: Math.max(...c.map((p) => p.x)) + pad, minZ: Math.min(...c.map((p) => p.z)) - pad, maxZ: Math.max(...c.map((p) => p.z)) + pad };
+    });
+    cache = { ver: version, list };
+    return list;
+  };
+  const over = (tx: number, tz: number) => boxes().filter((b) => b.maxX > tx * TILE && b.minX < (tx + 1) * TILE && b.maxZ > tz * TILE && b.minZ < (tz + 1) * TILE);
   return {
-    tileSize: 64,
-    version: () => version,
+    tileSize: TILE,
+    // a tile repaints only when a room over it changes; empty tiles never paint anything
+    version: (tx: number, tz: number) => over(tx, tz).reduce((v, b) => Math.max(v, b.r.rev), 0),
+    extent() {
+      const list = boxes();
+      if (!list.length) return null;
+      return { minX: Math.min(...list.map((b) => b.minX)), maxX: Math.max(...list.map((b) => b.maxX)), minZ: Math.min(...list.map((b) => b.minZ)), maxZ: Math.max(...list.map((b) => b.maxZ)) };
+    },
     drawTile(g: Ctx2D, tx: number, tz: number, px: number) {
-      const T = 64;
+      const here = over(tx, tz);
+      if (!here.length) return;
+      const T = TILE;
       g.save();
       g.scale(px / T, px / T);
       g.translate(-tx * T, -tz * T);
-      const inv = toLocal();
-      for (const r of rooms.values()) {
-        const m = inv.clone().multiply(r.world);
+      for (const { r, m } of here) {
         const c = corners(r, m);
         g.globalAlpha = r.visited || r.key === key ? 1 : 0.55;
         g.fillStyle = r.key === key ? '#efe7d6' : FLOOR;

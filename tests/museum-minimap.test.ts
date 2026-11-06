@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import { test, expect, near } from './qa';
 import { settle } from './env';
-import { setSurfaceFactory, type Ctx2D, type Surface } from '../src/minimap';
+import { Minimap, registerMinimapSource, setSurfaceFactory, type Ctx2D, type Surface } from '../src/minimap';
 import { loadMuseum } from '../src/museumData';
 import { AtriumLevel, GalleryLevel } from '../src/museum';
-import { descKeyOf, doorwayOf, markVisited, museumSource, planRooms, resetPlan } from '../src/museum/map';
+import { descKeyOf, doorwayOf, markVisited, museumSource, planRooms, registerRoom, resetPlan } from '../src/museum/map';
 import { ENTRY_Z } from '../src/museum/shell';
 import type { LevelDesc } from '../src/level';
 
@@ -61,4 +61,41 @@ test('museum plan: the atrium and a wing room in one frame, ? for unexplored doo
   const oMid = new THREE.Vector3(0, 0, -o.D / 2).applyMatrix4(o.world).applyMatrix4(r.world.clone().invert());
   expect(src.snap!(oMid.x, oMid.z) === null && entered === null, 'a click on a built but unvisited room teleported');
   atrium.dispose(); room.dispose(); g2.dispose();
+});
+
+test('museum map: empty tiles paint nothing, a new room repaints only its own tiles, the large map opens fitted to the explored rooms', async () => {
+  resetPlan();
+  await loadMuseum();
+  const atrium = new AtriumLevel();
+  const src = museumSource(descKeyOf({ kind: 'atrium' }));
+  const T = src.tileSize;
+  // empty space: no drawing at all
+  const far: string[] = [];
+  src.drawTile(recorder(far), 40, 40, 256);
+  expect(far.length === 0, `an empty tile painted ${far.length} calls`);
+  // tile versions over a grid before and after a new room far to the east
+  const grid: [number, number][] = [];
+  for (let tx = -3; tx <= 6; tx++) for (let tz = -4; tz <= 2; tz++) grid.push([tx, tz]);
+  const before = grid.map(([x, z]) => src.version!(x, z));
+  registerRoom({ key: 'qa-east', desc: { kind: 'gallery', theme: 1, page: 0 }, name: 'East', color: '#336699', W: 20, D: 30, doors: [{ wall: 'S', at: 0, w: 2.4, h: 3 }], exits: [null], dots: [] });
+  // place it by hand 400 m east (as if reached through rooms in between)
+  planRooms().get('qa-east')!.world.makeTranslation(400, 0, 0);
+  registerRoom({ ...planRooms().get('qa-east')!, key: 'qa-east' });
+  const after = grid.map(([x, z]) => src.version!(x, z));
+  const changed = grid.filter((_, i) => after[i] !== before[i]).map(([x, z]) => `${x},${z}`);
+  const touching = grid.filter(([x, z]) => (x + 1) * T > 400 - 15 && x * T < 400 + 15).map(([x, z]) => `${x},${z}`);
+  expect(changed.every((k) => touching.includes(k)), `tiles away from the new room repainted: ${changed.filter((k) => !touching.includes(k)).join(' ')}`);
+  expect(changed.length > 0, 'the new room repainted no tile');
+  // the large map opens fitted to the explored rooms
+  const m = new Minimap();
+  m.headless = { width: 1000, height: 600, getContext: () => recorder([]) };
+  registerMinimapSource((l) => (l === atrium ? src : null));
+  m.update(atrium, { x: 0, z: -3 }, 0, 0);
+  m.cycle(); // hud -> large
+  const view = (m as unknown as { view: { x: number; z: number; ppm: number } }).view;
+  const e = src.extent!()!;
+  expect(view.x > e.minX && view.x < e.maxX && view.z > e.minZ && view.z < e.maxZ, 'the large map is not centred on the explored rooms');
+  expect(view.ppm * (e.maxX - e.minX) <= 1000 && view.ppm * (e.maxZ - e.minZ) <= 600, 'the explored rooms do not fit the large map');
+  expect(view.ppm * (e.maxX - e.minX) > 1000 * 0.6 || view.ppm * (e.maxZ - e.minZ) > 600 * 0.6, `the explored rooms fill only ${Math.round(view.ppm * (e.maxX - e.minX))} px of 1000`);
+  atrium.dispose();
 });
