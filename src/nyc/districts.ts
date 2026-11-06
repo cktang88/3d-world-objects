@@ -1,4 +1,4 @@
-import { AX, SZ, AVE, ST, SW } from './common';
+import { AX, SZ, AVE, ST, SW, nameHooks } from './common';
 import { Rng, hashN } from '../rng';
 
 /**
@@ -204,3 +204,11 @@ export function shopPicker(d: District, types: string[]) {
 
 /** hand-made map extent, for the lab's overview */
 export const MAP_BOUNDS = { x0: MAP_X0, z0: MAP_Z0, w: MAP[0].length, h: MAP.length };
+
+/**
+ * Avenue names where the map packs districts closer than the real city: the avenue between the
+ * two auto row blocks is Eleventh Avenue, the one along the piers is Twelfth (avenue i runs
+ * between chunks i and i+1). Times Square keeps 6 Av / Broadway / 7 Av from the default sequence.
+ */
+const AVENUE_NAMES: Record<number, string> = { 4: '11 Av', 5: '12 Av' };
+nameHooks.avenue = (i) => AVENUE_NAMES[i] ?? null;

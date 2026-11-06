@@ -2,7 +2,7 @@
 import { readFileSync } from 'fs';
 import { test, expect, none, stats, sceneHash, fmt, rectOverlap } from './qa';
 import { nycChunk } from './world';
-import { AX, SZ, BX, BZ } from '../src/nyc/common';
+import { AX, SZ, BX, BZ, avenueName } from '../src/nyc/common';
 import { districtAt, laneOpen, walkable, roadOpen, MAP_BOUNDS, type DKind } from '../src/nyc/districts';
 import { slotsUnder } from '../src/nyc/district-showcase';
 import type { Rect } from '../src/level';
@@ -51,4 +51,11 @@ test('walkable: city and park yes, river and apron no, promenade yes', () => {
   expect(!walkable(-4 * AX, -3 * SZ), 'middle of the apron');
   expect(walkable(6 * AX - 30, 0), 'Hudson River Park promenade');
   expect(!walkable(6 * AX + 40, 25), 'the water beside a pier');
+});
+
+test('sign names follow the district map: auto row is on 11 Av, the piers on 12 Av', () => {
+  expect(avenueName(4) === '11 Av', `avenue between the auto row blocks is ${avenueName(4)}`);
+  expect(districtAt(4, -4).kind === 'autorow' && districtAt(5, -4).kind === 'autorow', 'auto row blocks moved');
+  expect(avenueName(5) === '12 Av' && districtAt(6, -4).kind === 'pier', 'the piers are not on 12 Av');
+  expect(avenueName(0) === '5 Av', `spawn avenue is ${avenueName(0)}`);
 });

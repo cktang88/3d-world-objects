@@ -20,7 +20,11 @@ export const RX = R_OVERRIDE !== null ? Math.max(0, Math.min(2, Number(R_OVERRID
 export const RZ = RX;
 
 export const AVENUES = ['York Av', '1 Av', '2 Av', '3 Av', 'Lexington Av', 'Park Av', 'Madison Av', '5 Av', '6 Av', 'Broadway', '7 Av', '8 Av', '9 Av', '10 Av', '11 Av', '12 Av'];
+/** [districts] the district map renames avenues it packs closer together (src/nyc/districts.ts) */
+export const nameHooks: { avenue: ((i: number) => string | null) | null } = { avenue: null };
 export function avenueName(i: number) {
+  const o = nameHooks.avenue?.(i);
+  if (o) return o;
   const n = AVENUES.length;
   return AVENUES[(((i + 7) % n) + n) % n];
 }

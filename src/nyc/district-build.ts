@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Portal, Rect } from '../level';
 import type { Rng } from '../rng';
 import type { BCtx, BuildingStyle } from './buildings';
-import { pickW, type District, type BType } from './districts';
+import { pickW, districtAtPos, type District, type BType } from './districts';
 import { openChunk } from './district-open';
 import { customBlock } from './district-custom';
 import { sidewalkDisplays } from './district-displays';
@@ -58,4 +58,41 @@ export function districtExtras(ctx: BCtx, d: District) {
 export function updateDistricts(p: THREE.Vector3, time: number) {
   updateShowcases(p);
   tickWater(time);
+  arrival(p, time);
 }
+
+/** what each neighbourhood shows off, for the arrival toast */
+const TAGLINE: Partial<Record<District['kind'], string>> = {
+  midtown: 'towers, delis and department stores', timesq: 'billboards, toys and electronics', music: '48th Street instrument shops', garment: 'sporting goods and supplies',
+  bowery: 'restaurant supply and lighting', canal: 'electronics, tools and street stalls', market: 'greenmarket stalls', brownstone: 'stoops, gardens and stoop sales',
+  industrial: 'rail and container yards', construction: 'cranes, machines and tools', museum: 'arms, armour, instruments and architecture', autorow: 'showrooms and car lots',
+  park: 'lawns, playgrounds, the boat pond', airport: 'aircraft on the apron', pier: 'piers, boats and the carrier',
+};
+let shownKind = '', candidate = '', since = 0;
+/** a HUD toast with the neighbourhood's name when the player walks into a new one */
+function arrival(p: THREE.Vector3, time: number) {
+  const d = districtAtPos(p.x, p.z);
+  if (d.kind === 'river') return;
+  if (!shownKind) {
+    shownKind = d.kind; // no toast at the spawn
+    return;
+  }
+  if (d.kind === shownKind) {
+    candidate = '';
+    return;
+  }
+  if (d.kind !== candidate) {
+    candidate = d.kind;
+    since = time;
+    return;
+  }
+  if (time - since < 1.2) return; // linger a moment: no flicker at a border
+  shownKind = d.kind;
+  const el = typeof document !== 'undefined' ? document.getElementById('toast') : null;
+  if (!el) return;
+  el.textContent = `${d.name}${TAGLINE[d.kind] ? ` — ${TAGLINE[d.kind]}` : ''}`;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3400) as unknown as number;
+}
+let toastTimer = 0;
