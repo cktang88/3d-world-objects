@@ -307,6 +307,7 @@ const propGeo = {
   phone: new RoundedBoxGeometry(0.075, 0.155, 0.009, 2, 0.006),
   beanie: new THREE.SphereGeometry(0.112, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
   cuff: new THREE.CylinderGeometry(0.106, 0.11, 0.05, 20, 1, true),
+  hood: new THREE.SphereGeometry(0.13, 18, 10, Math.PI, Math.PI, 0, Math.PI * 0.62),
 };
 /** a sneaker / boot: low toe box, higher heel collar, separate sole; colours baked into vertex
  *  colours so one shoe is one draw call. Built around the origin, toe toward +z. */
@@ -498,6 +499,11 @@ export class Person {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0));
     }
+    // hoods lying on the upper back (hoodies, most puffers)
+    if (o.topStyle === 4 || (o.topStyle === 2 && r.chance(0.6))) {
+      const hood = new THREE.Mesh(propGeo.hood, clothMat(o.top));
+      attach('spine_03', hood, at(0, b.neck - 0.03, -0.075, -0.35, 0, 0).multiply(new THREE.Matrix4().makeScale(1.05, 0.62, 0.8)));
+    }
     // long coats (most of the open coats in the reference photos reach the knee)
     if (o.coatLen >= 0) {
       const bones = ['pelvis', 'thigh_l', 'thigh_r'].map((n) => this.bones.get(n)!);
@@ -674,7 +680,8 @@ export class Pedestrians {
   update(dt: number, p: THREE.Vector3) {
     if (!this.assets) return;
     this.frame++;
-    while (this.peds.length < COUNT) {
+    // spawn a few per frame so building 84 skinned clones does not hitch one frame
+    for (let n = 0; n < 8 && this.peds.length < COUNT; n++) {
       const person = new Person(this.assets, this.rng);
       this.group.add(person.root);
       const pd: Ped = { p: person, axis: 'x', dir: 1, line: 0, t: 0, v: 1.3, off: 0, wait: 0, tick: this.peds.length, acc: 0, yaw: 0 };
