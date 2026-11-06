@@ -293,6 +293,8 @@ export class InteriorLevel implements Level {
     // the stair hall behind the back wall (its doorway near the -x corner, where no BSP wall ends)
     const core = (this.vcore = houseCore(this.desc, bounds, this.H, T));
     // ---- end vertical hook
+    // upper floors of a house with a stair core have no street door: you arrive by the stair hall
+    const upper = !!core && this.desc.floor > 0;
 
     // BSP into rooms
     const leaves: Room[] = [];
@@ -386,7 +388,7 @@ export class InteriorLevel implements Level {
     }
     for (const rm of leaves) {
       for (const sd of this.sides.get(rm)!) {
-        if (sd.axis === 'z' && Math.abs(sd.c - bounds.z1) < 0.01 && exitX > sd.e0 && exitX < sd.e1) sd.open.push({ t: exitX, w: DOOR, kind: 'exit', y0: 0, y1: DOOR_H });
+        if (!upper && sd.axis === 'z' && Math.abs(sd.c - bounds.z1) < 0.01 && exitX > sd.e0 && exitX < sd.e1) sd.open.push({ t: exitX, w: DOOR, kind: 'exit', y0: 0, y1: DOOR_H });
         // vertical.ts hook: the doorway to the stair core (that wall gets no windows)
         const coreSide = !!core && sd.axis === 'z' && Math.abs(sd.c - bounds.z0) < 0.01 && core.door.x > sd.e0 && core.door.x < sd.e1;
         if (core && coreSide) sd.open.push({ t: core.door.x, w: core.door.w, kind: 'door', y0: 0, y1: DOOR_H });
@@ -413,7 +415,7 @@ export class InteriorLevel implements Level {
 
     // door clearance zones (both sides of every doorway)
     const doorZones: Rect[] = splits.map((s) => (s.axis === 'x' ? rect(s.c, s.door, 2.0, DOOR + 0.3) : rect(s.door, s.c, DOOR + 0.3, 2.0)));
-    doorZones.push(rect(exitX, bounds.z1 - 0.9, DOOR + 0.6, 2.0));
+    if (!upper) doorZones.push(rect(exitX, bounds.z1 - 0.9, DOOR + 0.6, 2.0));
     if (core) doorZones.push(rect(core.door.x, bounds.z0 + 0.9, core.door.w + 0.6, 2.0)); // vertical.ts hook
 
     // architecture
@@ -438,8 +440,16 @@ export class InteriorLevel implements Level {
     }
     this.doorLeaves(splits, leaves);
     this.use(leaves.find((q) => exitX > q.x0 && exitX < q.x1 && Math.abs(q.z1 - bounds.z1) < 0.01) ?? leaves[0]);
-    this.exitDoor(exitX, bounds);
-    this.entry = { x: exitX, z: bounds.z1 - T / 2, width: DOOR, height: DOOR_H, yaw: Math.PI };
+    if (upper && core) {
+      // arrive from the stair hall: its doorway in the back wall is the entry
+      this.entry = { x: core.door.x, z: bounds.z0 + T / 2, width: core.door.w, height: DOOR_H, yaw: 0 };
+      this.spawn.pos.set(core.door.x, 0, bounds.z0 + 1.2);
+      this.spawn.yaw = Math.PI;
+      this.doorway = { pos: new THREE.Vector3(core.door.x, 0, bounds.z0), yaw: Math.PI };
+    } else {
+      this.exitDoor(exitX, bounds);
+      this.entry = { x: exitX, z: bounds.z1 - T / 2, width: DOOR, height: DOOR_H, yaw: Math.PI };
+    }
     for (const rm of leaves) {
       this.use(rm);
       this.floorAndCeiling(rm);

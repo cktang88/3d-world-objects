@@ -194,3 +194,15 @@ test('pieces against walls face into their room and stay inside it', () => {
   }
   none(bad, 'misplaced pieces');
 });
+
+test('upper floors of a house with a stair core: no street door, you arrive by the stair hall', () => {
+  for (const seed of [3, 8, 21]) {
+    const lv = new InteriorLevel(desc('house', seed, 1, 3));
+    if (!lv.vcore) continue;
+    expect(!lv.portals().some((p) => p.target === 'back'), `house#${seed}/1 still has a street exit`);
+    const dist = Math.hypot(lv.spawn.pos.x - lv.entry.x, lv.spawn.pos.z - lv.entry.z);
+    expect(dist <= 1.5, `house#${seed}/1 spawn ${fmt(dist)} m from the stair-hall door`);
+    expect(!lv.stairCore, `house#${seed}/1 has an in-room stair as well as the core`);
+    lv.dispose();
+  }
+});
