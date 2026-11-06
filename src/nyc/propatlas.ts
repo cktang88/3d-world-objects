@@ -512,11 +512,15 @@ function pedAnimation(m: THREE.MeshStandardMaterial) {
       }
       ` + sh.fragmentShader
       .replace('#include <map_fragment>', `
+        #ifdef USE_MAP
         vec2 pedMapUv = pedUv(vMapUv);
         vec4 sampledDiffuseColor = texture2D( map, pedMapUv );
-        diffuseColor *= sampledDiffuseColor;`)
+        diffuseColor *= sampledDiffuseColor;
+        #endif`)
       .replace('#include <emissivemap_fragment>', `
-        totalEmissiveRadiance *= texture2D( emissiveMap, pedMapUv ).rgb;`);
+        #if defined( USE_EMISSIVEMAP ) && defined( USE_MAP )
+        totalEmissiveRadiance *= texture2D( emissiveMap, pedMapUv ).rgb;
+        #endif`);
   };
   m.customProgramCacheKey = () => 'nyc-atlas-lit-ped';
 }
