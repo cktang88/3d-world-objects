@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { finishBuilding } from './level';
+import { registerContainer, type LazyContainer } from './lazy';
 import { mat } from './build';
 import { realScale } from './realscale';
 import { Rng, hashN } from './rng';
@@ -101,11 +102,14 @@ export class ShopLevel implements Level {
   private phase = 'start';
   private prio = 0;
   /**
-   * Glass-fronted containers (coolers, showcases, curio cabinets, deli cases). Their stock is
+   * Containers (coolers, showcases, curio cabinets, deli cases, drawers, cupboards, the back
+   * room), registered with lazy.ts: glass ones are stocked when you come near and look at them,
+   * opaque ones when you open them (E). Their stock is
    * not generated until generate() is called: update() does it when the player comes near
    * and stands in front of one; a seamless-entry system may call it earlier or later.
    */
-  containers: (Container & { generated: boolean; generate: () => void })[] = [];
+  cases: (Container & { lazy: LazyContainer })[] = [];
+  private caseSets = new Map<number, () => THREE.Object3D | Promise<THREE.Object3D>>();
 
   /** resolves when the room and its fixtures are built (stock streams in after) */
   ready: Promise<void>;
@@ -210,7 +214,19 @@ export class ShopLevel implements Level {
     this.phase = 'finish';
     this.group.add(baked);
     this.group.add(kit.live);
-    this.containers = kit.containers.map((c) => ({ ...c, generated: false, generate: () => {} }));
+    this.cases = kit.containers.map((c) => ({
+      ...c,
+      lazy: registerContainer(c.obj, {
+        label: c.label,
+        size: c.size,
+        closedOpaque: !c.glass,
+        door: c.door,
+        drawer: c.drawer,
+        // glass cases: nothing moves (E just looks); the stock is generated once seen
+        open: c.glass ? () => {} : undefined,
+        generate: () => this.caseContents(c),
+      }),
+    }));
     this.stockPromise = this.stock(kit.segs, info.pools, desc.seed, r.fork(9), type);
   }
 
@@ -365,28 +381,38 @@ export class ShopLevel implements Level {
         if (!m.has(p)) m.set(p, []);
         m.get(p)!.push(sg);
       }
-    if (sets.has(-1)) this.stockSet(sets.get(-1)!, kinds, r);
-    for (const c of this.containers) {
+    if (sets.has(-1)) this.stockSet(sets.get(-1)!, kinds, r, this.group);
+    for (const c of this.cases) {
       const set = sets.get(c.id);
-      if (!set) {
-        c.generated = true;
-        continue;
-      }
-      c.generate = () => {
-        if (c.generated || !this.alive) return;
-        c.generated = true;
-        this.stockSet(set, kinds, new Rng(hashN(seed, 100 + c.id)));
-      };
+      this.caseSets.set(c.id, () => {
+        const g = this.caseGroup(c);
+        if (set && this.alive) this.stockSet(set, kinds, new Rng(hashN(seed, 100 + c.id)), g);
+        return g;
+      });
     }
   }
 
+  /** the contents of a container, made on demand (lazy.ts); waits for the stock plan if needed */
+  private caseContents(c: Container): THREE.Object3D | Promise<THREE.Object3D> {
+    const make = this.caseSets.get(c.id);
+    if (make) return make();
+    return this.stocked.then(() => this.caseSets.get(c.id)?.() ?? this.caseGroup(c));
+  }
+  /** a group parented to the container's anchor that cancels its transform: contents keep level coordinates */
+  private caseGroup(c: Container) {
+    const g = new THREE.Group();
+    c.obj.updateMatrix();
+    c.obj.matrix.clone().invert().decompose(g.position, g.quaternion, g.scale);
+    return g;
+  }
+
   /** place a set of products (and packaging for the rest) and instance them */
-  private stockSet(set: Map<Loaded | 'filler', Seg[]>, kinds: Kind[], r: Rng) {
+  private stockSet(set: Map<Loaded | 'filler', Seg[]>, kinds: Kind[], r: Rng, into: THREE.Group) {
     const filler = new Filler();
     const rest: Seg[] = [...(set.get('filler') ?? [])];
-    for (const [p, list] of set) if (p !== 'filler') rest.push(...this.place(p, list, r, this.prio++));
+    for (const [p, list] of set) if (p !== 'filler') rest.push(...this.place(p, list, r, this.prio++, into));
     for (const sg of rest) this.fill(filler, sg, kinds, r);
-    filler.build(this.group);
+    filler.build(into);
     this.stats.filler += filler.count;
     this.stats.tris += filler.tris();
   }
@@ -568,7 +594,7 @@ export class ShopLevel implements Level {
 
   /** pack one product into its segments and instance it */
   /** returns the segments it could not fill within the triangle budget (they get packaging) */
-  private place(p: Loaded, segs: Seg[], r: Rng, prio: number): Seg[] {
+  private place(p: Loaded, segs: Seg[], r: Rng, prio: number, into: THREE.Group): Seg[] {
     const slots: Slot[] = [];
     const boxes: THREE.Box3[] = [];
     const cords: THREE.Vector3[][] = [];
@@ -661,13 +687,13 @@ export class ShopLevel implements Level {
     this.stats.products++;
     this.stats.slots += use.length;
     this.stats.tris += tri * use.length;
-    const sand = this.instance(p.obj, use);
+    const sand = this.instance(p.obj, use, into);
     for (const [a, b] of cords) {
       const len = a.y - b.y;
       const cm = new THREE.Mesh(new THREE.BoxGeometry(0.006, len, 0.006), M.black());
       cm.position.set(a.x, b.y + len / 2, a.z);
       cm.userData.owned = true;
-      this.group.add(cm);
+      into.add(cm);
     }
     const e = p.e;
     if (!e) {
@@ -692,8 +718,8 @@ export class ShopLevel implements Level {
       this.triBudget -= extra;
       this.stats.tris += extra;
       this.stats.originals++;
-      for (const im of sand) this.group.remove(im);
-      this.instance(orig, use);
+      for (const im of sand) im.removeFromParent();
+      this.instance(orig, use, into);
     });
     return rejected;
   }
@@ -709,7 +735,7 @@ export class ShopLevel implements Level {
   }
 
   /** every mesh under root becomes one InstancedMesh across all slots */
-  private instance(root: THREE.Object3D, slots: Slot[]) {
+  private instance(root: THREE.Object3D, slots: Slot[], into: THREE.Group) {
     root.updateMatrixWorld(true);
     const meshes: THREE.Mesh[] = [];
     root.traverse((o) => (o as THREE.Mesh).isMesh && meshes.push(o as THREE.Mesh));
@@ -736,7 +762,7 @@ export class ShopLevel implements Level {
       im.instanceMatrix.needsUpdate = true;
       im.computeBoundingSphere();
       im.receiveShadow = true;
-      this.group.add(im);
+      into.add(im);
       out.push(im);
     }
     return out;
@@ -748,21 +774,15 @@ export class ShopLevel implements Level {
   portals() {
     return this.ports;
   }
-  private tmp = new THREE.Vector3();
-  update(_dt: number, player: THREE.Vector3) {
-    for (const c of this.containers) {
-      if (c.generated) continue;
-      const d = this.tmp.set(player.x - c.center.x, 0, player.z - c.center.z);
-      // near, and on the side you can see into
-      if (d.length() < 5.5 && d.x * Math.sin(c.facing) + d.z * Math.cos(c.facing) > -0.2) c.generate();
-    }
-  }
+  update() {}
   /** generate every container's contents now (lab, screenshots) */
   generateAll() {
-    for (const c of this.containers) c.generate();
+    for (const c of this.cases) c.lazy.ensure();
   }
   dispose() {
     this.alive = false;
+    // lazy.ts forgets containers whose anchor is disposed
+    for (const c of this.cases) c.obj.userData.disposed = true;
     clearQueue();
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;

@@ -15,13 +15,16 @@ import type { Surf } from './tex';
  */
 export interface Container {
   id: number;
-  /** world centre and axis-aligned size */
-  center: THREE.Vector3;
+  /** anchor at the front-centre of its base, +z out of the front (level coordinates) */
+  obj: THREE.Group;
+  /** outer width / height / depth */
   size: THREE.Vector3;
-  /** glass-fronted: its contents show while closed (generate when near and facing) */
+  /** glass-fronted: contents visible while closed (generated when near and facing) */
   glass: boolean;
-  /** yaw of the side you look in from */
-  facing: number;
+  label: string;
+  /** opaque containers: the part that moves */
+  door?: THREE.Object3D;
+  drawer?: THREE.Object3D;
 }
 export type SegMode = 'shelf' | 'hang' | 'pile' | 'stack' | 'single' | 'ceil';
 export interface Seg {
@@ -196,16 +199,21 @@ export class Kit {
     this.segs.push({ p: this.w(x, y, z), rot: this.rot + r, len, depth, h, mode, ...more, ...(this.cur >= 0 ? { box: this.cur } : {}) });
   }
   /**
-   * Containers (coolers, showcases, curio cabinets, deli cases): the segments made between
-   * openBox() and closeBox() belong to it, and their stock is only generated on demand.
-   * Centre in local coordinates, size along local x, y, z; `glass`: contents visible when closed.
+   * Containers (coolers, showcases, curio cabinets, deli cases, drawers, cupboards): the
+   * segments made between openBox() and closeBox() belong to it, and its stock is only
+   * generated on demand (lazy.ts registerContainer). (fx, fz): local front-centre of its base;
+   * size along local x, y, z.
    */
   containers: Container[] = [];
   private cur = -1;
-  openBox(x: number, y: number, z: number, sx: number, sy: number, sz: number, glass = true) {
-    const quarter = Math.abs(Math.sin(this.rot)) > 0.7;
-    this.containers.push({ id: this.containers.length, center: this.w(x, y, z), size: new THREE.Vector3(quarter ? sz : sx, sy, quarter ? sx : sz), glass, facing: this.rot });
+  openBox(fx: number, fz: number, sx: number, sy: number, sz: number, label: string, glass = true, fy = 0) {
+    const obj = new THREE.Group();
+    obj.position.set(fx, fy, fz);
+    this.add(obj, true);
+    obj.updateMatrix();
+    this.containers.push({ id: this.containers.length, obj, size: new THREE.Vector3(sx, sy, sz), glass, label });
     this.cur = this.containers.length - 1;
+    return this.containers[this.cur];
   }
   closeBox() {
     this.cur = -1;

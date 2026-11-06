@@ -78,7 +78,7 @@ export function endcap(k: Kit, w: number, o: GondolaOpts = {}) {
 
 /** Glass-door reach-in cooler bank: lit inside, bottles fronted deep behind each door. */
 export function cooler(k: Kit, doors: number, o: { frame?: string; header?: string; headerColor?: string; want?: RegExp } = {}) {
-  k.openBox(0, 1.1, -0.42, doors * 0.76, 2.15, 0.85);
+  k.openBox(0, 0, doors * 0.76, 2.65, 0.85, 'cooler');
   const dw = 0.76, H = 2.15, D = 0.85, len = doors * dw;
   const frame = mat(o.frame ?? '#1b1c1e', { rough: 0.4, metal: 0.5 });
   const inner = mat('#f4f6f8', { rough: 0.4, emissive: '#eef4ff', ei: 0.35 });
@@ -195,7 +195,7 @@ export function backBar(k: Kit, len: number) {
 
 /** Refrigerated deli case: lit interior, angled glass front, stainless top. */
 export function deliCase(k: Kit, len: number, o: { want?: RegExp } = {}) {
-  k.openBox(0, 0.9, 0, len, 0.5, 0.95);
+  k.openBox(0, 0.475, len, 1.25, 0.95, 'deli case');
   const D = 0.95, H = 1.25;
   const ss = M.steel();
   k.box(mat('#efefea', { rough: 0.4 }), len, 0.75, D, 0, 0, 0);
@@ -297,7 +297,7 @@ export function tiered(k: Kit, w: number, o: { color?: string; slats?: boolean; 
 
 /** Glass showcase counter: lit, two glass shelves of goods. */
 export function showcase(k: Kit, len: number, o: { frame?: string; h?: number } = {}) {
-  k.openBox(0, 0.5, 0, len, 1.0, 0.6);
+  k.openBox(0, 0.3, len, o.h ?? 1.0, 0.6, 'showcase');
   const H = o.h ?? 1.0, D = 0.6;
   const fr = mat(o.frame ?? '#2a2a2a', { rough: 0.4, metal: 0.5 });
   k.box(fr, len, 0.2, D, 0, 0, 0);
@@ -317,7 +317,7 @@ export function showcase(k: Kit, len: number, o: { frame?: string; h?: number } 
 
 /** Tall glass curio cabinet (antiques, models). */
 export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number; pitch?: number } = {}) {
-  k.openBox(0, 1.0, -0.22, w, 1.95, 0.45);
+  k.openBox(0, 0, w, 1.95, 0.45, 'curio cabinet');
   const H = 1.95, D = 0.45, n = o.shelves ?? 4;
   const wood = mat(o.wood ?? '#4a2e1a', { rough: 0.5 });
   k.box(wood, w, 0.12, D, 0, 0, -D / 2);
