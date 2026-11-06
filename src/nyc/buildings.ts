@@ -1087,8 +1087,16 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
   ctx.hulls.push({ rect: { ...r }, h, top: roofY, side: front, type });
 }
 
+/** two entrance portals in each other's way (more than 0.3 m both ways) */
+export function doorsOverlap(a: THREE.Box3, b: THREE.Box3, p?: { returnPos?: THREE.Vector3 }) {
+  if (p && !p.returnPos) return false;
+  return Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x) > 0.3 && Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z) > 0.3;
+}
+
 function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean, addr: string, floors: number, type: BType, style: string) {
   const entry = F.at(u, 0, out);
+  // a narrow building's street door can land on its own shop door: keep the shop's (qa: door portals do not overlap)
+  if (ctx.portals.some((p) => doorsOverlap(p.box, F.boxOf(u - 1.1, u + 1.1, out - 1.2, out + 1.2, 0, 3), p))) return;
   ctx.portals.push({
     box: F.boxOf(u - 1.1, u + 1.1, out - 1.2, out + 1.2, 0, 3),
     returnPos: F.at(u, 0, out + 1.4),

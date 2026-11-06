@@ -7,6 +7,7 @@ import { Rng, hashN } from '../rng';
 import { roomMaterial, onNight, NIGHT } from './buildings-win';
 import { noWeather } from '../weather';
 import type { BCtx, BType, Face } from './buildings';
+import { doorsOverlap } from './buildings';
 
 /** Storefronts: display windows with a shop behind the glass, recessed entries, signs, gates, awnings. */
 
@@ -607,9 +608,12 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
   // ---- portal into the shop
   const ent = F.at(du, 0, 0.7);
   if (!closed) {
+    const pbox = F.boxOf(du - 0.9, du + 0.9, recess > 0.2 ? -recess : -0.1, 1.5, 0, 2.8);
+    // the shop's door wins over a street door the building put in the same spot (qa: door portals do not overlap)
+    for (let i = ctx.portals.length - 1; i >= 0; i--) if (doorsOverlap(ctx.portals[i].box, pbox, ctx.portals[i])) ctx.portals.splice(i, 1);
     ctx.portals.push({
       // from the door (at the back of the recess) out across the doorstep
-      box: F.boxOf(du - 0.9, du + 0.9, recess > 0.2 ? -recess : -0.1, 1.5, 0, 2.8),
+      box: pbox,
       returnPos: F.at(du, 0, 1.8),
       returnYaw: F.yawOut(),
       label: `Enter ${titleCaseName(name)}`,

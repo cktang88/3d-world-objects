@@ -20,7 +20,7 @@ import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, rect } from './level';
 import { BIOMES } from './biomes';
 // [districts] neighbourhoods: building/shop mix, open spaces, showcase objects (src/nyc/district*.ts)
-import { districtAt } from './nyc/districts';
+import { districtAt, SPAWN, spawnView } from './nyc/districts';
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
 
 // ---------------------------------------------------------------- static geometry baking
@@ -36,7 +36,7 @@ interface Chunk {
 export class NycLevel implements Level {
   name: string;
   group = new THREE.Group();
-  spawn = { pos: new THREE.Vector3(BX - 2.6, 0, BZ - 3.2), yaw: 0.1 };
+  spawn = { pos: new THREE.Vector3(SPAWN.x, 0, SPAWN.z), yaw: SPAWN.yaw }; // [districts] the 5 Av view north (districts.ts)
   env: Env;
   private chunks = new Map<string, Chunk>();
   private seed: number;
@@ -244,7 +244,7 @@ export class NycLevel implements Level {
       const side: Side = end < 0 ? 'W' : 'E';
       const big = tower > 0.62 && rng.chance(0.7);
       if (big) {
-        building(ctx, { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, side, 'tower', rng.int(22, 48), true, [true, true], districtStyle(D, rng)); yield; // [vis]
+        building(ctx, { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, side, 'tower', rng.int(22, 48), true, [true, true], districtStyle(D, rng, cx, cz)); yield; // [vis]
       } else {
         const n = rng.int(2, 3);
         const cuts = [-LZ];
@@ -253,7 +253,7 @@ export class NycLevel implements Level {
         for (let i = 0; i < n; i++) {
           const type = aveType(D, rng); // [districts]
           const floors = floorsFor(D, type === 'prewar' ? rng.int(9, 18) : type === 'midrise' ? rng.int(6, 12) : type === 'brownstone' ? rng.int(3, 5) : rng.int(5, 6));
-          building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1], districtStyle(D, rng)); yield; // [vis]
+          building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1], districtStyle(D, rng, cx, cz)); yield; // [vis]
         }
       }
     }
@@ -270,7 +270,7 @@ export class NycLevel implements Level {
         const r: Rect = row < 0 ? { minX: x, maxX: x + w, minZ: -LZ, maxZ: -LZ + depth } : { minX: x, maxX: x + w, minZ: LZ - depth, maxZ: LZ };
         const floors = floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));
         const store = type !== 'brownstone' && rng.chance(Math.min(1, (type === 'tenement' ? 0.6 : 0.75) * D.stores));
-        building(ctx, r, side, type, floors, store, [false, false], districtStyle(D, rng)); yield; // [vis]
+        building(ctx, r, side, type, floors, store, [false, false], districtStyle(D, rng, cx, cz)); yield; // [vis]
         x += w;
       }
     }
@@ -399,7 +399,7 @@ export class NycLevel implements Level {
       }
     }
     // litter baskets, mailbox, meters, bags, shelters, sheds, manholes (streetprops.ts)
-    streetExtras({ stat, rng, colliders, near, village });
+    streetExtras({ stat, rng, colliders, near, village, noSheds: spawnView(ctx.cx, ctx.cz) }); // [districts] noSheds: the spawn view
     // a few sand3d props on the sidewalks (benches, planters, statues) — all enterable worlds
     for (let i = 0; i < 3; i++) {
       const run = rng.pick(runs);

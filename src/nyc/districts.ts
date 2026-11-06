@@ -1,4 +1,4 @@
-import { AX, SZ, AVE, ST, SW, nameHooks } from './common';
+import { AX, SZ, AVE, ST, SW, BX as BX_, BZ as BZ_, nameHooks } from './common';
 import { Rng, hashN } from '../rng';
 
 /**
@@ -212,3 +212,15 @@ export const MAP_BOUNDS = { x0: MAP_X0, z0: MAP_Z0, w: MAP[0].length, h: MAP.len
  */
 const AVENUE_NAMES: Record<number, string> = { 4: '11 Av', 5: '12 Av' };
 nameHooks.avenue = (i) => AVENUE_NAMES[i] ?? null;
+
+/**
+ * The spawn: on the 5 Av sidewalk of the spawn block (chunk 0,0; the avenue is its +x edge), a
+ * step in from the kerb furniture, a third of the block up from the corner of W 34 St, facing
+ * north up the avenue past Midtown towers to the park. Yaw 0 looks north (-z); a little negative
+ * turns the view toward the avenue and its traffic.
+ */
+export const SPAWN = { x: BX_ - 2.2, z: BZ_ - 18, yaw: -0.12 };
+/** blocks seen from the spawn: both sides of 5 Av for three blocks north (open shops, no sheds) */
+export function spawnView(cx: number, cz: number) {
+  return (cx === 0 || cx === 1) && cz <= 0 && cz >= -2;
+}

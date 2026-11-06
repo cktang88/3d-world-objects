@@ -3,7 +3,10 @@ import { readFileSync } from 'fs';
 import { test, expect, none, stats, sceneHash, fmt, rectOverlap } from './qa';
 import { nycChunk } from './world';
 import { AX, SZ, BX, BZ, avenueName } from '../src/nyc/common';
-import { districtAt, laneOpen, walkable, roadOpen, MAP_BOUNDS, type DKind } from '../src/nyc/districts';
+import { districtAt, laneOpen, walkable, roadOpen, MAP_BOUNDS, SPAWN, spawnView, type DKind } from '../src/nyc/districts';
+import { districtStyle } from '../src/nyc/district-build';
+import { Rng } from '../src/rng';
+import { LX } from '../src/nyc/common';
 import { slotsUnder } from '../src/nyc/district-showcase';
 import type { Rect } from '../src/level';
 
@@ -58,4 +61,19 @@ test('sign names follow the district map: auto row is on 11 Av, the piers on 12 
   expect(districtAt(4, -4).kind === 'autorow' && districtAt(5, -4).kind === 'autorow', 'auto row blocks moved');
   expect(avenueName(5) === '12 Av' && districtAt(6, -4).kind === 'pier', 'the piers are not on 12 Av');
   expect(avenueName(0) === '5 Av', `spawn avenue is ${avenueName(0)}`);
+});
+
+test('spawn: on the 5 Av sidewalk a third up the block, facing north; the view has open shops, no sheds', () => {
+  expect(SPAWN.x > LX + 1.2 && SPAWN.x < BX - 1.2, `spawn x ${fmt(SPAWN.x)} not on the sidewalk clear of shopfronts and kerb furniture`);
+  const up = (BZ - SPAWN.z) / (2 * BZ); // 0 at the W 34 St corner, 1 at the next street north
+  expect(up > 0.25 && up < 0.45, `spawn ${fmt(up)} of the way up the block`);
+  expect(Math.abs(SPAWN.yaw) < 0.3, `spawn yaw ${SPAWN.yaw} is not facing north up the avenue`);
+  expect(walkable(SPAWN.x, SPAWN.z) && districtAt(0, 0).kind === 'midtown', 'spawn not on a Midtown sidewalk');
+  // the 5 Av frontage both sides, three blocks north: no roll-down gates at all (so none shut), no sidewalk sheds
+  for (const [cx, cz] of [[0, 0], [1, 0], [0, -1], [1, -1], [0, -2], [1, -2]]) {
+    expect(spawnView(cx, cz), `${cx},${cz} not in the spawn view`);
+    const r = new Rng(cx * 31 + cz);
+    for (let i = 0; i < 20; i++) expect(districtStyle(districtAt(cx, cz), r, cx, cz).gate === 0, `${cx},${cz}: shop gates possible in the spawn view`);
+  }
+  expect(!spawnView(3, 0), 'spawn view leaks to other blocks');
 });

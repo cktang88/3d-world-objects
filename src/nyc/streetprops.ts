@@ -1068,7 +1068,7 @@ export function standpipe(parent: THREE.Object3D, x: number, z: number, ry: numb
  * sidewalk shed on the avenues now and then, and manhole covers in the roadway. Everything is
  * placed only where it doesn't collide with what's already on the sidewalk.
  */
-export function streetExtras(o: { stat: THREE.Object3D; rng: Rng; colliders: LRect[]; near: (x: number, z: number, d?: number) => boolean; village: boolean }) {
+export function streetExtras(o: { stat: THREE.Object3D; rng: Rng; colliders: LRect[]; near: (x: number, z: number, d?: number) => boolean; village: boolean; noSheds?: boolean }) {
   const { stat, rng, colliders, near } = o;
   const free = (x: number, z: number, w: number, d: number, pad = 0.3) => {
     if (near(x, z, 2.0) || onRamp(x, z, w, d)) return false; // keep corner kerb ramps clear (ground.ts)
@@ -1115,7 +1115,7 @@ export function streetExtras(o: { stat: THREE.Object3D; rng: Rng; colliders: LRe
       const z0 = rng.range(-BZ + 5, BZ - 5 - len), x = sx * (BX - 0.75);
       if (free(x, z0 + len / 2, 0.9, len)) { bikeDock(stat, x, z0, -Math.PI / 2, n, rng); claim(x, z0 + len / 2, 0.85, len); }
     }
-    if (!o.village && rng.chance(0.14)) {
+    if (!o.village && rng.chance(0.14) && !o.noSheds) { // noSheds: districts.ts spawnView
       const len = rng.range(10, 22), z = rng.range(-BZ + 4 + len / 2, BZ - 4 - len / 2);
       sidewalkShed(stat, sx * (LX + 0.02), z, sx > 0 ? Math.PI / 2 : -Math.PI / 2, len);
     }
