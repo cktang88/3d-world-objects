@@ -125,6 +125,40 @@ function pickNext(s: Slot): RemoteEntry | null {
   return best;
 }
 
+/**
+ * Real size ranges per pool (metres): length = the longer horizontal side, height. Anything
+ * outside is rescaled to `target` length if its proportions then fit, else rejected.
+ */
+export const RANGES: Record<string, { len: [number, number]; h: [number, number]; target: number }> = {
+  car: { len: [3.6, 6], h: [1.3, 2.1], target: 4.6 },
+  carShow: { len: [3.6, 6], h: [1.3, 2.1], target: 4.6 },
+  truck: { len: [4, 14], h: [1.9, 4.6], target: 7 },
+  bike: { len: [1.4, 2.5], h: [0.7, 1.6], target: 1.9 },
+  train: { len: [8, 27], h: [3, 5.2], target: 18 },
+  plane: { len: [6, 75], h: [1.8, 20], target: 12 },
+  planeStand: { len: [10, 75], h: [3, 20], target: 38 },
+  deckPlane: { len: [7, 25], h: [2, 7], target: 16 },
+  heli: { len: [7, 22], h: [2.5, 6], target: 13 },
+  boat: { len: [2.5, 60], h: [0.5, 30], target: 8 },
+};
+/** the uniform factor that brings real-scaled dims into the pool's range (1 = fine), or null to reject */
+export function plausible(pool: string | null, x: number, y: number, z: number): number | null {
+  const R = pool ? RANGES[pool] : undefined;
+  if (!R) return 1;
+  const ok = (len: number, h: number) => len >= R.len[0] && len <= R.len[1] && h >= R.h[0] && h <= R.h[1];
+  const len = Math.max(x, z);
+  if (!(len > 0) || !(y > 0)) return null;
+  if (ok(len, y)) return 1;
+  const f = R.target / len;
+  return ok(len * f, y * f) ? f : null;
+}
+/** which of the slot's pools an entry came from */
+function poolOf(s: Slot, e: RemoteEntry): string | null {
+  const kinds = Array.isArray(s.spec.kind) ? s.spec.kind : [s.spec.kind];
+  for (const k of kinds) if (pools?.[k]?.some((x) => x.id === e.id)) return k;
+  return null;
+}
+
 const tmpBox = new THREE.Box3();
 const tmpV = new THREE.Vector3();
 
@@ -184,7 +218,15 @@ async function load(s: Slot) {
     const obj = m.object;
     tmpBox.setFromObject(obj);
     const size = tmpBox.getSize(new THREE.Vector3());
-    const k = realScale(e.title, e.entry, e.family, Math.max(size.x, size.y, size.z), e.ds);
+    let k = realScale(e.title, e.entry, e.family, Math.max(size.x, size.y, size.z), e.ds);
+    // vehicles, aircraft and boats must also land in their real ranges (a model titled "BMW 4"
+    // has no size word, and the family range alone would leave it toy-sized)
+    const fix = plausible(poolOf(s, e), size.x * k, size.y * k, size.z * k);
+    if (fix === null) {
+      disposeModel(m.object);
+      continue;
+    }
+    k *= fix;
     const dim = size.clone().multiplyScalar(k);
     const maxTris = spec.maxTris ?? 200_000;
     // the longer horizontal side along the slot's x
