@@ -11,7 +11,8 @@ function canvas(w: number, h = w): [HTMLCanvasElement, CanvasRenderingContext2D]
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  return [c, c.getContext('2d')!];
+  // CPU-backed: these canvases are read back (speckle, normal maps), which is slow on GPU canvases
+  return [c, c.getContext('2d', { willReadFrequently: true })!];
 }
 function tex(c: HTMLCanvasElement, repeat = true, srgb = true): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
@@ -77,11 +78,11 @@ export function dropTile(): Surf {
 }
 
 /** Pressed-tin ceiling panel (0.61 m): beaded border, corner fans and a centre medallion. */
-export function tinTile(paint: string): Surf {
-  return cached(`tin:${paint}`, () => {
-    const S = 512;
-    // height field
-    const [hc, h] = canvas(S);
+function tinRelief(): { hc: HTMLCanvasElement; normal: THREE.Texture } {
+  return cached('tinRelief', () => {
+    const S = 512; // drawn in 512 units onto a 256 canvas
+    const [hc, h] = canvas(256);
+    h.scale(0.5, 0.5);
     h.fillStyle = '#808080';
     h.fillRect(0, 0, S, S);
     const ring = (x: number, y: number, r: number, w: number, v: string) => {
@@ -144,7 +145,13 @@ export function tinTile(paint: string): Surf {
       h.fillStyle = rng.next() < 0.5 ? '#9a9a9a' : '#6a6a6a';
       h.fillRect(x, y, 3, 3);
     }
-    const normal = normalFrom(hc, 4);
+    return { hc, normal: normalFrom(hc, 3) };
+  });
+}
+export function tinTile(paint: string): Surf {
+  return cached(`tin:${paint}`, () => {
+    const { hc, normal } = tinRelief();
+    const S = 256;
     // colour: paint, darker in the recesses (dirt), lighter on the high points
     const [c, g] = canvas(S);
     g.fillStyle = paint;

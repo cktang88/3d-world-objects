@@ -7,11 +7,11 @@ import { Rng, hashN } from './rng';
 import { loadPools } from './museumData';
 import { loadRemote, isRebuilt, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { SHOPS } from './nyc';
-import { bake } from './nyc/common';
+import { bakeSteps } from './shopkit/bake';
 import { loadOriginal } from './detail';
 import { Kit, M, quad, surfMat, lit, type Seg, type Container } from './shopkit/kit';
 import { dropTile, tinTile, textTex } from './shopkit/tex';
-import { LAYOUTS, type Style } from './shopkit/layouts';
+import { LAYOUTS, type Layout, type Style } from './shopkit/layouts';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
 import { DRINK } from './shopkit/fixtures';
 import { searchLibrary, loadLibraryModel, type LibraryEntry, type LibraryQuery } from './libraries';
@@ -68,6 +68,9 @@ const LIB_QUERIES: Record<string, LibraryQuery[]> = {
 };
 const LIB_NAME: Record<string, string> = { gso: 'Google Scanned Objects', polyhaven: 'Poly Haven', smithsonian: 'Smithsonian', khronos: 'Khronos' };
 
+/** default per-call budget of ShopLevel.step() */
+export const SHOP_BUILD = { budgetMs: 4 };
+
 export const SHOP_BUDGET = { tris: 2_500_000 };
 
 export class ShopLevel implements Level {
@@ -86,7 +89,7 @@ export class ShopLevel implements Level {
   door = { pos: new THREE.Vector3(), yaw: 0, width: 1.6, height: 2.6 };
   room = { W: 0, D: 0, H: 0 };
   /** resolves once the stock has been placed (for the lab) */
-  stocked: Promise<void> = Promise.resolve();
+  stocked: Promise<void>;
   private cols: Rect[] = [];
   private ports: Portal[] = [];
   private alive = true;
@@ -94,7 +97,8 @@ export class ShopLevel implements Level {
   /** triangles we are willing to spend on products (sand3d instances and swapped-in originals) */
   private triBudget = SHOP_BUDGET.tris;
   /** stats for the lab */
-  stats = { products: 0, slots: 0, tris: 0, originals: 0, filler: 0 };
+  stats = { products: 0, slots: 0, tris: 0, originals: 0, filler: 0, buildMs: 0, buildSlices: 0, longestStepMs: 0, longestStep: '' };
+  private phase = 'start';
   private prio = 0;
   /**
    * Glass-fronted containers (coolers, showcases, curio cabinets, deli cases). Their stock is
@@ -103,56 +107,124 @@ export class ShopLevel implements Level {
    */
   containers: (Container & { generated: boolean; generate: () => void })[] = [];
 
+  /** resolves when the room and its fixtures are built (stock streams in after) */
+  ready: Promise<void>;
+  /** build progress, 0..1 (rough) */
+  progress = 0;
+  private steps: Generator<void, void, unknown>;
+  private stockPromise: Promise<void> = Promise.resolve();
+  private done = false;
+  private resolveReady!: () => void;
+
   /** seamless.ts: the doorway onto the street, and the shop front to hide when seen from outside */
   doorway?: Level['doorway'];
+  /**
+   * Staged construction (Level.staging): each next() builds one slice (the shell in parts, one
+   * fixture, a bake batch). Built with `{ staged: true }` the caller drains it (seamless.ts does,
+   * within a per-frame budget, or call step(ms)); otherwise the constructor finishes it at once.
+   */
   staging?: Iterator<unknown>;
   private front: THREE.Object3D | null = null;
 
-  /** staged: leave construction in `staging` (seamless.ts runs it in time slices) */
   constructor(desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean } = {}) {
     this.name = desc.name;
-    this.staging = this.steps(desc);
-    if (!opts.staged) finishBuilding(this);
-  }
-
-  private *steps(desc: Extract<LevelDesc, { kind: 'interior' }>) {
     const r = new Rng(hashN(desc.seed, 31));
     const type = desc.shop ?? 'deli';
     const layout = LAYOUTS[type] ?? LAYOUTS.deli;
     const st = layout.style(r);
     const { W, D } = st;
-    const kit = new Kit();
-    const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
     const doorX = layout.door?.(W, r) ?? 0;
-    this.shell(kit, st, doorX, desc.name, info.colors[0], r);
-    this.doorway = { pos: new THREE.Vector3(doorX, 0, D / 2), yaw: 0, hide: this.front ? [this.front] : [] };
-    yield;
-    layout.build(kit, r, st, { doorX, name: desc.name, color: info.colors[0] });
-    yield;
+    // the cheap facts first, so a caller can place the shop before it is built
     this.env = { ...this.env, ...st.env };
-    // merge static fixtures into a handful of meshes
-    const baked = bake(kit.stat);
-    baked.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = false) : null));
-    this.group.add(baked);
-    this.group.add(kit.live);
-    this.cols.push(...kit.cols);
-    this.containers = kit.containers.map((c) => ({ ...c, generated: false, generate: () => {} }));
     this.spawn.pos.set(doorX, 0, D / 2 - 1.1);
     this.door.pos.set(doorX, 0, D / 2);
     this.room = { W, D, H: st.H };
+    this.doorway = { pos: this.door.pos.clone(), yaw: 0, hide: [] };
     this.ports.push({ box: new THREE.Box3(new THREE.Vector3(doorX - 0.8, 0, D / 2 - 0.6), new THREE.Vector3(doorX + 0.8, 2.6, D / 2 + 0.3)), label: 'Back to the street', target: 'back' });
-    this.stocked = this.stock(kit.segs, info.pools, desc.seed, r.fork(9), type);
+    this.ready = new Promise((res) => (this.resolveReady = res));
+    this.steps = this.build(desc, type, layout, st, doorX, r);
+    this.stocked = this.ready.then(() => this.stockPromise);
+    this.staging = this.timed();
+    if (!opts.staged) finishBuilding(this);
+  }
+
+  /** the build, one slice per next(), with timing stats */
+  private *timed(): Generator<void, void, unknown> {
+    while (true) {
+      const t = performance.now();
+      const fin = this.steps.next().done;
+      const dt = performance.now() - t;
+      this.stats.buildMs += dt;
+      this.stats.buildSlices++;
+      if (dt > this.stats.longestStepMs) {
+        this.stats.longestStepMs = dt;
+        this.stats.longestStep = this.phase;
+      }
+      if (fin) {
+        this.done = true;
+        this.progress = 1;
+        this.resolveReady();
+        return;
+      }
+      yield;
+    }
+  }
+
+  /** drain the staged build for up to `budgetMs` milliseconds; true once it is complete */
+  step(budgetMs = SHOP_BUILD.budgetMs): boolean {
+    const t0 = performance.now();
+    while (this.staging && !this.done) {
+      if (this.staging.next().done) this.staging = undefined;
+      if (performance.now() - t0 >= budgetMs) break;
+    }
+    if (this.done) this.staging = undefined;
+    return this.done;
+  }
+
+  private *build(desc: Extract<LevelDesc, { kind: 'interior' }>, type: string, layout: Layout, st: Style, doorX: number, r: Rng): Generator<void, void, unknown> {
+    const kit = new Kit();
+    const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
+    this.phase = 'shell';
+    yield* this.shell(kit, st, doorX, desc.name, info.colors[0], r);
+    this.cols.push(...kit.cols);
+    kit.cols.length = 0;
+    yield;
+    this.progress = 0.1;
+    let n = 0;
+    this.phase = 'fixture 0';
+    for (const _ of layout.build(kit, r, st, { doorX, name: desc.name, color: info.colors[0] })) {
+      // colliders as soon as each fixture exists
+      if (kit.cols.length) {
+        this.cols.push(...kit.cols);
+        kit.cols.length = 0;
+      }
+      yield;
+      this.phase = `fixture ${++n}`;
+    }
+    this.cols.push(...kit.cols);
+    this.progress = 0.5;
+    // merge static fixtures into a handful of meshes, a slice at a time
+    const baked = new THREE.Group();
+    this.phase = 'bake';
+    yield* bakeSteps(kit.stat, baked);
+    this.phase = 'finish';
+    this.group.add(baked);
+    this.group.add(kit.live);
+    this.containers = kit.containers.map((c) => ({ ...c, generated: false, generate: () => {} }));
+    this.stockPromise = this.stock(kit.segs, info.pools, desc.seed, r.fork(9), type);
   }
 
   // ---------------------------------------------------------------- the room
 
-  private shell(k: Kit, st: Style, doorX: number, name: string, color: string, r: Rng) {
+  private *shell(k: Kit, st: Style, doorX: number, name: string, color: string, r: Rng): Generator<void, void, unknown> {
     const { W, D, H } = st;
     const T = 0.2;
     // floor
     const fl = quad(st.floor.m, W, D, st.floor.tile ?? [W, D]);
     fl.rotation.x = -Math.PI / 2;
     k.at(0, 0).add(fl);
+    yield;
+    this.phase = 'shell walls';
     // walls (inner faces) and a baseboard
     const wm = st.wall;
     const walls: [number, number, number, number][] = [
@@ -168,8 +240,14 @@ export class ShopLevel implements Level {
     this.cols.push({ minX: -W / 2 - 1, maxX: W / 2 + 1, minZ: -D / 2 - 1, maxZ: -D / 2 + 0.1 });
     this.cols.push({ minX: -W / 2 - 1, maxX: -W / 2 + 0.1, minZ: -D / 2 - 1, maxZ: D / 2 + 1 });
     this.cols.push({ minX: W / 2 - 0.1, maxX: W / 2 + 1, minZ: -D / 2 - 1, maxZ: D / 2 + 1 });
+    yield;
+    this.phase = 'shell ceiling';
     // ceiling
     k.at(0, 0);
+    // canvas textures are made once per kind and cached; making one is its own step
+    if (st.ceil === 'drop') dropTile();
+    else if (st.ceil === 'tin') tinTile(st.tin ?? '#efe9da');
+    yield;
     if (st.ceil === 'drop') {
       const s = dropTile();
       const c = k.face(surfMat(s, { rough: 0.95, ns: 0.6 }), W, D, 0, H, 0, s.tile);
@@ -195,6 +273,8 @@ export class ShopLevel implements Level {
       const c = k.face(mat(st.ceilColor ?? '#f2f0ea', { rough: 0.95 }), W, D, 0, H, 0);
       c.rotation.x = Math.PI / 2;
     }
+    yield;
+    this.phase = 'shell front';
     // shop front: windows onto the street and the door
     k.at(0, D / 2, Math.PI);
     const frontFrame = k.stat.children[k.stat.children.length - 1];
@@ -218,9 +298,12 @@ export class ShopLevel implements Level {
     k.stat.remove(frontFrame);
     const fg = new THREE.Group();
     fg.add(frontFrame);
-    this.front = bake(fg);
-    this.front.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = false) : null));
+    this.front = new THREE.Group();
+    yield* bakeSteps(fg, this.front as THREE.Group);
     this.group.add(this.front);
+    this.doorway?.hide?.push(this.front);
+    yield;
+    this.phase = 'shell signs';
     // name on the back wall
     if (st.banner !== false) {
       k.at(0, -D / 2 + 0.11);
