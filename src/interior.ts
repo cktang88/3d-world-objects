@@ -13,7 +13,7 @@ import { rugTex, windowViewTex, photoTex } from './rooms/tex';
 import * as F from './rooms/furniture';
 import { LIB, pickLib, fillHolder } from './rooms/lib';
 import { drawerContents, cabinetContents, upperContents, fridgeContents, closetContents } from './rooms/contents';
-import { detectDrawersSteps, runIdle, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
+import { readFront, detectDrawers, cutOpenings, compartment, frontMaterialAt, frontMaterial, slotMesh, fillCompartment, themeOf } from './lazy-furniture';
 import { adoptContainer } from './lazy';
 import { houseCore, wantsHouseCore, type HouseCore } from './rooms/vertical';
 
@@ -92,8 +92,6 @@ export interface Container {
   hideClosed?: boolean;
   /** the dark empty slot shown over the model's own front while the drawer is out */
   slot?: THREE.Object3D;
-  /** contents behind a door added to a library model: drawn through the model's front (lazy.ts) */
-  seeThrough?: boolean;
 }
 interface Frame {
   x: number;
@@ -1210,47 +1208,57 @@ export class InteriorLevel implements Level {
     this.libFill(entries, this.cur.room.type);
     const lib = this.lastLib, cur = this.cur, wood = this.pal.wood;
     if (!lib) return;
-    // reading the layout costs ~100 ms of rays on a real model: in idle time, 2 ms at a time
-    const st = { ms: 0, slices: 0, maxSlice: 0 };
-    lib.loaded.then(async (model) => {
+    lib.loaded.then((model) => {
       if (!model || lib.holder.userData.disposed || this.group.userData.disposed) return;
-      const bands = await runIdle(detectDrawersSteps(model, lib.holder, size, kind), 2, st);
-      if (lib.holder.userData.disposed || this.group.userData.disposed) return;
-      // (for the lab and perf notes: what reading the layout took)
-      ((globalThis as unknown as { __drawerProbe?: unknown[] }).__drawerProbe ??= []).push({ ms: +st.ms.toFixed(1), slices: st.slices, maxSlice: +st.maxSlice.toFixed(2) });
-      if (bands) {
-        for (const e of entries) {
-          e.obj.removeFromParent();
-          e.obj.traverse((o) => (o.userData.disposed = true));
-          const i = this.containers.indexOf(e);
-          if (i >= 0) this.containers.splice(i, 1);
-        }
-        const prev = this.cur;
-        this.cur = cur;
-        const d = Math.max(0.15, size[2] - 0.1);
-        entries = this.movingParts(
-          f,
-          bands.map((b) => (b.move === 'door'
-            ? { move: 'door' as const, kind: 'cabinet' as const, hinge: b.hinge, x: b.x, y: b.y, z: size[2] / 2 + 0.004, w: b.w, h: b.h, d, mat: wood }
-            : { move: 'drawer' as const, kind, x: b.x, y: b.y, z: size[2] / 2 + 0.004, w: b.w, h: b.h, d, mat: wood })),
-          true,
-        );
-        this.libFill(entries, cur.room.type);
-        this.cur = prev;
-        if (this.group.userData.containersAdopted) {
-          for (const e of entries) {
-            this.containers.splice(this.containers.indexOf(e), 1);
-            adoptContainer(e);
-          }
-        }
+      // the model's front as a depth grid (one pass over its triangles), the layout read off it
+      const t0 = performance.now();
+      const front = readFront(model, lib.holder, size);
+      const bands = detectDrawers(model, lib.holder, size, kind, front);
+      // (for the lab and perf notes)
+      const note = { gridMs: +front.ms.toFixed(1), tris: front.meshes.reduce((n, m) => n + (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3, 0), bands: bands?.length ?? 0, totalMs: 0, cut: 0 };
+      ((globalThis as unknown as { __drawerProbe?: unknown[] }).__drawerProbe ??= []).push(note);
+      if (!bands) {
+        // no layout: the added drawers stay (drawn only while out), in the model's main colour
+        const mat = frontMaterial(model);
+        if (mat) for (const e of entries) e.drawer?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
+        return;
       }
-      // each drawer front and door in the paint of the model's own front there
       for (const e of entries) {
-        // (off-centre and low: not on the knob or pull in the middle)
-        const lp = lib.holder.worldToLocal(e.obj.localToWorld(new THREE.Vector3(e.size.x * 0.3, e.size.y * 0.25, 0)));
-        const mat = frontMaterial(model, { holder: lib.holder, size, x: lp.x, y: lp.y });
-        if (mat) (e.drawer ?? e.door)?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
+        e.obj.removeFromParent();
+        e.obj.traverse((o) => (o.userData.disposed = true));
+        const i = this.containers.indexOf(e);
+        if (i >= 0) this.containers.splice(i, 1);
       }
+      // the paint of each front (sampled low and off-centre: not the knob), before the fronts are cut out
+      const paints = bands.map((b) => frontMaterialAt(front, b.x + b.w * 0.3, b.y + b.h * 0.25));
+      // cut the fronts out of the model, and put real drawers / doors and compartments in the holes
+      const cut = cutOpenings(front, bands);
+      const prev = this.cur;
+      this.cur = cur;
+      const d = Math.max(0.15, size[2] - 0.12);
+      const zf = (bands[0].z ?? front.zf) + 0.002;
+      entries = this.movingParts(
+        f,
+        bands.map((b) => (b.move === 'door'
+          ? { move: 'door' as const, kind: 'cabinet' as const, hinge: b.hinge, x: b.x, y: b.y, z: zf, w: b.w, h: b.h, d, mat: wood }
+          : { move: 'drawer' as const, kind, x: b.x, y: b.y, z: zf, w: b.w, h: b.h, d, mat: wood })),
+      );
+      this.cur = prev;
+      for (const e of entries) e.obj.add(compartment(e.size.x + 0.012, e.size.y + 0.006, e.size.z + 0.03));
+      this.libFill(entries, cur.room.type);
+      if (this.group.userData.containersAdopted) {
+        for (const e of entries) {
+          this.containers.splice(this.containers.indexOf(e), 1);
+          adoptContainer(e);
+        }
+      }
+      // fronts and doors in the paint of the model's own front there
+      entries.forEach((e, i) => {
+        const mat = paints[i];
+        if (mat) (e.drawer ?? e.door)?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === wood) m.material = mat; });
+      });
+      note.totalMs = +(performance.now() - t0).toFixed(1);
+      note.cut = cut;
     });
   }
 
@@ -1297,17 +1305,14 @@ export class InteriorLevel implements Level {
       };
       const entry: Container = { kind: pt.kind, obj, size: new THREE.Vector3(pt.w, pt.h, pt.d), room: this.cur.room, generate: gen };
       if (pt.move === 'drawer') entry.drawer = mover;
-      else entry.open = open;
+      else {
+        // a door: our open() swings it (lazy.ts uses `door` only to show / hide it)
+        entry.open = open;
+        entry.door = mover;
+      }
       if (hideClosed) {
         entry.hideClosed = true;
         mover.visible = false;
-        // a door: lazy.ts shows/hides `door`, our open() swings it; the cupboard's inside is drawn
-        // through the model's own (closed) front, after the slot and before the door leaf
-        if (pt.move === 'door') {
-          entry.door = mover;
-          entry.seeThrough = true;
-          mover.traverse((o) => (o.renderOrder = 3));
-        }
         // the model's own closed front stays behind a pulled-out drawer: cover it with an empty slot
         entry.slot = slotMesh(pt.w, pt.h);
         entry.slot.position.z = -0.003;

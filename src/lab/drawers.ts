@@ -53,8 +53,8 @@ const scene: LabScene = {
       if (which) {
         rays.length = 0;
         for (const c of (level as unknown as { containers: (C & { door?: THREE.Object3D })[] }).containers) {
-          if (!c.hideClosed || !c.obj.parent || c.obj.position.distanceTo(p0.obj.position) > 1.5) continue;
-          if ((which === 'doors' && !c.door) || (which === 'drawers' && !c.drawer)) continue;
+          if (!c.obj.parent || c.obj.position.distanceTo(p0.obj.position) > 1.5) continue;
+          if (which === 'none' || (which === 'doors' && !c.door) || (which === 'drawers' && !c.drawer)) continue;
           rays.push(new THREE.Ray(c.obj.localToWorld(new THREE.Vector3(c.size.x * 0.25, c.size.y / 2, 1.0)), c.obj.getWorldDirection(new THREE.Vector3()).negate()));
         }
       }

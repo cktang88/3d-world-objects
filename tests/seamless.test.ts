@@ -8,7 +8,7 @@ import { InteriorLevel } from '../src/interior';
 import { Vertical } from '../src/vertical';
 import { Player } from '../src/player';
 import { Lazy, registerContainer } from '../src/lazy';
-import { detectDrawers, frontMaterial, fillCompartment, themeOf } from '../src/lazy-furniture';
+import { detectDrawers, frontMaterial, fillCompartment, themeOf, readFront, cutOpenings, compartment } from '../src/lazy-furniture';
 import { realScale } from '../src/realscale';
 import type { Level, LevelDesc, Portal } from '../src/level';
 
@@ -347,4 +347,59 @@ test('library cupboards: doors read off the model with the hinge away from the k
     }
   }
   expect(themeOf('kitchen', true) === 'dishes' && themeOf('bedroom', false) === 'clothes', 'room themes');
+});
+
+test('library openings: the front grid is read in one fast pass, fronts are cut out of the model, compartments close the holes', () => {
+  // the cupboard of the test above, built dense (~45k triangles, like a library model)
+  const W = 0.9, H = 1.0, D = 0.45;
+  const model = new THREE.Group();
+  const add = (w: number, h: number, d: number, x: number, y: number, z: number, seg = 1) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d, Math.ceil(w * seg), Math.ceil(h * seg), 2), new THREE.MeshStandardMaterial({ color: '#f0ece4' }));
+    m.position.set(x, y + h / 2, z);
+    model.add(m);
+  };
+  add(W, H, D - 0.02, 0, 0, -0.01, 60);
+  for (const sx of [-1, 1]) {
+    add(W / 2 - 0.05, 0.2, 0.02, sx * (W / 4 - 0.005), 0.72, D / 2 - 0.01, 60);
+    add(W / 2 - 0.05, 0.6, 0.02, sx * (W / 4 - 0.005), 0.08, D / 2 - 0.01, 60);
+    add(0.03, 0.03, 0.03, sx * 0.07, 0.38, D / 2 + 0.015, 4);
+  }
+  const holder = new THREE.Group();
+  holder.add(model);
+  let tris = 0;
+  model.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) tris += m.geometry.index!.count / 3; });
+  readFront(model, holder, [W, H, D]); // warm up (JIT)
+  const front = readFront(model, holder, [W, H, D]);
+  const t0 = performance.now();
+  const bands = detectDrawers(model, holder, [W, H, D], 'dresser', front)!;
+  const detectMs = performance.now() - t0;
+  console.log(`   ${tris} triangles: front grid ${fmt(front.ms)} ms (${front.nx}x${front.ny}), layout ${fmt(detectMs)} ms, ${bands.length} openings`);
+  expect(front.ms + detectMs < 25, `reading the layout took ${fmt(front.ms + detectMs)} ms in Node (budget: ~5 ms in the browser)`);
+  // cut: afterwards nothing of the model stands in front of an opening
+  const shared = (model.children[1] as THREE.Mesh).geometry;
+  const cut = cutOpenings(front, bands);
+  expect(cut > 0, 'nothing was cut');
+  expect((model.children[1] as THREE.Mesh).geometry !== shared, 'cut the shared geometry instead of a clone');
+  const after = readFront(model, holder, [W, H, D]);
+  for (const b of bands) {
+    let worst = -Infinity;
+    for (let x = b.x - b.w / 2 + 0.02; x < b.x + b.w / 2 - 0.02; x += 0.01)
+      for (let y = b.y + 0.02; y < b.y + b.h - 0.02; y += 0.01) {
+        const i = Math.floor((x - after.x0) / after.cell), j = Math.floor((y - after.y0) / after.cell);
+        worst = Math.max(worst, after.z[j * after.nx + i]);
+      }
+    expect(worst < front.zf - 0.01, `${b.move ?? 'drawer'} at ${fmt(b.x)},${fmt(b.y)}: the model still reaches z ${fmt(worst)} in the opening (front ${fmt(front.zf)})`);
+  }
+  // a compartment behind each hole: looking straight in, you see its back, not through to the wall
+  for (const b of bands) {
+    const g = compartment(b.w, b.h, D - 0.1);
+    g.updateMatrixWorld(true);
+    for (const [fx, fy] of [[0, 0.5], [-0.4, 0.2], [0.4, 0.8]]) {
+      const hit = new THREE.Raycaster(new THREE.Vector3(fx * b.w, fy * b.h, 0.5), new THREE.Vector3(0, 0, -1)).intersectObject(g, true)[0];
+      expect(hit && hit.point.z <= -(D - 0.1) + 0.001, `compartment open at (${fx}, ${fy}): ${hit ? fmt(hit.point.z) : 'no hit'}`);
+    }
+    // and from an angle the sides and floor close it
+    const side = new THREE.Raycaster(new THREE.Vector3(0, b.h / 2, 0.05), new THREE.Vector3(0.6, -0.25, -1).normalize()).intersectObject(g, true)[0];
+    expect(side, 'a ray in at an angle got out of the compartment');
+  }
 });
