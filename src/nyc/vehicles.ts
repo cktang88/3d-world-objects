@@ -323,19 +323,46 @@ export interface Car {
   obj: THREE.Group;
   axis: 'x' | 'z';
   dir: number;
+  /** lateral position of the lane centre (x for avenues, z for streets); eases toward lineTo when changing lanes */
   line: number;
+  lineTo: number;
   t: number;
   v: number;
   vmax: number;
   len: number;
   wid: number;
   rect: Rect;
+  /** which road this car keeps to when it is recycled: avenue (axis z) or street, offset from the player's */
+  slot: { axis: 'x' | 'z'; k: number };
+  kind: VehicleKind;
+  /** a double-parked delivery truck: stands still in the kerb-side lane with its hazards on */
+  parked?: boolean;
 }
+
+/**
+ * How many vehicles keep to which road around the player. Midtown avenues are packed (three lanes of queues and
+ * platoons released by the signals), side avenues less, cross streets carry a trickle.
+ */
+const SLOTS: { axis: 'x' | 'z'; k: number; n: number }[] = [
+  { axis: 'z', k: 0, n: 72 },
+  { axis: 'z', k: -1, n: 12 },
+  { axis: 'z', k: 1, n: 12 },
+  { axis: 'x', k: -2, n: 3 },
+  { axis: 'x', k: -1, n: 4 },
+  { axis: 'x', k: 0, n: 4 },
+  { axis: 'x', k: 1, n: 4 },
+  { axis: 'x', k: 2, n: 3 },
+];
+/** avenue lanes (offset from the centre line): three moving lanes between the two parking lanes */
+const AVE_LANES = [-3.6, 0, 3.6];
+/** how far ahead/behind the player traffic is simulated (m) */
+const RANGE = 200;
 
 export class Traffic {
   cars: Car[] = [];
   portals: Portal[] = [];
   private rng: Rng;
+  private warm = false;
   constructor(private group: THREE.Group, seed: number) {
     this.rng = new Rng(hashN(seed, 404));
     group.add(fleetInstances.root); // mid/far LODs of every fleet car (parked and moving) in this level
@@ -343,48 +370,128 @@ export class Traffic {
   rects() {
     return this.cars.map((c) => c.rect);
   }
-  private place(c: Car, p: THREE.Vector3) {
+  private spawn(slot: Car['slot'], p: THREE.Vector3, parked = false) {
     const r = this.rng;
-    c.axis = r.chance(0.6) ? 'z' : 'x';
+    const ave = slot.axis === 'z';
+    const kind: VehicleKind = parked
+      ? 'truck'
+      : r.chance(ave ? 0.05 : 0.02)
+        ? 'bus'
+        : r.chance(0.06)
+          ? 'truck'
+          : r.chance(ave ? 0.42 : 0.3)
+            ? 'cab'
+            : 'sedan';
+    const obj = carMesh(kind, r);
+    this.group.add(obj);
+    const c: Car = {
+      obj, axis: slot.axis, dir: 1, line: 0, lineTo: 0, t: 0, v: 0, vmax: parked ? 0 : r.range(ave ? 8.5 : 6.5, ave ? 12.5 : 10),
+      len: obj.userData.len ?? 4.8, wid: obj.userData.wid ?? 1.9, rect: { minX: 0, minZ: 0, maxX: 0, maxZ: 0 }, slot, kind, parked,
+    };
+    this.place(c, p, true);
+    this.cars.push(c);
+  }
+  /** put a car on its road: anywhere in range at start, upstream of the player when recycled */
+  private place(c: Car, p: THREE.Vector3, initial = false) {
+    const r = this.rng;
     if (c.axis === 'z') {
-      const k = Math.round(p.x / AX - 0.5) + r.int(-1, 1);
+      const k = Math.round(p.x / AX - 0.5) + c.slot.k;
       c.dir = k % 2 === 0 ? -1 : 1; // one-way avenues alternate
-      c.line = (k + 0.5) * AX + r.pick([-3.6, 0, 3.6]);
-      c.t = p.z - c.dir * r.range(60, 140);
+      // buses and double-parked trucks keep to the kerb-side lanes
+      const lanes = c.parked || c.kind === 'bus' ? [AVE_LANES[0], AVE_LANES[2]] : AVE_LANES;
+      c.line = (k + 0.5) * AX + r.pick(lanes);
+      // at start mostly downstream of the player (in view when looking along the traffic), later fed from upstream
+      c.t = p.z - c.dir * (initial ? r.range(-RANGE * 0.95, RANGE * 0.35) : r.range(RANGE * 0.7, RANGE * 0.95));
     } else {
-      const k = Math.round(p.z / SZ - 0.5) + r.int(-2, 2);
+      const k = Math.round(p.z / SZ - 0.5) + c.slot.k;
       c.dir = k % 2 === 0 ? 1 : -1;
       c.line = (k + 0.5) * SZ;
-      c.t = p.x - c.dir * r.range(60, 140);
+      c.t = p.x - c.dir * (initial ? r.range(-RANGE * 0.8, RANGE * 0.8) : r.range(RANGE * 0.6, RANGE * 0.9));
     }
+    c.lineTo = c.line;
     // [districts] roads end at parks, the airport and the river: start on a road that is there
     for (let i = 0; i < 8 && !laneOpen(c.axis, c.line, c.t); i++) c.t += c.dir * SZ;
-    // never drop a car onto (or right behind) one already in that lane: back off until there is a gap
-    for (let i = 0; i < 20; i++) {
-      const hit = this.cars.find(
-        (o) => o !== c && o.axis === c.axis && o.dir === c.dir && Math.abs(o.line - c.line) <= 1 && Math.abs(o.t - c.t) < (o.len + c.len) / 2 + 6,
-      );
-      if (!hit) break;
-      c.t = hit.t - c.dir * ((hit.len + c.len) / 2 + 8);
+    // double-parked trucks stand clear of intersections (mid-block)
+    if (c.parked) {
+      const P = c.axis === 'z' ? SZ : AX;
+      const mid = (Math.round(c.t / P - 0.5) + 0.5) * P + P / 2;
+      c.t = mid + r.range(-P * 0.25, P * 0.25);
     }
-    c.v = c.vmax;
+    // never drop a car onto (or right behind) one already in that lane: back off until there is a gap
+    for (let i = 0; i < 30; i++) {
+      const hit = this.cars.find((o) => o !== c && o.axis === c.axis && Math.abs(o.line - c.line) <= 1.2 && Math.abs(o.t - c.t) < (o.len + c.len) / 2 + 3);
+      if (!hit) break;
+      c.t = hit.t - c.dir * ((hit.len + c.len) / 2 + 3 + r.range(0, 4));
+    }
+    c.v = c.parked ? 0 : c.vmax * (initial ? 0.6 : 1);
+    // not so fast that it could not stop for the next signal from here
+    if (!c.parked) {
+      const period = c.axis === 'z' ? SZ : AX, half = c.axis === 'z' ? ST / 2 : AVE / 2;
+      const front = c.t + (c.dir * c.len) / 2;
+      const k = c.dir > 0 ? Math.floor((front + half) / period - 0.5) + 1 : Math.ceil((front - half) / period - 0.5) - 1;
+      const dist = ((k + 0.5) * period - c.dir * (half + 4.2) - front) * c.dir;
+      if (dist < 30) c.v = Math.min(c.v, Math.max(0, dist - 1) * 0.4);
+    }
     c.obj.rotation.y = c.axis === 'z' ? (c.dir > 0 ? Math.PI : 0) : c.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
   }
   update(dt: number, p: THREE.Vector3, time: number) {
-    while (this.cars.length < 26) {
-      const kind: VehicleKind = this.rng.chance(0.07) ? 'bus' : this.rng.chance(0.07) ? 'truck' : this.rng.chance(0.5) ? 'cab' : 'sedan';
-      const obj = carMesh(kind, this.rng);
-      this.group.add(obj);
-      const c: Car = { obj, axis: 'z', dir: 1, line: 0, t: 0, v: 0, vmax: this.rng.range(9, 14), len: obj.userData.len ?? 4.8, wid: obj.userData.wid ?? 1.9, rect: { minX: 0, minZ: 0, maxX: 0, maxZ: 0 } };
-      this.place(c, p);
-      this.cars.push(c);
+    if (!this.cars.length) {
+      for (const s of SLOTS) for (let i = 0; i < s.n; i++) this.spawn({ axis: s.axis, k: s.k }, p);
+      // one or two delivery trucks double-parked on the player's avenue
+      for (let i = 0; i < 2; i++) this.spawn({ axis: 'z', k: 0 }, p, true);
     }
+    if (!this.warm) {
+      // settle 40 s of traffic before the first frame, so queues and platoons are already there at load
+      this.warm = true;
+      for (let s = 0; s < 160; s++) this.step(0.25, p, time - 40 + s * 0.25);
+    }
+    this.step(dt, p, time);
+    // near LODs on, everything else into the instance batches (parked cars of every chunk included)
+    fleetInstances.update(p);
+  }
+  private laneFree(c: Car, line: number) {
+    for (const o of this.cars) {
+      if (o === c || o.axis !== c.axis || (Math.abs(o.line - line) > 1.5 && Math.abs(o.lineTo - line) > 1.5)) continue;
+      // room ahead, and behind enough for whoever comes up that lane to brake
+      const behind = (c.t - o.t) * c.dir > 0;
+      if (Math.abs(o.t - c.t) < (o.len + c.len) / 2 + 4 + (behind ? o.v * 1.2 : 0)) return false;
+    }
+    return true;
+  }
+  private step(dt: number, p: THREE.Vector3, time: number) {
     for (const c of this.cars) {
       const along = c.axis === 'x' ? p.x : p.z;
       const across = c.axis === 'x' ? p.z : p.x;
-      if (Math.abs(c.t - along) > 170 || Math.abs(c.line - across) > 200) this.place(c, p);
-      // red light: stop before the next intersection
+      // (recycle well beyond the placement range: a crowded upstream backs new cars off past it)
+      if (Math.abs(c.t - along) > RANGE * 1.3 || Math.abs(c.line - across) > 260) this.place(c, p);
+      const x0 = c.axis === 'x' ? c.t : c.line, z0 = c.axis === 'x' ? c.line : c.t;
+      if (c.parked) {
+        c.obj.userData.braking = Math.floor(time * 1.6) % 2 === 0; // hazard flashers
+        this.finish(c, x0, z0);
+        continue;
+      }
       let target = c.vmax;
+      // follow the car ahead in the same lane (or in the lane it is moving into)
+      let blocker: Car | null = null;
+      let leadGap = 1e9;
+      for (const o of this.cars) {
+        if (o === c || o.axis !== c.axis || o.dir !== c.dir) continue;
+        if (Math.abs(o.line - c.line) > 1.6 && Math.abs(o.line - c.lineTo) > 1.6 && Math.abs(o.lineTo - c.line) > 1.6) continue;
+        const ahead = (o.t - c.t) * c.dir;
+        // o is ahead (ties broken by order) — also when they already overlap, so the rear one waits
+        if (ahead < 0 || (ahead === 0 && this.cars.indexOf(o) > this.cars.indexOf(c))) continue;
+        const gap = ahead - (o.len + c.len) / 2;
+        leadGap = Math.min(leadGap, gap);
+        if (gap < 30) {
+          // ~1 s headway with 2.5 m standstill spacing, so platoons keep moving at speed
+          const tg = Math.max(0, gap - 2.5);
+          if (tg < target) {
+            target = tg;
+            blocker = o;
+          }
+        }
+      }
+      // red light: stop before the next intersection
       const period = c.axis === 'z' ? SZ : AX;
       const halfCross = c.axis === 'z' ? ST / 2 : AVE / 2;
       const front = c.t + (c.dir * c.len) / 2;
@@ -399,7 +506,8 @@ export class Traffic {
       // (going on yellow only if the front reaches the box before the red)
       const ph = ((time % CYCLE) + CYCLE) % CYCLE;
       const yellowLeft = (c.axis === 'z' ? SIGNAL.aveRed : SIGNAL.stRed) - ph;
-      const stop = light === 'r' || (light === 'y' && (dist > (c.v * c.v) / 8 - 1 || (dist + 4.2) / Math.max(c.v, 0.1) > yellowLeft - 0.15));
+      // (and only with a clear road ahead: a follower slowed by its leader would reach the box on red)
+      const stop = light === 'r' || (light === 'y' && (dist > (c.v * c.v) / 8 - 1 || (dist + 4.2) / Math.max(c.v, 0.1) > yellowLeft - 0.7 || leadGap < 15));
       if (stop && dist < 30) target = Math.min(target, Math.max(0, (dist - 0.5) * 1.2));
       // [districts] a dead end ahead (park, airport, river): stop there; vanish once out of sight range
       {
@@ -409,14 +517,15 @@ export class Traffic {
           else target = 0;
         }
       }
-      // follow the car ahead in the same lane
-      for (const o of this.cars) {
-        if (o === c || o.axis !== c.axis || o.dir !== c.dir || Math.abs(o.line - c.line) > 1) continue;
-        const ahead = (o.t - c.t) * c.dir;
-        // o is ahead (ties broken by order) — also when they already overlap, so the rear one waits
-        if (ahead < 0 || (ahead === 0 && this.cars.indexOf(o) > this.cars.indexOf(c))) continue;
-        const gap = ahead - (o.len + c.len) / 2;
-        if (gap < 25) target = Math.min(target, Math.max(0, (gap - 2.5) * 1.0));
+      // stuck behind a double-parked truck: move over a lane when there is room
+      if (blocker?.parked && c.axis === 'z' && c.line === c.lineTo) {
+        const centreLine = (Math.round(c.line / AX - 0.5) + 0.5) * AX;
+        const inner = c.line - Math.sign(c.line - centreLine) * 3.6;
+        if (this.laneFree(c, inner)) c.lineTo = inner;
+      }
+      if (c.line !== c.lineTo) {
+        const d = c.lineTo - c.line;
+        c.line += Math.sign(d) * Math.min(Math.abs(d), dt * 1.4);
       }
       // don't run the player over
       const pg = (along - c.t) * c.dir - c.len / 2;
@@ -428,15 +537,14 @@ export class Traffic {
       c.v += (target - c.v) * Math.min(1, dt * (target < c.v ? 4 : 1.2));
       c.t += c.dir * c.v * dt;
       const x = c.axis === 'x' ? c.t : c.line, z = c.axis === 'x' ? c.line : c.t;
-      c.obj.position.set(x, 0, z);
       const wheels = c.obj.userData.wheels as THREE.Object3D[] | undefined;
       if (wheels) for (const w of wheels) w.rotation.x -= (c.v * dt) / c.obj.userData.wheelR;
-      const hx = (c.axis === 'x' ? c.len : c.wid) / 2, hz = (c.axis === 'x' ? c.wid : c.len) / 2;
-      c.rect.minX = x - hx; c.rect.maxX = x + hx; c.rect.minZ = z - hz; c.rect.maxZ = z + hz;
+      this.finish(c, x, z);
     }
-    // near LODs on, everything else into the instance batches (parked cars of every chunk included)
-    fleetInstances.update(p);
+  }
+  private finish(c: Car, x: number, z: number) {
+    c.obj.position.set(x, 0, z);
+    const hx = (c.axis === 'x' ? c.len : c.wid) / 2, hz = (c.axis === 'x' ? c.wid : c.len) / 2;
+    c.rect.minX = x - hx; c.rect.maxX = x + hx; c.rect.minZ = z - hz; c.rect.maxZ = z + hz;
   }
 }
-
-

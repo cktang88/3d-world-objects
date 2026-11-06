@@ -381,7 +381,7 @@ export class NycLevel implements Level {
       // parked cars on streets (and sand3d vehicles you can shrink into)
       const lane = run.axis === 'x' ? (BZ + 1.15) * Math.sign(run.c) : (BX + 1.15) * Math.sign(run.c);
       for (let t = run.from + 4; t < run.to - 4; t += rng.range(6.5, 9)) {
-        if (!rng.chance(run.ave ? 0.35 : 0.55)) continue;
+        if (!rng.chance(run.ave ? 0.85 : 0.8)) continue; // Manhattan kerbs are nearly full
         const x = run.axis === 'x' ? t : lane;
         const z = run.axis === 'x' ? lane : t;
         if (rng.chance(0.18)) {
