@@ -42,6 +42,7 @@ const AREAS = {
   districts: ['districts', 'districts-blocks', 'districts-open'],
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop'], shops: ['shop'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
+  lighting: ['lighting'], light: ['lighting'],
   museum: ['museum'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['seamless', 'museum'],
 };
 /** changed file -> areas (first match wins; '*' = every test file). Add a line when you add a test file. */
@@ -61,6 +62,7 @@ const SRC_MAP = [
   [/^src\/(museum\.ts|museumData\.ts|museum\/|libraries\.ts)/, ['museum']],
   [/^src\/(seamless|lazy)\.ts$/, ['seamless', 'lazy']],
   [/^src\/realscale\.ts$/, ['realscale']],
+  [/^src\/lighting\.ts$/, ['lighting']],
   [/^src\/(assets|remote|materials|textures|pbr)\.ts$/, ['nyc', 'interior', 'shop']],
 ];
 const walk = (d) => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : [p]; });

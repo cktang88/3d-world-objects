@@ -84,6 +84,27 @@ export const PRESETS: Record<TimeOfDay, Preset> = {
   },
 };
 
+const _ca = new THREE.Color(), _cb = new THREE.Color();
+/**
+ * Interpolate two presets (numbers linearly, #hex colours in linear RGB; other strings and
+ * booleans switch at the midpoint). Used for smooth time-of-day / overcast transitions.
+ */
+export function blendPreset<T>(a: T, b: T, t: number): T {
+  if (typeof a === 'number' && typeof b === 'number') return (a + (b - a) * t) as T;
+  if (typeof a === 'string' && typeof b === 'string') {
+    if (/^#[0-9a-f]{6}$/i.test(a) && /^#[0-9a-f]{6}$/i.test(b)) return ('#' + _ca.set(a).lerp(_cb.set(b), t).getHexString()) as T;
+    return (t < 0.5 ? a : b) as T;
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(a as object)) out[k] = blendPreset((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], t);
+    return out as T;
+  }
+  if (a === undefined) return (t < 0.5 ? a : b) as T;
+  if (b === undefined) return (t < 0.5 ? a : b) as T;
+  return (t < 0.5 ? a : b) as T;
+}
+
 /** CC0 indoor HDRIs (Poly Haven) used as image-based light for each kind of interior */
 export const INDOOR_HDRI: Record<Exclude<Place, 'outdoor' | 'studio'>, { hdri: string; mean: number }> = {
   museum: { hdri: 'sculpture_exhibition', mean: 0.75 },
@@ -260,12 +281,25 @@ function dirFromPixel(c: number, r: number, W: number, H: number, out: THREE.Vec
   return out.set(Math.cos(el) * Math.cos(a), Math.sin(el), Math.cos(el) * Math.sin(a));
 }
 
-function analyse(tex: THREE.DataTexture, clampMul: number, sat = 1): Omit<Hdri, 'tex' | 'env'> {
+/**
+ * Measure an equirect HDRI in place (exported for tests): median sky, sun direction, horizon
+ * colour; clamps everything brighter than clampMul x median (the sun, which the directional light
+ * supplies), desaturates by sat, and replaces non-finite pixels (Inf/NaN would turn the whole frame
+ * black through PMREM and bloom) with the cap.
+ */
+export function analyse(tex: THREE.DataTexture, clampMul: number, sat = 1): Omit<Hdri, 'tex' | 'env'> {
   const img = tex.image as unknown as { data: Uint16Array; width: number; height: number };
   const { data, width: W, height: H } = img;
   const half = THREE.DataUtils.fromHalfFloat;
   const lum = new Float32Array(W * H);
-  for (let i = 0, p = 0; i < W * H; i++, p += 4) lum[i] = 0.2126 * half(data[p]) + 0.7152 * half(data[p + 1]) + 0.0722 * half(data[p + 2]);
+  const BIG = 65504;
+  for (let i = 0, p = 0; i < W * H; i++, p += 4) {
+    for (let k = 0; k < 3; k++) {
+      const v = half(data[p + k]);
+      if (!Number.isFinite(v) || v < 0) data[p + k] = THREE.DataUtils.toHalfFloat(Number.isNaN(v) || v < 0 ? 0 : BIG);
+    }
+    lum[i] = 0.2126 * half(data[p]) + 0.7152 * half(data[p + 1]) + 0.0722 * half(data[p + 2]);
+  }
   // median of the upper sky
   const samples: number[] = [];
   for (let i = 0; i < (W * H) / 2; i += 7) samples.push(lum[i]);
@@ -446,6 +480,8 @@ export class Lighting {
     scene.add(this.lampGroup);
     this.grade.uniforms.uAspect.value = innerWidth / innerHeight;
     rig = this;
+    // a lost GL context (out of GPU memory) shows as a black frame: make it visible in debug()
+    renderer.domElement.addEventListener?.('webglcontextlost', () => (this.status = 'webgl context lost'));
   }
 
   /** re-apply the weather modifiers on top of the current outdoor preset */
@@ -594,6 +630,7 @@ export class Lighting {
     this.ready = pr;
     const h = await pr;
     if (!h || token !== this.loadToken || !this.env) return;
+    if (!(h.mean > 1e-5 && Number.isFinite(h.mean))) return;
     this.scene.environment = h.env;
     // normalise: the HDRI's mean radiance becomes spec.mean, scaled by the level's own envIntensity
     this.scene.environmentIntensity = (spec.mean / Math.max(1e-5, h.mean)) * this.env.envIntensity;
@@ -657,6 +694,11 @@ export class Lighting {
     this.ready = pr;
     const h = await pr;
     if (!h || token !== this.loadToken || this.place !== 'outdoor') return;
+    // a black or broken image would blow the normalisation up: keep the physical sky instead
+    if (!(h.skyMean > 1e-5 && Number.isFinite(h.skyMean))) {
+      this.status = `bad HDRI ${p.hdri}`;
+      return;
+    }
     this.status = '';
     this.hdriKey = key;
     const scale = p.sky / Math.max(1e-6, h.skyMean);
