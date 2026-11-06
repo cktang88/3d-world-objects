@@ -447,7 +447,9 @@ export class Minimap {
     const placed: Box[] = [];
     const labels = src.labels?.(x0, z0, x1, z1) ?? [];
     // the HUD-sized legend box and the help line are taken first
-    placed.push({ x0: 0, y0: H - 150 * k, x1: 190 * k, y1: H }, { x0: 0, y0: H - 30 * k, x1: W, y1: H });
+    const lg = src.legend ?? [];
+    const legendTop = H - (40 + lg.length * 17 + 18) * k;
+    placed.push({ x0: 0, y0: legendTop - 4 * k, x1: 236 * k, y1: H }, { x0: 0, y0: H - 30 * k, x1: W, y1: H });
     const dSize = Math.max(11, Math.min(20, 15 * Math.sqrt(zoom / 0.5))) * k;
     for (const l of labels) if (l.kind === 'district') {
       const [sx, sy] = toS(l.x, l.z);
@@ -504,11 +506,10 @@ export class Minimap {
       this.label(g, [], t, hx + 16 * k + (t.length * 12 * k * 0.56) / 2, hy - 14 * k, 12 * k, '#ffffff', 500);
     }
     // legend
-    const lg = src.legend ?? [];
     g.textAlign = 'left';
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = 'rgba(20,28,34,.82)';
-    g.fillRect(12 * k, H - (40 + lg.length * 17 + 18) * k, 170 * k, (lg.length * 17 + 30) * k);
+    g.fillRect(12 * k, legendTop, 220 * k, (lg.length * 17 + 30) * k);
     lg.forEach(([color, text], i) => {
       const y = H - (40 + (lg.length - i) * 17) * k;
       g.fillStyle = color;
