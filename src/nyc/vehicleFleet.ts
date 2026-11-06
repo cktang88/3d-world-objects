@@ -435,13 +435,16 @@ function textureAverage(t: THREE.Texture): THREE.Color {
 
 /** the far-far LOD: the far parts merged into one vertex-coloured mesh with this car's paint baked in */
 const LOD2_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.25, name: 'car-lod2' });
+const LOD1_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, name: 'car-lod1' });
 const lod2Cache = new Map<string, THREE.BufferGeometry>();
-function lod2Geometry(p: Prepared, paint: THREE.Material): THREE.BufferGeometry {
-  const key = `${p.id}|${paint.uuid}`;
+function lod2Geometry(p: Prepared, paint: THREE.Material | null): THREE.BufferGeometry {
+  // paint null: everything but the paint (the mid LOD draws its paint separately)
+  const key = `${p.id}|${paint ? paint.uuid : 'nopaint'}`;
   let geo = lod2Cache.get(key);
   if (!geo) {
     const geos: THREE.BufferGeometry[] = [];
     for (const part of p.lod1) {
+      if (!paint && part.mat === 'paint') continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', part.geo.getAttribute('position'));
       g.setAttribute('normal', part.geo.getAttribute('normal'));
@@ -451,7 +454,7 @@ function lod2Geometry(p: Prepared, paint: THREE.Material): THREE.BufferGeometry 
       const src = part.geo.getAttribute('color') as THREE.BufferAttribute | undefined;
       if (src && part.mat !== 'paint') col = src;
       else {
-        const m = (part.mat === 'paint' ? paint : part.mat) as THREE.MeshStandardMaterial;
+        const m = (part.mat === 'paint' ? paint! : part.mat) as THREE.MeshStandardMaterial;
         const c = m.color.clone();
         if (m.map) c.multiply(textureAverage(m.map));
         const arr = new Float32Array(n * 3);
@@ -469,7 +472,7 @@ function lod2Geometry(p: Prepared, paint: THREE.Material): THREE.BufferGeometry 
 }
 
 /** Build one car object: a THREE.LOD (near, far, one-draw-call far-far) sharing everything but the paint. */
-export function fleetObject(p: Prepared, paint: THREE.Material, far = 26, farther = 70): THREE.LOD {
+export function fleetObject(p: Prepared, paint: THREE.Material, far = 20, farther = 45): THREE.LOD {
   const lod = new THREE.LOD();
   const level = (parts: Part[], shadow: boolean) => {
     const g = new THREE.Group();
@@ -497,9 +500,18 @@ export function fleetObject(p: Prepared, paint: THREE.Material, far = 26, farthe
     lod.userData.wheelR = p.wheels[0].r;
   }
   lod.addLevel(near, 0);
-  lod.addLevel(level(p.lod1, true), far);
+  // mid LOD: the clear-coat paint plus everything else merged into one vertex-coloured mesh (2-3 draws)
+  const mid = level(
+    p.lod1.filter((x) => x.mat === 'paint'),
+    true,
+  );
+  const rest = new THREE.Mesh(lod2Geometry(p, null), LOD1_MAT);
+  rest.castShadow = true;
+  rest.userData.owned = false;
+  mid.add(rest);
+  lod.addLevel(mid, far);
   const m2 = new THREE.Mesh(lod2Geometry(p, paint), LOD2_MAT);
-  m2.castShadow = true;
+  m2.castShadow = false; // beyond 45 m a car's shadow is a few pixels: skip the shadow-pass draw
   m2.userData.owned = false;
   lod.addLevel(m2, farther);
   if (p.brake) {

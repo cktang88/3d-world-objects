@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTex } from './common';
+import { bake, canvasTex } from './common';
 import type { Rng } from '../rng';
 
 /**
@@ -177,10 +177,20 @@ export function truckMesh(rng: Rng): THREE.Group {
     }
   // black wheel-well shadows under the box and cab
   box(g, mats.black, 2.3, 0.35, 1.2, 0, 0.75, TRUCK.rear);
+  mergeStatic(g, new Set<THREE.Object3D>([cab, bx, ...wheels]));
   g.userData.wheels = wheels;
   g.userData.wheelR = TRUCK.r;
   g.userData.len = TRUCK.len;
   g.userData.wid = TRUCK.wid;
   g.traverse((o) => (o.userData.owned = false));
   return g;
+}
+
+/** merge every static part (all but `keep`) into a few meshes, so a bus costs ~10 draw calls instead of ~60 */
+function mergeStatic(g: THREE.Group, keep: Set<THREE.Object3D>) {
+  const tmp = new THREE.Group();
+  for (const c of [...g.children]) if (!keep.has(c)) tmp.add(c);
+  const baked = bake(tmp);
+  baked.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+  g.add(baked);
 }
