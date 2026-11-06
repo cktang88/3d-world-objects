@@ -62,7 +62,8 @@ const BRANDS = ['HUDSON MOTORS', 'WEST SIDE AUTO', 'ELEVENTH AVE IMPORTS', 'MANH
  */
 function autoRow(ctx: BCtx, r: Rng): Plan {
   const slot = slotter(ctx);
-  const west = r.chance(0.5); // showroom on the -x end
+  // showroom on the east (-x) end: across the avenue from the neighbouring block's lot
+  const west = true;
   const s = west ? -1 : 1;
   const brand = r.pick(BRANDS);
   // ---- showroom: x from s*LX to s*(LX-22), the whole block depth
@@ -70,7 +71,7 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
     const x0 = Math.min(s * LX, s * (LX - 20)), x1 = Math.max(s * LX, s * (LX - 20));
     const z0 = -LZ, z1 = LZ, H = 8.5;
     const xc = (x0 + x1) / 2;
-    const floor = new THREE.MeshStandardMaterial({ color: '#d9d8d3', roughness: 0.18, metalness: 0.05 });
+    const floor = new THREE.MeshStandardMaterial({ color: '#ecebe6', roughness: 0.25, metalness: 0 });
     ctx.stat.add(slab(floor, x0, x1, z0, z1, CURB + 0.02, 2));
     // roof slab and fascia with the brand
     const roof = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0 + 0.6, 0.6, z1 - z0 + 0.6), flat('#ecebe6', 0.6));
@@ -81,7 +82,8 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
     const fx = s * LX + s * 0.32; // street face
     sign(ctx, brand, fx + s * 0.02, H + 0.3, 0, s > 0 ? Math.PI / 2 : -Math.PI / 2, 0.42, 30, '#1b2a44');
     // glass walls on the three outer sides, black mullions every 3 m; the back wall is solid
-    const glass = new THREE.MeshPhysicalMaterial({ color: '#cfdde3', roughness: 0.05, metalness: 0, transmission: 0, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+    // clear plate glass: barely tinted, mirror-smooth so it picks up the sky
+    const glass = new THREE.MeshStandardMaterial({ color: '#e8f1f4', roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.6 });
     const mull = flat('#1b1d20', 0.4, 0.6);
     const pane = (ax: 'x' | 'z', c: number, a0: number, a1: number) => {
       const len = a1 - a0;
@@ -114,6 +116,14 @@ function autoRow(ctx: BCtx, r: Rng): Plan {
     back.userData.owned = true;
     ctx.stat.add(back);
     ctx.colliders.push({ minX: backX - 0.3, maxX: backX + 0.3, minZ: z0, maxZ: z1 });
+    // lit ceiling panels: the showroom glows like the real ones on Eleventh Avenue
+    const panel = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6e8', emissiveIntensity: 1.4 });
+    for (let z = z0 + 4; z < z1 - 2; z += 6)
+      for (const u of [5, 13]) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 4), panel);
+        p.position.set(s * (LX - u), H - 0.05, z + 1);
+        ctx.stat.add(p);
+      }
     // sales desks along the back wall
     for (const z of [-12, 12]) {
       const desk = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.76, 2.4), flat('#2a2c30', 0.5));
