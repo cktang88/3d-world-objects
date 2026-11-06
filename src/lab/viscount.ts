@@ -103,7 +103,8 @@ const scene: LabScene = {
       if (want && !want.includes(pose.name)) continue;
       const p = new THREE.Vector3(...pose.pos);
       const t0 = performance.now();
-      for (let i = 0; i < steps; i++) level.update(1 / 60, p, i / 60);
+      // step until streaming settles (chunk builds are time-sliced across frames)
+      for (let i = 0; i < steps || (level.streaming && i < 20000); i++) level.update(1 / 60, p, i / 60);
       const buildMs = Math.round(performance.now() - t0);
       cam.position.set(p.x, p.y + 1.6, p.z);
       cam.rotation.set(pose.pitch, pose.yaw, 0, 'YXZ');

@@ -81,13 +81,28 @@ export class NycLevel implements Level {
 
   update(dt: number, p: THREE.Vector3, time: number) {
     const cx = Math.round(p.x / AX), cz = Math.round(p.z / SZ);
-    let built = 0;
-    for (let ring = 0; ring <= Math.max(RX, RZ) && built < 1; ring++) {
-      for (let dz = -Math.min(ring, RZ); dz <= Math.min(ring, RZ) && built < 1; dz++)
-        for (let dx = -Math.min(ring, RX); dx <= Math.min(ring, RX) && built < 1; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
-          if (this.ensure(cx + dx, cz + dz)) built++;
+    // [vis] time-sliced streaming: the nearest missing chunk is built a few ms per frame (a
+    // generator yielding between buildings), and at most one far chunk is unloaded per frame
+    if (!this.pending) {
+      search: for (let ring = 0; ring <= Math.max(RX, RZ); ring++)
+        for (let dz = -Math.min(ring, RZ); dz <= Math.min(ring, RZ); dz++)
+          for (let dx = -Math.min(ring, RX); dx <= Math.min(ring, RX); dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring || this.chunks.has(`${cx + dx},${cz + dz}`)) continue;
+            this.pending = { cx: cx + dx, cz: cz + dz, it: this.blockSteps(cx + dx, cz + dz) };
+            break search;
+          }
+    }
+    if (this.pending) {
+      const t0 = performance.now();
+      for (;;) {
+        const r = this.pending.it.next();
+        if (r.done) {
+          this.place(this.pending.cx, this.pending.cz, r.value);
+          this.pending = null;
+          break;
         }
+        if (performance.now() - t0 > NycLevel.BUILD_BUDGET_MS) break;
+      }
     }
     for (const [k, ch] of this.chunks) {
       const [x, z] = k.split(',').map(Number);
@@ -96,6 +111,7 @@ export class NycLevel implements Level {
         this.group.remove(ch.group);
         disposeTree(ch.group);
         this.chunks.delete(k);
+        break; // [vis] one unload per frame
       }
     }
     // LOD: small details (brackets, balusters, sashes, AC units) only on nearby blocks
@@ -145,7 +161,20 @@ export class NycLevel implements Level {
   private ensure(cx: number, cz: number) {
     const k = `${cx},${cz}`;
     if (this.chunks.has(k)) return false;
-    const ch = this.block(cx, cz);
+    this.place(cx, cz, this.block(cx, cz));
+    return true;
+  }
+
+  /** [vis] a chunk being built across frames (see update) */
+  private pending: { cx: number; cz: number; it: Generator<void, Chunk> } | null = null;
+  /** [vis] true while a chunk is being built across frames */
+  get streaming() { return this.pending !== null; }
+  /** [vis] per-frame budget for chunk building (ms) */
+  static BUILD_BUDGET_MS = 4;
+
+  /** shift a built chunk to its grid position and add it */
+  private place(cx: number, cz: number, ch: Chunk) {
+    const k = `${cx},${cz}`;
     const ox = cx * AX, oz = cz * SZ;
     ch.group.position.set(ox, 0, oz);
     for (const c of ch.colliders) { c.minX += ox; c.maxX += ox; c.minZ += oz; c.maxZ += oz; }
@@ -158,12 +187,21 @@ export class NycLevel implements Level {
     this.group.add(ch.group);
     this.chunks.set(k, ch);
     this.vis.add(cx, cz, ch.group); // [vis]
-    return true;
   }
 
   // ------------------------------------------------------------ one block
 
+  /** one block, built in one go (constructor, tests) */
   private block(cx: number, cz: number): Chunk {
+    const it = this.blockSteps(cx, cz);
+    for (;;) {
+      const r = it.next();
+      if (r.done) return r.value;
+    }
+  }
+
+  /** [vis] the block build as steps: yields between buildings so update() can spread it over frames */
+  private *blockSteps(cx: number, cz: number): Generator<void, Chunk> {
     const rng = new Rng(hashN(this.seed, cx, cz));
     const group = new THREE.Group();
     const stat = new THREE.Group(); // merged at the end
@@ -180,6 +218,7 @@ export class NycLevel implements Level {
     const loft = D.kind === 'industrial' || D.kind === 'canal' || D.kind === 'bowery' || D.kind === 'garment';
     const cobble = (D.kind === 'industrial' && hashN(this.seed, cx, cz, 9) % 2 === 0) || ((D.kind === 'canal' || village) && hashN(this.seed, cx, cz, 9) % 4 === 0);
     groundBase({ group, stat, cx, cz, village: loft, cobble });
+    yield; // [vis]
     // the hidden backyard core of the block
     B(stat, mat('#5a564f'), LX * 2 - 1, 2.5, LZ * 2 - 1, 0, 0, 0, false);
 
@@ -196,7 +235,7 @@ export class NycLevel implements Level {
       const side: Side = end < 0 ? 'W' : 'E';
       const big = tower > 0.62 && rng.chance(0.7);
       if (big) {
-        building(ctx, { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, side, 'tower', rng.int(22, 48), true, [true, true], districtStyle(D, rng));
+        building(ctx, { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, side, 'tower', rng.int(22, 48), true, [true, true], districtStyle(D, rng)); yield; // [vis]
       } else {
         const n = rng.int(2, 3);
         const cuts = [-LZ];
@@ -205,7 +244,7 @@ export class NycLevel implements Level {
         for (let i = 0; i < n; i++) {
           const type = aveType(D, rng); // [districts]
           const floors = floorsFor(D, type === 'prewar' ? rng.int(9, 18) : type === 'midrise' ? rng.int(6, 12) : type === 'brownstone' ? rng.int(3, 5) : rng.int(5, 6));
-          building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1], districtStyle(D, rng));
+          building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1], districtStyle(D, rng)); yield; // [vis]
         }
       }
     }
@@ -222,16 +261,19 @@ export class NycLevel implements Level {
         const r: Rect = row < 0 ? { minX: x, maxX: x + w, minZ: -LZ, maxZ: -LZ + depth } : { minX: x, maxX: x + w, minZ: LZ - depth, maxZ: LZ };
         const floors = floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));
         const store = type !== 'brownstone' && rng.chance(Math.min(1, (type === 'tenement' ? 0.6 : 0.75) * D.stores));
-        building(ctx, r, side, type, floors, store, [false, false], districtStyle(D, rng));
+        building(ctx, r, side, type, floors, store, [false, false], districtStyle(D, rng)); yield; // [vis]
         x += w;
       }
     }
     this.street(ctx, village, tower);
+    yield; // [vis]
     districtExtras(ctx, D); // [districts] sidewalk displays, district props
     groundDetails({ group, stat, cx, cz, village: loft, doors: ctx.doors, seed: this.seed });
+    yield; // [vis]
 
     // buildings: windows, shop glass, lettering, instanced small parts (pulled out of stat first)
     finishBuildings(ctx);
+    yield; // [vis]
     // merge everything static into a few meshes
     const baked = bake(stat);
     group.add(baked);

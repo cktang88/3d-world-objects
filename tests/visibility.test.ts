@@ -5,7 +5,8 @@
  * (exact boxes) make the ray check exact; one real block checks the height-grid scan.
  */
 import * as THREE from 'three';
-import { test, expect, between, fmt } from './qa';
+import { test, expect, between, fmt, stats } from './qa';
+import { NycLevel } from '../src/nyc';
 import { nycChunk } from './world';
 import { CityVis, heightGrid } from '../src/nyc/occlusion';
 import { hlodGeometry } from '../src/nyc/hlod';
@@ -133,4 +134,28 @@ test('real block: height grid finds the buildings and the HLOD proxy is cheap', 
   const geo = hlodGeometry(g, 1);
   const tris = geo.index!.count / 3;
   between(tris, 10, 4000, 'HLOD triangles per chunk');
+});
+
+test('chunk builds are time-sliced: many short steps, same result as the one-go build', () => {
+  const lv = Object.create(NycLevel.prototype) as any;
+  lv.seed = 1;
+  lv.steam = [];
+  lv.group = new THREE.Group();
+  const it = lv.blockSteps(0, 0) as Generator<void, { group: THREE.Group }>;
+  let steps = 0, longest = 0, total = 0, at = 0, r: IteratorResult<void, { group: THREE.Group }>;
+  const times: number[] = [];
+  for (;;) {
+    const t = performance.now();
+    r = it.next();
+    const dt = performance.now() - t;
+    total += dt;
+    times.push(Math.round(dt));
+    if (dt > longest) { longest = dt; at = steps; }
+    if (r.done) break;
+    steps++;
+  }
+  expect(steps >= 6, `only ${steps} yields in a block build`);
+  const a = stats(r.value.group), b = stats(nycChunk(1, 0, 0).group);
+  expect(a.tris === b.tris && a.drawables === b.drawables, `sliced build differs: ${a.drawables}/${a.tris} vs ${b.drawables}/${b.tris}`);
+  console.log(`block build: ${steps + 1} steps, longest ${fmt(longest)} ms (step ${at}) of ${fmt(total)} ms: ${times.join(' ')}`);
 });
