@@ -51,3 +51,21 @@ Lab: `/?lab=interior-room&style=apartment|house|office&seed=N&room=<type|index>&
 | Bathroom | `img/interiors-bathroom.jpg` | #9: subway wainscot with cap, hex mosaic floor, clawfoot tub, pedestal sink + mirror, towel bar |
 | Bedroom | `img/interiors-bedroom.jpg` | #2: bed centred on a wall, nightstands + lamps, painting over the headboard, door leaf open against the wall |
 | Office | `img/interiors-office.jpg` | #11-15: drop ceiling with troffers, benching desks with monitors, glass meeting-room partitions, carpet tile |
+
+## Round 2 (density, library, containers, cells)
+
+- Floors: parquet uses a fixed satin roughness (0.52) with the scan's colour/normal/AO but not its roughness map.
+- Pre-war rooms: tall panel frames or wainscot frames with a chair rail (`panels`), brownstone wallpaper in
+  some bedrooms/dining/studies, curtains on brass rods (folded sheets) or roman shades part-way down.
+- Living groups: sofas 2.0-2.5 m (Poly Haven `sofa_02` only in narrow rooms), centred on the TV/fireplace,
+  layered jute + patterned rug, 2-3 pillows per end and a throw, console with lamp/books/painting, side chair + table.
+- Poly Haven models used (`src/rooms/lib.ts`, credited in CREDITS.md); fronts checked in `?lab=interior-lib`
+  (all +z). `painted_wooden_chair_01` was ambiguous and is not used.
+- Kitchens: marble counters (often a marble slab backsplash), shaker doors (proud frame on a flat panel),
+  island with stools when the room is 3.6 m+ across.
+- Bathrooms: frosted sash glass with a plain daylight backdrop.
+- Offices: reception room at the entry (counter, company name, waiting sofa), guest chairs + credenza in private offices.
+- `InteriorLevel.cells` (room group + batch + doorways), `.entry` (entry door in level coords),
+  `.containers` (dressers, nightstands, closets, kitchen cabinets, uppers, fridges: `generate()` builds the
+  contents only when asked: folded clothes, coats/shoes/boxes, plates/bowls/pots, glasses/mugs,
+  bottles/cartons/jars/eggs/fruit).
