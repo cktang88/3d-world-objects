@@ -169,6 +169,29 @@ export abstract class MuseumBase implements Level {
   }
 
   private tick = 0;
+  private fills = new Map<THREE.Mesh, { own: THREE.Material; fill: THREE.Material }>();
+  /**
+   * While seen through a doorway the room has no lights of its own (seamless.ts strips them), so its
+   * shell and cases glow a little instead: an emissive copy of each merged material, swapped in.
+   */
+  private previewFill(on: boolean) {
+    if (on && !this.fills.size) {
+      for (const o of this.group.children) {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.userData.owned || m.userData.tex) continue;
+        const own = m.material as THREE.MeshStandardMaterial;
+        if (!own.isMeshStandardMaterial || own.transparent) continue;
+        const fill = own.clone();
+        fill.emissive = own.color.clone().multiplyScalar(this.fillLevel);
+        if (own.map) fill.emissiveMap = own.map;
+        fill.userData = { ...own.userData };
+        this.fills.set(m, { own, fill });
+      }
+    }
+    for (const [m, f] of this.fills) m.material = on ? f.fill : f.own;
+  }
+  /** how strongly the shell glows while previewed (dark rooms less) */
+  protected fillLevel = 0.45;
   private outside = false;
   /**
    * Seen from outside (through another room's doorway, see seamless.ts: the player is in front of
@@ -180,6 +203,7 @@ export abstract class MuseumBase implements Level {
     const out = player.z > 0.2 && this.doorway !== undefined;
     if (!out && !this.outside) return;
     this.outside = out;
+    this.previewFill(out);
     for (const o of this.group.children) {
       const m = o as THREE.Mesh;
       const detail = o.userData.baseScale !== undefined || o.userData.exhibit || o.userData.tex || (m.isMesh && (m.material as THREE.Material).blending === THREE.AdditiveBlending);
@@ -242,6 +266,7 @@ export abstract class MuseumBase implements Level {
       }
     });
     for (const s of this.slots) if (s.model) disposeModel(s.model.object);
+    for (const f of this.fills.values()) f.fill.dispose();
   }
 
   /** wait for every exhibit queued so far */
@@ -305,12 +330,16 @@ export abstract class MuseumBase implements Level {
     for (let i = 0; i < MuseumBase.RIG_SPOTS; i++) {
       const l = new THREE.SpotLight('#fff1dc', 0, 0, 0.4, 0.65, 2);
       l.castShadow = false;
+      // parked far below until used: a preview (seamless.ts) lends its two shared lights to the
+      // lights nearest the viewer, and an unused one must never be the nearest
+      l.position.set(0, -1e4, 0);
       this.rigSpots.push(l);
       this.group.add(l, l.target);
     }
     for (let i = 0; i < MuseumBase.RIG_POINTS; i++) {
       const l = new THREE.PointLight('#fff1dc', 0, 10, 1.4);
       l.castShadow = false;
+      l.position.set(0, -1e4, 0);
       this.rigPoints.push(l);
       this.group.add(l);
     }
@@ -330,10 +359,10 @@ export abstract class MuseumBase implements Level {
     return true;
   }
 
-  /** a point light from the rig */
+  /** a point light from the rig (the last one is kept for previewLight) */
   point(at: THREE.Vector3, color: string, intensity: number, distance: number, decay = 1.4) {
     this.rig();
-    if (this.points >= MuseumBase.RIG_POINTS) return null;
+    if (this.points >= MuseumBase.RIG_POINTS - 1) return null;
     const l = this.rigPoints[this.points++];
     l.color.set(color);
     l.intensity = intensity;
@@ -343,10 +372,30 @@ export abstract class MuseumBase implements Level {
     return l;
   }
 
+  /**
+   * The light that stands in for the whole room while it is seen through a doorway: dark inside
+   * the room (intensity 0), but placed just inside the entrance with `userData.base` set, so it is
+   * the light seamless.ts lends its shared preview light to.
+   */
+  previewLight(at: THREE.Vector3, color: string, base: number, distance: number) {
+    this.rig();
+    const l = this.rigPoints[MuseumBase.RIG_POINTS - 1];
+    l.color.set(color);
+    l.intensity = 0;
+    l.userData.base = base;
+    l.distance = distance;
+    l.decay = 1.2;
+    l.position.copy(at);
+  }
+
   /** give the rig back (e.g. when a waiting room is replaced by the real one) */
   protected resetRig() {
     this.spots = this.points = 0;
-    for (const l of [...this.rigSpots, ...this.rigPoints]) l.intensity = 0;
+    for (const l of [...this.rigSpots, ...this.rigPoints]) {
+      l.intensity = 0;
+      l.position.set(0, -1e4, 0);
+      delete l.userData.base;
+    }
   }
 
   /** a track-light can at `from` aimed at `to` (merged geometry; emissive lens) */

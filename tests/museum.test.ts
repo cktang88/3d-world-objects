@@ -331,3 +331,25 @@ test('atrium spawn: looking in from the entrance, the two north wings show throu
   expect(shown().length === 2, `only ${shown().length} of the north wings show through their doorways from the spawn (shown: ${[...seam.slots.values()].filter((s) => s.shown).map((s) => s.key.slice(0, 60)).join('; ')})`);
   seam.clear();
 });
+
+test('a gallery seen through a doorway: its shell glows and its stand-in light is the one nearest the door', async () => {
+  await loadMuseum();
+  const g = new GalleryLevel({ kind: 'gallery', theme: 2453, page: 0 });
+  await Promise.race([g.built, settle(8000)]);
+  const lights: THREE.Light[] = [];
+  g.group.traverse((o) => { if ((o as THREE.Light).isLight) lights.push(o as THREE.Light); });
+  const outside = new THREE.Vector3(0, 0, 4);
+  const lit = lights.filter((l) => l.position.y > -100);
+  const nearest = [...lit].sort((a, b) => a.position.distanceTo(outside) - b.position.distanceTo(outside))[0];
+  expect(nearest && (nearest.userData.base ?? 0) > 0, 'the light nearest the entrance is not the preview stand-in (unused rig lights must be parked away)');
+  // from outside the entrance the shell swaps to its glowing copy, and back inside it does not
+  const shell = g.group.children.find((o) => (o as THREE.Mesh).isMesh && o.userData.owned && !o.userData.tex && !((o as THREE.Mesh).material as THREE.Material).transparent) as THREE.Mesh;
+  const glow = () => { const e = (shell.material as THREE.MeshStandardMaterial).emissive; return e.r + e.g + e.b; };
+  const before = glow();
+  for (let i = 0; i < 31; i++) g.update(1 / 60, outside, i / 60);
+  const out = glow();
+  expect(out > before + 0.05, `the shell does not glow while seen from outside (${fmt(before)} -> ${fmt(out)})`);
+  for (let i = 0; i < 31; i++) g.update(1 / 60, new THREE.Vector3(0, 0, -3), i / 60);
+  expect(glow() === before, 'the shell still glows from inside');
+  g.dispose();
+});
