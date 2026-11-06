@@ -94,6 +94,87 @@ function pageHelpers() {
     await frames(3);
     return { pos: pos(), stuck, dist: r2(Math.hypot(x - W.player.pos.x, z - W.player.pos.z)), ms: Math.round(performance.now() - t0), path };
   };
+  /** walk(), and when stuck (an exhibit, a fixture) side-step 1.5 m left or right and go on; up to 4 detours */
+  const walkAround = async (x, z, o = {}) => {
+    let r = await walk(x, z, o);
+    const detours = [];
+    for (let i = 0; i < 4 && r.stuck && !o.stop?.(); i++) {
+      const p = W.player.pos, dx = x - p.x, dz = z - p.z, L = Math.hypot(dx, dz) || 1;
+      const s = i % 2 ? -1 : 1, k = 1.5 * (1 + (i >> 1));
+      await walk(p.x + (-dz / L) * k * s, p.z + (dx / L) * k * s, { ms: 4000, stop: o.stop });
+      detours.push(pos());
+      r = await walk(x, z, o);
+    }
+    return { ...r, detours };
+  };
+  /**
+   * A path from the player to (x, z) around the active colliders (inflated by the player's radius):
+   * breadth-first search on a 0.2 m grid within `pad` m of both ends, then string-pulled to the
+   * fewest straight legs. null when there is none.
+   */
+  const plan = (x, z, o = {}) => {
+    const R = (o.radius ?? 0.36), G = 0.2, pad = o.pad ?? 12;
+    const p = W.player.pos;
+    const x0 = Math.min(p.x, x) - pad, z0 = Math.min(p.z, z) - pad;
+    const nx = Math.ceil((Math.max(p.x, x) + pad - x0) / G), nz = Math.ceil((Math.max(p.z, z) + pad - z0) / G);
+    const cols = W.seam.colliders(W.level.colliders(p), p);
+    const free = (px, pz) => !cols.some((c) => px > c.minX - R && px < c.maxX + R && pz > c.minZ - R && pz < c.maxZ + R);
+    const grid = new Uint8Array(nx * nz);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) grid[j * nx + i] = free(x0 + i * G, z0 + j * G) ? 1 : 0;
+    const cell = (px, pz) => [Math.round((px - x0) / G), Math.round((pz - z0) / G)];
+    const [si, sj] = cell(p.x, p.z), [gi, gj] = cell(x, z);
+    const prev = new Int32Array(nx * nz).fill(-1);
+    const q = [sj * nx + si];
+    prev[q[0]] = q[0];
+    const goal = gj * nx + gi;
+    grid[q[0]] = 1;
+    grid[goal] = 1; // the target itself may be a portal's trigger inside a passage
+    for (let h = 0; h < q.length && prev[goal] < 0; h++) {
+      const k = q[h], i = k % nx, j = (k - i) / nx;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const a = i + di, b = j + dj;
+        if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+        const n = b * nx + a;
+        if (prev[n] >= 0 || !grid[n]) continue;
+        if (di && dj && (!grid[j * nx + a] || !grid[b * nx + i])) continue;
+        prev[n] = k;
+        q.push(n);
+      }
+    }
+    if (prev[goal] < 0) return null;
+    const pts = [];
+    for (let k = goal; ; k = prev[k]) {
+      const i = k % nx;
+      pts.push([x0 + i * G, z0 + ((k - i) / nx) * G]);
+      if (k === prev[k]) break;
+    }
+    pts.reverse();
+    pts[pts.length - 1] = [x, z];
+    const clear = (a, b) => {
+      const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.1);
+      for (let t = 1; t < n; t++) if (!free(a[0] + ((b[0] - a[0]) * t) / n, a[1] + ((b[1] - a[1]) * t) / n)) return false;
+      return true;
+    };
+    const legs = [];
+    let a = 0;
+    while (a < pts.length - 1) {
+      let b = pts.length - 1;
+      while (b > a + 1 && !clear(pts[a], pts[b])) b--;
+      legs.push(pts[b]);
+      a = b;
+    }
+    return legs;
+  };
+  /** walk to (x, z) along plan()'s path (straight if there is none) */
+  const walkPath = async (x, z, o = {}) => {
+    const legs = plan(x, z, o) ?? [[x, z]];
+    let r = null;
+    for (let i = 0; i < legs.length; i++) {
+      r = await walk(legs[i][0], legs[i][1], { ...o, tol: i < legs.length - 1 ? 0.25 : o.tol });
+      if (r.stuck || o.stop?.()) break;
+    }
+    return { ...r, legs: legs.map((l) => l.map(r2)) };
+  };
   /** point the camera at a world point (yaw + pitch) */
   const face = (x, y, z) => {
     W.player.yaw = yawTo(x, z);
@@ -194,7 +275,7 @@ function pageHelpers() {
   const r0 = W.renderer.__render0 ?? (W.renderer.__render0 = W.renderer.render);
   const draw = (on) => { W.renderer.render = on ? r0 : function () {}; };
   draw(false);
-  window.__e2e = { W, draw, useSeen, back, openOne, raf, sleep, frames, until, walk, face, key, info, pos, yawTo, blocked, descKey, r2 };
+  window.__e2e = { W, draw, useSeen, back, openOne, walkAround, plan, walkPath, raf, sleep, frames, until, walk, face, key, info, pos, yawTo, blocked, descKey, r2 };
 }
 
 export async function harness(name, scriptUrl) {
