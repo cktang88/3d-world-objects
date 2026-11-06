@@ -238,3 +238,22 @@ test('every gallery carries the same light rig (no shader recompiles between roo
   }
   expect(new Set(counts).size === 1, `light counts differ between rooms: ${counts.join(', ')}`);
 });
+
+test('sand3d galleries are planned at once from the offline sizes (no measuring wait), halls capped', async () => {
+  await loadMuseum();
+  const bad: string[] = [];
+  // a cabinet room, a furniture room, a motor hall and the colossal ships
+  for (const theme of [811, 2453, 3766, 3855]) {
+    const g = new GalleryLevel({ kind: 'gallery', theme, page: 0 });
+    const t0 = Date.now();
+    await Promise.race([(g as unknown as { built: Promise<void> }).built, settle(8000)]);
+    const name = museum().themes[theme].name;
+    if (!g.plan) bad.push(`${name}: not built within 8 s (${Date.now() - t0} ms)`);
+    else {
+      const big = Math.max(0, ...g.plan.floor.flatMap((p) => p.u.items.map((m) => Math.max(m.real.x, m.real.z))));
+      if (big < 55 && (g.plan.W > 64 || g.plan.D > 125)) bad.push(`${name}: ${fmt(g.plan.W)} x ${fmt(g.plan.D)} m hall`);
+    }
+    g.dispose();
+  }
+  none(bad, 'gallery build problems');
+});
