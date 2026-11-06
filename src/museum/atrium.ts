@@ -9,6 +9,7 @@ import type { Door, Plan } from './plan';
 import { buildShell, doorPortal, doorSign } from './shell';
 import { measure, type Measured } from './sizes';
 import { STYLES, type Style } from './style';
+import { SI_BASE, SI_ROOMS } from './smithsonian';
 import { textPlane, SANS } from './text';
 
 const PALETTE = ['#7d2e2e', '#2e4d7d', '#2e6b55', '#6b4a2e', '#4d2e6b', '#7d6a2e', '#2e6b7d', '#5b5b5b', '#8a3d5c', '#3d5c2e'];
@@ -34,6 +35,9 @@ export class AtriumLevel extends MuseumBase {
       { wall: 'W', at: -9, w: 3, h: 4.4 },
       { wall: 'E', at: -21, w: 3, h: 4.4 },
       { wall: 'E', at: -9, w: 3, h: 4.4 },
+      // behind you as you arrive: the Smithsonian rooms (real museum scans)
+      { wall: 'S', at: -8, w: 3, h: 4.4 },
+      { wall: 'S', at: 8, w: 3, h: 4.4 },
     ];
     const plan: Plan = { W, D, H, Hw: H, floor: [], wall: [], hang: [], doors, ceiling: 'lantern', floorKind: 'marble', wallColor: '#e6dccb', rows: [] };
     buildShell(this, plan, st);
@@ -74,6 +78,11 @@ export class AtriumLevel extends MuseumBase {
     const spots: Frame[] = [new Frame(-12, -26.5, Math.PI / 4), new Frame(12, -26.5, -Math.PI / 4), new Frame(-12.3, -15.5, Math.PI / 2), new Frame(-12.3, -3.5, Math.PI / 2), new Frame(12.3, -15.5, -Math.PI / 2), new Frame(12.3, -3.5, -Math.PI / 2)];
     const loads: Promise<unknown>[] = [];
     let hung = false;
+    const siDoors: [number, number][] = [[6, 0], [7, 3]];
+    for (const [di, k] of siDoors) {
+      doorSign(this, doors[di], W, D, 'Smithsonian · real museum scans', SI_ROOMS[k].name, '#2b2a28');
+      doorPortal(this, doors[di], W, D, SI_ROOMS[k].name, SI_ROOMS[k].blurb, { kind: 'gallery', theme: SI_BASE + k, page: 0, wing: 'Smithsonian' });
+    }
     wings.forEach((w, i) => {
       const d = doors[i];
       const theme = m.themes[w.theme];

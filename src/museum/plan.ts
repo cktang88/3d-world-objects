@@ -15,7 +15,7 @@ export type Kind = 'hang' | 'floor' | 'medium' | 'flat' | 'mount' | 'small' | 't
 export function classify(m: Measured, st: Style, r: Rng): Kind {
   const { x, y, z } = m.real;
   const L = Math.max(x, z), thin = Math.min(x, z);
-  if (st.hang && L >= 1.5 && L <= 26 && y <= 6 && y < L * 0.7 && /aircraft|spacecraft/.test(m.entry.family)) return 'hang';
+  if (st.hang && L >= 1.5 && L <= 26 && y <= 6 && y < L * 0.7 && /aircraft|spacecraft|air-space/.test(m.entry.family)) return 'hang';
   if (L > 1.9 || y > 2.0) return 'floor';
   if (st.mount && thin <= 0.22 * Math.max(L, y) && thin <= 0.3 && y >= 0.25 && L >= 0.3 && y <= 2.0 && r.chance(0.85)) return 'mount';
   if (y <= 0.25 && L >= 0.45 && L <= 2.3 && y < L * 0.35) return 'flat';

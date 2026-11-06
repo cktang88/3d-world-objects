@@ -8,7 +8,10 @@ import { makeMats, type Ctx, type Unit } from './displays';
 import { assemble, planRoom, type Plan } from './plan';
 import { buildShell, doorPortal, doorSign } from './shell';
 import { measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
-import { pageSize, styleFor, type Style } from './style';
+import { pageSize, styleFor, STYLES, type Style } from './style';
+import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smithsonian';
+
+const SI_PAGE = 16;
 import { roman, textPlane, SANS, SERIF } from './text';
 
 /** which objects a room was built with, so it comes back identical */
@@ -24,7 +27,7 @@ interface Exit {
 
 export class GalleryLevel extends MuseumBase {
   name: string;
-  readonly theme: Theme;
+  theme: Theme;
   readonly style: Style;
   plan: Plan | null = null;
   private r: Rng;
@@ -33,12 +36,20 @@ export class GalleryLevel extends MuseumBase {
   constructor(private desc: Extract<LevelDesc, { kind: 'gallery' }>) {
     super();
     const m = museum();
-    const t = (this.theme = m.themes[desc.theme]);
-    const st = (this.style = styleFor(t.collection));
-    const per = pageSize(t.collection);
+    const si = isSi(desc.theme);
+    const t = (this.theme = si ? siTheme(desc.theme) : m.themes[desc.theme]);
+    const st = (this.style = si ? STYLES[SI_ROOMS[desc.theme - SI_BASE].arch] : styleFor(t.collection));
+    const per = si ? SI_PAGE : pageSize(t.collection);
     const pages = Math.max(1, Math.ceil(t.size / per));
     this.name = `${t.name}${desc.page ? ` · ${roman(desc.page + 1)}` : ''}`;
     this.r = new Rng(hashN(desc.theme, desc.page, 11));
+    this.setEnv(st);
+    this.spawn.pos.set(0, 0, -1.6);
+    this.spawn.yaw = 0;
+    if (si) {
+      this.ready = this.startSi();
+      return;
+    }
 
     // exits: the next room of this theme (if any), then the most similar themes
     const exits: Exit[] = [];
@@ -54,8 +65,14 @@ export class GalleryLevel extends MuseumBase {
       const n = er.int(0, m.themes.length - 1);
       exits.push({ top: 'somewhere else', label: m.themes[n].name, target: { kind: 'gallery', theme: n, page: 0, wing: desc.wing } });
     }
+    // now and then a doorway into the Smithsonian rooms that match this collection
+    const sk = SI_ROOMS.findIndex((x) => x.related === t.collection);
+    if (sk >= 0 && er.chance(0.5)) exits[exits.length - 1] = { top: 'Smithsonian · real museum scans', label: SI_ROOMS[sk].name, target: { kind: 'gallery', theme: SI_BASE + sk, page: 0, wing: desc.wing } };
     er.shuffle(exits);
+    this.ready = this.start(per, pages, exits);
+  }
 
+  private setEnv(st: Style) {
     // light and sky
     this.env = {
       ...this.env,
@@ -71,9 +88,33 @@ export class GalleryLevel extends MuseumBase {
         ambient: 0.05, envIntensity: 0.6, exposure: 0.75, physicalSky: true,
       };
     }
-    this.spawn.pos.set(0, 0, -1.6);
-    this.spawn.yaw = 0;
-    this.ready = this.start(per, pages, exits);
+  }
+
+  /** a Smithsonian room: sizes come with the catalog, so it is built at once */
+  private async startSi() {
+    const d = this.desc;
+    const k = d.theme - SI_BASE;
+    const room = SI_ROOMS[k];
+    const all = await siEntries(d.theme);
+    if (!this.alive) return;
+    (this as { theme: Theme }).theme = siTheme(d.theme, all.length);
+    const pages = Math.max(1, Math.ceil(all.length / SI_PAGE));
+    const items = all.slice(d.page * SI_PAGE, d.page * SI_PAGE + SI_PAGE);
+    const exits: Exit[] = [];
+    if (d.page + 1 < pages) exits.push({ top: 'continue', label: `${room.name} ${roman(d.page + 2)}`, target: { kind: 'gallery', theme: d.theme, page: d.page + 1, wing: d.wing } });
+    const next = (k + 1) % SI_ROOMS.length;
+    exits.push({ top: 'Smithsonian', label: SI_ROOMS[next].name, target: { kind: 'gallery', theme: SI_BASE + next, page: 0, wing: d.wing } });
+    const m = museum();
+    const rel = m.themes.filter((x) => x.collection === room.related);
+    const er = new Rng(hashN(d.theme, d.page, 7));
+    for (let i = 0; exits.length < 3 && i < 4; i++) {
+      const n = rel.length ? er.pick(rel) : m.themes[er.int(0, m.themes.length - 1)];
+      if (exits.some((x) => x.target.kind === 'gallery' && x.target.theme === n.id)) continue;
+      exits.push({ top: `sand3d · ${n.collection}`, label: n.name, target: { kind: 'gallery', theme: n.id, page: 0, wing: d.wing } });
+    }
+    er.shuffle(exits);
+    this.build(items.map((e, i) => siMeasured(e, i === 0)), exits, pages);
+    await this.settle();
   }
 
   private async start(per: number, pages: number, exits: Exit[]) {

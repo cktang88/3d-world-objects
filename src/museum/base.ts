@@ -284,12 +284,12 @@ export abstract class MuseumBase implements Level {
     this.ports.push({
       box: bx,
       label: e.title,
-      sub: `${fmtDims(m.real)} · ${DATASET_LABEL[e.ds] ?? e.ds}${e.author ? ` · by ${e.author}` : ''}${e.joints ? ` · ${e.joints} joint${e.joints > 1 ? 's' : ''}` : ''} — E for details & its program`,
+      sub: `${fmtDims(m.real)} · ${DATASET_LABEL[e.ds] ?? e.ds}${e.author ? ` · by ${e.author}` : ''}${e.joints ? ` · ${e.joints} joint${e.joints > 1 ? 's' : ''}` : ''}${m.library ? ' · CC0, a real museum object' : ' — E for details & its program'}`,
       target: 'inspect',
-      inspect: e,
+      inspect: m.library ? undefined : e,
     });
     e.attribution = `${fmtDims(m.real)} · shown at actual size${Math.abs(m.k - 1) > 0.01 ? ' · rescaled from the source to a realistic size' : ''}`;
-    const got = m.model ? Promise.resolve(m.model) : loadRemote(e, { prio: opts.prio ?? 0, shadows: false });
+    const got = m.model ? Promise.resolve(m.model) : m.load ? m.load() : loadRemote(e, { prio: opts.prio ?? 0, shadows: false });
     m.model = undefined; // hand over ownership
     const p = got
       .then((mod) => {

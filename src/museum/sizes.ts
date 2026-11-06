@@ -55,6 +55,9 @@ export interface Measured {
   raw: THREE.Vector3;
   k: number;
   real: THREE.Vector3;
+  /** a library scan (not a sand3d program): loads with load() */
+  library?: boolean;
+  load?: () => Promise<RemoteModel>;
   /** the model, if we had to stream it to measure it */
   model?: RemoteModel;
 }
