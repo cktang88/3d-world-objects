@@ -169,6 +169,25 @@ export abstract class MuseumBase implements Level {
   }
 
   private tick = 0;
+  private outside = false;
+  /**
+   * Seen from outside (through another room's doorway, see seamless.ts: the player is in front of
+   * this room's entrance, local z > 0), only what can be seen through the opening is drawn: exhibits,
+   * labels and light pools in a cone through the doorway and within ~22 m of it. The room's shell
+   * (a few merged meshes) always draws.
+   */
+  private cullOutside(player: THREE.Vector3) {
+    const out = player.z > 0.2 && this.doorway !== undefined;
+    if (!out && !this.outside) return;
+    this.outside = out;
+    for (const o of this.group.children) {
+      const m = o as THREE.Mesh;
+      const detail = o.userData.baseScale !== undefined || o.userData.exhibit || o.userData.tex || (m.isMesh && (m.material as THREE.Material).blending === THREE.AdditiveBlending);
+      if (!detail) continue;
+      const p = o.position;
+      o.visible = !out || (p.z > -22 && Math.abs(p.x) < Math.abs(p.z) * 0.75 + 2.5);
+    }
+  }
   /** the nearest few library scans within reach get their full-detail version; the rest stay low */
   private scanDetail(player: THREE.Vector3) {
     const scans = this.slots.filter((s) => s.m.loadQ && s.model && !s.swapping);
@@ -193,6 +212,7 @@ export abstract class MuseumBase implements Level {
 
   update(dt: number, player: THREE.Vector3, time: number) {
     if (++this.tick % 30 === 0) this.scanDetail(player);
+    if (this.tick % 15 === 0) this.cullOutside(player);
     for (const s of this.slots) {
       if (!s.model) {
         s.placeholder.rotation.y += dt;
@@ -349,6 +369,7 @@ export abstract class MuseumBase implements Level {
   exhibit(m: Measured, f: Frame, lx: number, ly: number, lz: number, rot = 0, opts: { prio?: number; spin?: number; label?: string; progressive?: boolean } = {}) {
     const at = f.point(lx, ly, lz);
     const holder = new THREE.Group();
+    holder.userData.exhibit = true;
     holder.position.copy(at);
     holder.rotation.y = f.rot + rot;
     const placeholder = new THREE.Mesh(phGeo, phMat);
