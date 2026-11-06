@@ -505,11 +505,13 @@ export function bench(): Unit {
 // ---------------------------------------------------------------- wall displays
 
 /** Wall case: a cabinet base, glass front, glass shelves, light in the canopy (V&A ceramics). */
-export function wallCase(items: Measured[], len: number, storage: boolean): { unit: Unit; rest: Measured[] } {
+export function wallCase(items: Measured[], len0: number, storage: boolean): { unit: Unit; rest: Measured[] } {
   const depth = storage ? 0.48 : 0.6;
   const base = storage ? 0.35 : 0.65;
   const gh = storage ? 2.25 : 1.75;
-  const { shelves, rest } = packShelves(items, len - 0.1, gh - 0.1, depth - 0.1, storage ? 0.05 : 0.1);
+  const { shelves, rest } = packShelves(items, len0 - 0.1, gh - 0.1, depth - 0.1, storage ? 0.05 : 0.1);
+  // a case only as long as its fullest shelf needs (a few small things get a short case)
+  const len = Math.min(len0, Math.max(0.9, ...shelves.map((s) => s.used + 0.15)));
   const used = shelves.flatMap((s) => s.items.map((i) => i.m));
   return {
     rest,
