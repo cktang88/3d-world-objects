@@ -159,7 +159,7 @@ function facadeMat(style: FacadeStyle, seed: number) {
   return m;
 }
 const stoneMat = () => surface('nyc_limestone', TILE, { vertexColors: true, roughness: 1, normalScale: 1.2, envMapIntensity: 0.4 });
-const brownMat = () => surface('nyc_limestone', TILE, { vertexColors: true, roughness: 1, normalScale: 1.4, envMapIntensity: 0.4 });
+const brownMat = () => surface('nyc_castiron', TILE, { vertexColors: true, roughness: 1, normalScale: 1.4, envMapIntensity: 0.4 });
 
 function shade(hex: string, f: number) {
   return `#${new THREE.Color(hex).multiplyScalar(f).getHexString()}`;
@@ -929,7 +929,7 @@ export function building(ctx: BCtx, r: Rect, front: Side, type: BType, floors: n
       F.wall(fm, baseTop, h, tint);
       F.band(stoneMat(), baseTop - 0.05, 0.35, 0.12, 0.06);
     } else if (type === 'brownstone') {
-      F.wall(brownMat(), 0, baseTop, shade(tint, 1.3), 0.42);
+      F.wall(brownMat(), 0, baseTop, shade(tint, 1.05), 0.42);
       F.wall(fm, baseTop, h, tint);
       F.band(brownMat(), baseTop - 0.02, 0.18, 0.1, 0.04, false, tint);
     } else {
