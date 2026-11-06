@@ -125,6 +125,7 @@ export interface Prepared {
   id: string;
   lod0: Part[];
   lod1: Part[];
+  lod2: Part[];
   /** the four near-LOD wheels, cut out of the body so moving cars can spin them */
   wheels: Wheel[];
   /** the rear red lamp lenses, slightly proud of the body: lit while braking */
@@ -136,10 +137,10 @@ export function loadFleet(id: string): Promise<Prepared | null> {
   let p = prepared.get(id);
   if (!p) {
     const base = `${import.meta.env.BASE_URL}assets/vehicles/${id}`;
-    p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`)])
-      .then(([a, b]) => {
+    p = Promise.all([gltf()!.loadAsync(`${base}.glb`), gltf()!.loadAsync(`${base}_lod1.glb`), gltf()!.loadAsync(`${base}_lod2.glb`)])
+      .then(([a, b, c]) => {
         const lod0 = prepare(a.scene, id);
-        return { id, lod0, lod1: prepare(b.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0), brake: brakeLenses(lod0) };
+        return { id, lod0, lod1: prepare(b.scene, id), lod2: prepare(c.scene, id), wheels: cutWheels(lod0, FLEET[id]?.wheelR ?? 0), brake: brakeLenses(lod0) };
       })
       .catch((e) => {
         console.warn('vehicle', id, e);
@@ -427,11 +428,17 @@ function textureAverage(t: THREE.Texture): THREE.Color {
     c = new THREE.Color(0.5, 0.5, 0.5);
     try {
       const cv = document.createElement('canvas');
-      cv.width = cv.height = 1;
+      // atlases are mostly dark trim: average the brighter half of a 16x16 thumbnail (the body colour)
+      cv.width = cv.height = 16;
       const g = cv.getContext('2d')!;
-      g.drawImage(t.image as CanvasImageSource, 0, 0, 1, 1);
-      const d = g.getImageData(0, 0, 1, 1).data;
-      c.setRGB(d[0] / 255, d[1] / 255, d[2] / 255, THREE.SRGBColorSpace);
+      g.drawImage(t.image as CanvasImageSource, 0, 0, 16, 16);
+      const d = g.getImageData(0, 0, 16, 16).data;
+      const px: number[][] = [];
+      for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2], d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11]);
+      px.sort((a, b) => b[3] - a[3]);
+      const top = px.slice(0, Math.max(1, px.length >> 1));
+      const avg = [0, 1, 2].map((k) => top.reduce((s, q) => s + q[k], 0) / top.length / 255);
+      c.setRGB(avg[0], avg[1], avg[2], THREE.SRGBColorSpace);
     } catch {
       /* image not decodable here: keep grey */
     }
@@ -440,59 +447,61 @@ function textureAverage(t: THREE.Texture): THREE.Color {
   return c;
 }
 
-/** the far-far LOD: the far parts merged into one vertex-coloured mesh with this car's paint baked in */
-const LOD2_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.25, name: 'car-lod2' });
-const LOD1_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, name: 'car-lod1' });
-const lod2Cache = new Map<string, THREE.BufferGeometry>();
-function lod2Geometry(p: Prepared, paint: THREE.Material | null): THREE.BufferGeometry {
-  // paint null: everything but the paint (the mid LOD draws its paint separately)
-  const key = `${p.id}|${paint ? paint.uuid : 'nopaint'}`;
-  let geo = lod2Cache.get(key);
-  if (!geo) {
+
+// ---------------------------------------------------------------- merged LOD geometry (shared by every car of a model)
+
+const mergedCache = new Map<string, THREE.BufferGeometry | null>();
+/**
+ * One LOD's parts merged into a single geometry: `paint` = only the paint parts (positions + normals; the car's
+ * colour comes from the instance), otherwise every other part with its colour in the vertices (textured parts
+ * take their texture's average colour, glass its tint).
+ */
+function merged(p: Prepared, level: 1 | 2, paint: boolean): THREE.BufferGeometry | null {
+  const key = `${p.id}|${level}|${paint}`;
+  if (!mergedCache.has(key)) {
     const geos: THREE.BufferGeometry[] = [];
-    for (const part of p.lod1) {
-      if (!paint && part.mat === 'paint') continue;
+    for (const part of level === 1 ? p.lod1 : p.lod2) {
+      if ((part.mat === 'paint') !== paint) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', part.geo.getAttribute('position'));
       g.setAttribute('normal', part.geo.getAttribute('normal'));
       g.setIndex(part.geo.index);
-      const n = g.getAttribute('position').count;
-      let col: THREE.BufferAttribute;
-      const src = part.geo.getAttribute('color') as THREE.BufferAttribute | undefined;
-      if (src && part.mat !== 'paint') col = src;
-      else {
-        const m = (part.mat === 'paint' ? paint! : part.mat) as THREE.MeshStandardMaterial;
-        const c = m.color.clone();
-        if (m.map) c.multiply(textureAverage(m.map));
-        const arr = new Float32Array(n * 3);
-        for (let i = 0; i < n; i++) c.toArray(arr, i * 3);
-        col = new THREE.BufferAttribute(arr, 3);
+      if (!paint) {
+        const n = g.getAttribute('position').count;
+        let col = part.geo.getAttribute('color') as THREE.BufferAttribute | undefined;
+        if (!col) {
+          const m = part.mat as THREE.MeshStandardMaterial;
+          const c = m.color.clone();
+          if (m.map) c.multiply(textureAverage(m.map));
+          const arr = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) c.toArray(arr, i * 3);
+          col = new THREE.BufferAttribute(arr, 3);
+        }
+        g.setAttribute('color', col);
       }
-      g.setAttribute('color', col);
       geos.push(g);
     }
-    geo = mergeGeometries(geos, false) ?? new THREE.BufferGeometry();
-    geo.computeBoundingSphere();
-    lod2Cache.set(key, geo);
+    const geo = geos.length ? mergeGeometries(geos, false) : null;
+    geo?.computeBoundingSphere();
+    mergedCache.set(key, geo);
   }
-  return geo;
+  return mergedCache.get(key)!;
 }
 
-/** Build one car object: a THREE.LOD (near, far, one-draw-call far-far) sharing everything but the paint. */
-export function fleetObject(p: Prepared, paint: THREE.Material, far = 20, farther = 45): THREE.LOD {
-  const lod = new THREE.LOD();
-  const level = (parts: Part[], shadow: boolean) => {
-    const g = new THREE.Group();
-    for (const part of parts) {
-      const m = new THREE.Mesh(part.geo, part.mat === 'paint' ? sided(paint, part.double) : part.mat);
-      m.castShadow = shadow;
-      m.receiveShadow = false;
-      m.userData.owned = false;
-      g.add(m);
-    }
-    return g;
-  };
-  const near = level(p.lod0, true);
+// ---------------------------------------------------------------- one car's near LOD
+
+/**
+ * The near LOD of one car (full parts, cut-out wheels), plus its brake-lamp lenses. Geometry and materials are
+ * shared; only the paint material is the car's own (shared by every car of that colour).
+ */
+export function nearObject(p: Prepared, paint: THREE.Material) {
+  const near = new THREE.Group();
+  for (const part of p.lod0) {
+    const m = new THREE.Mesh(part.geo, part.mat === 'paint' ? sided(paint, part.double) : part.mat);
+    m.castShadow = true;
+    m.userData.owned = false;
+    near.add(m);
+  }
   const wheels: THREE.Object3D[] = [];
   for (const w of p.wheels) {
     const m = new THREE.Mesh(w.geo, WHEEL_MAT);
@@ -502,32 +511,142 @@ export function fleetObject(p: Prepared, paint: THREE.Material, far = 20, farthe
     near.add(m);
     wheels.push(m);
   }
-  if (wheels.length) {
-    lod.userData.wheels = wheels;
-    lod.userData.wheelR = p.wheels[0].r;
-  }
-  lod.addLevel(near, 0);
-  // mid LOD: the clear-coat paint plus everything else merged into one vertex-coloured mesh (2-3 draws)
-  const mid = level(
-    p.lod1.filter((x) => x.mat === 'paint'),
-    true,
-  );
-  const rest = new THREE.Mesh(lod2Geometry(p, null), LOD1_MAT);
-  rest.castShadow = true;
-  rest.userData.owned = false;
-  mid.add(rest);
-  lod.addLevel(mid, far);
-  const m2 = new THREE.Mesh(lod2Geometry(p, paint), LOD2_MAT);
-  m2.castShadow = false; // beyond 45 m a car's shadow is a few pixels: skip the shadow-pass draw
-  m2.userData.owned = false;
-  lod.addLevel(m2, farther);
+  let brake: THREE.Mesh | null = null;
   if (p.brake) {
-    // not a LOD level: shown at every distance while the car brakes (Traffic toggles visible)
-    const b = new THREE.Mesh(p.brake, BRAKE_MAT);
-    b.visible = false;
-    b.userData.owned = false;
-    lod.add(b);
-    lod.userData.brake = b;
+    brake = new THREE.Mesh(p.brake, BRAKE_MAT);
+    brake.visible = false;
+    brake.userData.owned = false;
   }
-  return lod;
+  return { near, wheels, wheelR: p.wheels[0]?.r ?? 0.33, brake };
 }
+
+// ---------------------------------------------------------------- instanced mid/far LODs
+
+/** distances (m): near LOD inside NEAR, instanced mid LOD to MID (with shadows), instanced far LOD beyond */
+export const FLEET_LOD = { NEAR: 15, MID: 40 };
+
+const MID_PAINT = new THREE.MeshPhysicalMaterial({ color: '#fff', metalness: 0.45, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.08, side: THREE.DoubleSide, name: 'car-mid-paint' });
+const MID_REST = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, side: THREE.DoubleSide, name: 'car-mid' });
+const FAR_PAINT = new THREE.MeshStandardMaterial({ color: '#fff', metalness: 0.4, roughness: 0.35, side: THREE.DoubleSide, name: 'car-far-paint' });
+const FAR_REST = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.25, side: THREE.DoubleSide, name: 'car-far' });
+
+interface Entry {
+  obj: THREE.Object3D;
+  id: string;
+  color: THREE.Color;
+  near: THREE.Object3D;
+}
+/** a growable InstancedMesh for one (model, level, paint|rest) */
+class Batch {
+  mesh: THREE.InstancedMesh | null = null;
+  n = 0;
+  constructor(
+    private root: THREE.Group,
+    private geo: THREE.BufferGeometry,
+    private mat: THREE.Material,
+    private shadow: boolean,
+    private colored: boolean,
+  ) {}
+  begin() {
+    this.n = 0;
+  }
+  push(m: THREE.Matrix4, c: THREE.Color) {
+    if (!this.mesh || this.n >= this.mesh.instanceMatrix.count) {
+      const cap = Math.max(16, (this.mesh?.instanceMatrix.count ?? 8) * 2);
+      const next = new THREE.InstancedMesh(this.geo, this.mat, cap);
+      next.frustumCulled = false; // instances span the whole neighbourhood; the GPU culls the few off-screen
+      next.castShadow = this.shadow;
+      next.userData.owned = false;
+      if (this.mesh) {
+        next.instanceMatrix.array.set(this.mesh.instanceMatrix.array);
+        if (this.colored && this.mesh.instanceColor) {
+          next.setColorAt(0, c); // allocates the colour buffer
+          next.instanceColor!.array.set(this.mesh.instanceColor.array);
+        }
+        this.root.remove(this.mesh);
+        this.mesh.dispose();
+      }
+      this.mesh = next;
+      this.root.add(next);
+    }
+    this.mesh.setMatrixAt(this.n, m);
+    if (this.colored) this.mesh.setColorAt(this.n, c);
+    this.n++;
+  }
+  end() {
+    if (!this.mesh) return;
+    this.mesh.count = this.n;
+    this.mesh.visible = this.n > 0;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+}
+
+/**
+ * Every fleet car's mid and far LODs, drawn as one InstancedMesh per (model, level, paint/rest): all parked and
+ * moving cars of a model cost 2-4 draw calls together. Cars register once loaded; each frame update() puts the
+ * cars inside NEAR on their own near-LOD meshes and the rest into the instance buffers. Cars that leave the
+ * scene (chunk unloaded) are dropped.
+ */
+export class FleetInstances {
+  root = new THREE.Group();
+  private cars = new Set<Entry>();
+  private batches = new Map<string, { midP: Batch | null; midR: Batch | null; farP: Batch | null; farR: Batch | null }>();
+  constructor() {
+    this.root.name = 'fleet-instances';
+  }
+  register(obj: THREE.Object3D, id: string, color: THREE.Color, near: THREE.Object3D) {
+    this.cars.add({ obj, id, color, near });
+  }
+  private set(id: string) {
+    let b = this.batches.get(id);
+    if (!b) {
+      const p = ready.get(id)!;
+      const mk = (level: 1 | 2, paint: boolean) => {
+        const g = merged(p, level, paint);
+        return g ? new Batch(this.root, g, level === 1 ? (paint ? MID_PAINT : MID_REST) : paint ? FAR_PAINT : FAR_REST, level === 1, paint) : null;
+      };
+      b = { midP: mk(1, true), midR: mk(1, false), farP: mk(2, true), farR: mk(2, false) };
+      this.batches.set(id, b);
+    }
+    return b;
+  }
+  /** stats for labs/QA: cars by level */
+  census = { near: 0, mid: 0, far: 0 };
+  update(eye: THREE.Vector3) {
+    for (const b of this.batches.values()) for (const x of Object.values(b)) x?.begin();
+    const c = { near: 0, mid: 0, far: 0 };
+    const pos = new THREE.Vector3();
+    for (const e of this.cars) {
+      let top: THREE.Object3D = e.obj;
+      while (top.parent) top = top.parent;
+      if (!(top as THREE.Scene).isScene) {
+        this.cars.delete(e);
+        continue;
+      }
+      e.obj.updateWorldMatrix(true, false);
+      pos.setFromMatrixPosition(e.obj.matrixWorld);
+      const d = pos.distanceTo(eye);
+      const isNear = d < FLEET_LOD.NEAR;
+      e.near.visible = isNear;
+      if (isNear) {
+        c.near++;
+        continue;
+      }
+      const b = this.set(e.id);
+      if (d < FLEET_LOD.MID) {
+        b.midP?.push(e.obj.matrixWorld, e.color);
+        b.midR?.push(e.obj.matrixWorld, e.color);
+        c.mid++;
+      } else {
+        b.farP?.push(e.obj.matrixWorld, e.color);
+        b.farR?.push(e.obj.matrixWorld, e.color);
+        c.far++;
+      }
+    }
+    for (const b of this.batches.values()) for (const x of Object.values(b)) x?.end();
+    this.census = c;
+  }
+}
+/** the one shared instance manager (its root goes into the active level; see Traffic) */
+export const fleetInstances = new FleetInstances();

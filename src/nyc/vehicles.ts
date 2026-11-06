@@ -4,7 +4,7 @@ import { mat } from '../build';
 import type { Portal, Rect } from '../level';
 import { B, C, bake, canvasTex, lightFor, AX, SZ, AVE, ST, CYCLE, SIGNAL } from './common';
 import { laneOpen } from './districts'; // [districts]
-import { FLEET, PAINTS, TAXI_YELLOW, fleetObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
+import { FLEET, PAINTS, TAXI_YELLOW, fleetInstances, nearObject, paintMat, preloadFleet, ready, type Prepared } from './vehicleFleet';
 import { busMesh } from './vehicleBus';
 import { truckMesh } from './vehicleTruck';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
@@ -12,7 +12,8 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 /**
  * Cars, cabs and buses, and the traffic that drives them.
  *
- * Cars are detailed CC-BY models (see vehicleFleet.ts, CREDITS.md) with a near and a far LOD, tinted from a
+ * Cars are detailed CC-BY models (see vehicleFleet.ts, CREDITS.md): a ~15k-tri near LOD per car within 15 m,
+ * and instanced mid (~5k, to 40 m) and far (~2-4k) LODs shared by every car of a model; tinted from a
  * weighted palette of real street colours; cabs are the Crown Vic taxi or a Prius/Accord in taxi yellow with a
  * roof light. Until the models have streamed in, a cars shows a simple stand-in that is swapped on load.
  * Buses are a procedural MTA New Flyer Xcelsior (vehicleBus.ts).
@@ -23,7 +24,7 @@ export type VehicleKind = 'cab' | 'sedan' | 'bus' | 'truck';
 const SEDANS: [string, number][] = [
   ['accord', 10], ['accord19', 12], ['prius', 12], ['charger', 8], ['suburban', 14], ['explorer', 12], ['escalade', 8], ['sprinter', 6],
 ];
-const CABS: [string, number][] = [['taxi_cv', 3], ['prius', 3], ['accord', 2], ['accord19', 3]];
+const CABS: [string, number][] = [['taxi_cv', 3], ['prius', 4], ['accord', 3]];
 /** black-car (livery) SUVs are usually black */
 const BLACK_CAR = new Set(['suburban', 'escalade']);
 
@@ -48,15 +49,18 @@ function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean
   const p = ready.get(id);
   if (!p) return;
   for (const c of [...obj.children]) if (c.userData.standin) obj.remove(c);
-  const lod = fleetObject(p, paint);
-  obj.add(lod);
-  if (lod.userData.wheels) {
-    obj.userData.wheels = lod.userData.wheels;
-    obj.userData.wheelR = lod.userData.wheelR;
+  // near LOD as real meshes (shown within FLEET_LOD.NEAR); mid/far are drawn by the shared instance batches
+  const { near, wheels, wheelR, brake } = nearObject(p, paint);
+  obj.add(near);
+  if (wheels.length) {
+    obj.userData.wheels = wheels;
+    obj.userData.wheelR = wheelR;
   }
-  if (lod.userData.brake) {
-    obj.userData.brake = lod.userData.brake;
+  if (brake) {
+    obj.add(brake);
+    obj.userData.brake = brake;
   }
+  fleetInstances.register(obj, id, (paint as THREE.MeshStandardMaterial).color, near);
   if (cab && id !== 'taxi_cv') {
     let top = 0, zc = 0;
     for (const part of p.lod0) {
@@ -67,7 +71,7 @@ function dress(obj: THREE.Group, id: string, paint: THREE.Material, cab: boolean
     const sign = roofSign();
     sign.position.set(0, top - 0.02, zc);
     obj.add(sign);
-    for (const d of taxiDecals(id, p)) lod.levels[0].object.add(d);
+    for (const d of taxiDecals(id, p)) near.add(d);
   }
 }
 
@@ -76,7 +80,6 @@ const decalCache = new Map<string, THREE.Mesh[]>();
 const DECAL_AT: Record<string, { door: number; quarter: number; y: number }> = {
   prius: { door: -0.35, quarter: 1.45, y: 0.72 },
   accord: { door: -0.45, quarter: 1.55, y: 0.68 },
-  accord19: { door: -0.4, quarter: 1.5, y: 0.7 },
 };
 let decalMats: { logo: THREE.Material; num: THREE.Material } | null = null;
 function taxiDecals(id: string, p: Prepared): THREE.Mesh[] {
@@ -257,6 +260,7 @@ export class Traffic {
   private rng: Rng;
   constructor(private group: THREE.Group, seed: number) {
     this.rng = new Rng(hashN(seed, 404));
+    group.add(fleetInstances.root); // mid/far LODs of every fleet car (parked and moving) in this level
   }
   rects() {
     return this.cars.map((c) => c.rect);
@@ -350,6 +354,8 @@ export class Traffic {
       const hx = (c.axis === 'x' ? c.len : c.wid) / 2, hz = (c.axis === 'x' ? c.wid : c.len) / 2;
       c.rect.minX = x - hx; c.rect.maxX = x + hx; c.rect.minZ = z - hz; c.rect.maxZ = z + hz;
     }
+    // near LODs on, everything else into the instance batches (parked cars of every chunk included)
+    fleetInstances.update(p);
   }
 }
 

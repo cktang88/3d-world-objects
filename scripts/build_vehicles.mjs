@@ -31,11 +31,14 @@ export const FLEET = [
   { id: 'suburban', uid: 'b01950cf99aa48c1ba2ebd0addc8a9d4', len: 5.7, yaw: Math.PI, paint: /^default$/, glass: /^blackplast1$/, drop: /^tree$|^inter01$|^stuf$/, tris: 40000, lod1: 6000 },
   { id: 'escalade', uid: '7c5516c76bd441d998af76e2240a2b8d', len: 5.14, yaw: Math.PI, paint: null, glass: /Platinum23Mtl$/, drop: null, tris: 40000, lod1: 6000 },
   { id: 'explorer', uid: 'a47d2d8c83b44d348329dba8f92d1adc', len: 5.05, yaw: Math.PI, paint: /wire_187200200|Exterior_01/, glass: /Glass/, drop: null, tris: 40000, lod1: 6000 },
-  { id: 'accord19', uid: 'aad70ad7eae3467e99c71ef0c7150138', len: 4.88, yaw: Math.PI, paint: /^Platinum_White_Metallic$/, glass: /Glass/, drop: /^edge_color|^BlackTrim$/, tris: 45000, lod1: 6000, err0: 0.02 },
+  { id: 'accord19', uid: 'aad70ad7eae3467e99c71ef0c7150138', len: 4.88, yaw: Math.PI, paint: /^Platinum_White_Metallic$/, glass: /Glass/, drop: /^edge_color|^BlackTrim$/, tris: 45000, lod1: 6000, err0: 0.02, weld0: true },
   { id: 'sprinter', uid: 'f69de1315bb049c8946d57f6006acd73', len: 5.9, yaw: Math.PI, paint: null, glass: /vitre|glass/i, drop: /Interrieur/, tris: 30000, lod1: 5000 },
   // { id: 'lexus', uid: '6f2f754c78794734b794237913ba97cc', len: 4.76, yaw: 0, paint: null, glass: null, drop: null, tris: 40000, lod1: 6000 },
 ];
 
+const TRIS = { near: 25000, mid: 4500, far: 2000 };
+// LODS=0,1 rebuilds only those levels
+const LODS = (process.env.LODS ?? '0,1,2').split(',').map(Number);
 const OUT = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'vehicles');
 
 async function main() {
@@ -48,7 +51,7 @@ async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   for (const cfg of FLEET) {
     if (only.length && !only.includes(cfg.id)) continue;
-    for (const lod of [0, 1]) {
+    for (const lod of LODS) {
       const doc = await io.read(path.join(dir, `${cfg.uid}.glb`));
       const root = doc.getRoot();
       // no animation/skins/cameras/lights in traffic cars
@@ -93,14 +96,16 @@ async function main() {
       scene.removeChild(pivot);
       outer.addChild(pivot);
       scene.addChild(outer);
-      const target = lod === 0 ? cfg.tris : cfg.lod1;
+      // budgets: near ~15k (within 15 m), mid ~4.5k (to 40 m), far ~2k
+      const target = [TRIS.near, TRIS.mid, TRIS.far][lod];
       await doc.transform(dedup({ propertyTypes: [PropertyType.ACCESSOR, PropertyType.MESH, PropertyType.TEXTURE] }), flatten(), join({ keepNamed: false }), weld({}));
       const tris = count(root);
       const ratio = Math.min(1, target / tris);
-      if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? (cfg.err0 ?? 0.003) : 0.02, lockBorder: false }));
+      if (ratio < 1) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: lod === 0 ? (cfg.err0 ?? 0.005) : 0.02, lockBorder: false }));
       // seams (uv/normal splits) stop the simplifier early: for the far LOD drop normals (and uvs of untextured
       // parts), weld by position alone and simplify again; normals are recomputed at load
-      if (count(root) > target * 1.15) {
+      // (the near LOD only for models whose triangles are all unwelded, flag weld0: welding blurs their hard edges)
+      if (count(root) > target * 1.15 && (lod > 0 || cfg.weld0)) {
         for (const m of root.listMeshes())
           for (const p of m.listPrimitives()) {
             p.setAttribute('NORMAL', null);
@@ -109,14 +114,14 @@ async function main() {
           }
         await doc.transform(weld({}));
         const now = count(root);
-        await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, target / now), error: lod === 0 ? 0.006 : 0.04, lockBorder: false }));
+        await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, target / now), error: [0.006, 0.04, 0.09][lod], lockBorder: false }));
       }
       await doc.transform(
         prune(),
-        textureCompress({ encoder: sharp, targetFormat: 'webp', resize: lod === 0 ? [1024, 1024] : [256, 256] }),
+        textureCompress({ encoder: sharp, targetFormat: 'webp', resize: lod === 0 ? [1024, 1024] : lod === 1 ? [256, 256] : [64, 64] }),
         meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
       );
-      const file = path.join(OUT, `${cfg.id}${lod ? '_lod1' : ''}.glb`);
+      const file = path.join(OUT, `${cfg.id}${lod ? '_lod' + lod : ''}.glb`);
       await io.write(file, doc);
       const sz2 = getBounds(scene);
       console.log(cfg.id, 'lod', lod, 'tris', tris, '->', count(root), 'mats', root.listMaterials().length, 'size', sz2.max.map((v, i) => (v - sz2.min[i]).toFixed(2)).join('x'), (fs.statSync(file).size / 1024) | 0, 'KB');

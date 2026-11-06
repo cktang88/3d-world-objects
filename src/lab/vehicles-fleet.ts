@@ -1,46 +1,52 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
-import { FLEET, fleetObject, paintMat, preloadFleet, ready } from '../nyc/vehicleFleet';
+import { FLEET, FLEET_LOD, fleetInstances, nearObject, paintMat, preloadFleet, ready } from '../nyc/vehicleFleet';
 
 /**
  * ?lab=vehicles-fleet — every fleet model in a row, noses toward -z.
- * &paint=%23ff00ff tints the paint material (to check which parts are paint); &lod=1 forces the far LOD;
- * &only=id,id limits the row.
+ * &paint=%23ff00ff tints the paint (to check which parts are paint); &lod=1|2 forces the instanced mid/far LOD;
+ * &only=id,id limits the row; &spin=<rad> turns the cut-out wheels; &brake=1 lights the brake lamps.
  */
+let cam: THREE.Camera | null = null;
 const scene: LabScene = {
   name: 'vehicles-fleet',
-  description: 'all GLB fleet cars in a row (&paint=, &lod=1, &only=)',
+  description: 'all GLB fleet cars in a row (&paint=, &lod=1|2, &only=, &spin=, &brake=1)',
   cam: [-14, 3.5, -16],
   look: [0, 0.8, 0],
   env: 'nyc',
-  async build({ group, params }) {
+  async build({ group, params, camera }) {
+    cam = camera;
     await preloadFleet();
     const only = params.get('only')?.split(',');
     const ids = Object.keys(FLEET).filter((id) => !only || only.includes(id));
     const forced = params.get('lod');
+    if (forced === '1') Object.assign(FLEET_LOD, { NEAR: 0, MID: 1e9 });
+    if (forced === '2') Object.assign(FLEET_LOD, { NEAR: 0, MID: 0 });
     const paint = paintMat(params.get('paint') ?? '#1f3558', 0.6);
+    group.add(fleetInstances.root);
+    let tris = 0;
     ids.forEach((id, i) => {
       const p = ready.get(id);
       if (!p) return;
-      const o = fleetObject(p, paint);
-      if (forced) {
-        o.autoUpdate = false;
-        o.levels.forEach((l, k) => (l.object.visible = k === Number(forced)));
+      const o = new THREE.Group();
+      const { near, wheels, brake } = nearObject(p, paint);
+      o.add(near);
+      if (brake) {
+        brake.visible = params.has('brake');
+        o.add(brake);
       }
+      for (const w of wheels) w.rotation.x = Number(params.get('spin') ?? 0);
       o.position.x = (i - (ids.length - 1) / 2) * 2.8;
-      // &spin=<rad> turns the cut-out wheels, to check they were cut cleanly
-      for (const w of (o.userData.wheels ?? []) as THREE.Object3D[]) w.rotation.x = Number(params.get('spin') ?? 0);
-      // &brake=1 lights the brake lamps
-      if (o.userData.brake) o.userData.brake.visible = params.has('brake');
       group.add(o);
+      fleetInstances.register(o, id, paint.color, near);
+      for (const part of forced === '1' ? p.lod1 : forced === '2' ? p.lod2 : p.lod0) tris += (part.geo.index?.count ?? 0) / 3;
     });
-    let tris = 0;
-    group.traverse((m) => {
-      const mesh = m as THREE.Mesh;
-      if (mesh.isMesh && mesh.visible) tris += (mesh.geometry.index?.count ?? 0) / 3;
-    });
+    fleetInstances.update(camera.position);
     (window as any).__fleetTris = tris;
     (window as any).__fleet = ready;
+  },
+  update() {
+    if (cam) fleetInstances.update(cam.position);
   },
 };
 export default scene;

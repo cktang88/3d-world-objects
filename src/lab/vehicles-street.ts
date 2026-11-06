@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { carMesh } from '../nyc/vehicles';
-import { preloadFleet } from '../nyc/vehicleFleet';
+import { fleetInstances, preloadFleet } from '../nyc/vehicleFleet';
 import { Rng } from '../rng';
 
 /**
@@ -9,6 +9,7 @@ import { Rng } from '../rng';
  * (~70) and 26 cars/buses/trucks in three lanes, camera at eye height on the sidewalk.
  * window.__vehStats() returns the renderer's draw calls / triangles for the last frame and the LOD census.
  */
+let cam: THREE.Camera | null = null;
 const scene: LabScene = {
   name: 'vehicles-street',
   description: 'parked + moving cars along a 240 m avenue (counts: __vehStats())',
@@ -16,8 +17,10 @@ const scene: LabScene = {
   look: [0, 1.2, -30],
   env: 'nyc',
   ground: true,
-  async build({ group, renderer, params }) {
+  async build({ group, renderer, params, camera }) {
     await preloadFleet();
+    cam = camera;
+    group.add(fleetInstances.root);
     const r = new Rng(Number(params.get('seed') ?? 7));
     for (const side of [-1, 1])
       for (let z = -120; z < 120; z += r.range(6.5, 8)) {
@@ -33,12 +36,20 @@ const scene: LabScene = {
       group.add(car);
     }
     (window as any).__vehStats = () => {
-      const lods = [0, 0, 0];
-      group.traverse((o) => {
-        if ((o as THREE.LOD).isLOD) lods[(o as THREE.LOD).getCurrentLevel()]++;
+      // triangles in the scene graph that are drawn (visible meshes; instanced counted per instance)
+      let tris = 0, meshes = 0;
+      group.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        meshes++;
+        const n = (m.geometry.index?.count ?? m.geometry.getAttribute('position').count) / 3;
+        tris += (m as THREE.InstancedMesh).isInstancedMesh ? n * (m as THREE.InstancedMesh).count : n;
       });
-      return { ...renderer.info.render, lods };
+      return { ...renderer.info.render, cars: fleetInstances.census, sceneTris: Math.round(tris), meshes };
     };
+  },
+  update() {
+    if (cam) fleetInstances.update(cam.position);
   },
 };
 export default scene;
