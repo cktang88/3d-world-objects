@@ -78,6 +78,7 @@ export function endcap(k: Kit, w: number, o: GondolaOpts = {}) {
 
 /** Glass-door reach-in cooler bank: lit inside, bottles fronted deep behind each door. */
 export function cooler(k: Kit, doors: number, o: { frame?: string; header?: string; headerColor?: string; want?: RegExp } = {}) {
+  k.openBox(0, 1.1, -0.42, doors * 0.76, 2.15, 0.85);
   const dw = 0.76, H = 2.15, D = 0.85, len = doors * dw;
   const frame = mat(o.frame ?? '#1b1c1e', { rough: 0.4, metal: 0.5 });
   const inner = mat('#f4f6f8', { rough: 0.4, emissive: '#eef4ff', ei: 0.35 });
@@ -112,6 +113,7 @@ export function cooler(k: Kit, doors: number, o: { frame?: string; header?: stri
     k.box(M.chrome(), 0.025, 0.9, 0.03, x + (i % 2 ? -1 : 1) * (dw / 2 - 0.08), 0.75, 0.06);
     k.face(glass(), dw - 0.06, H - 0.26, x, 0.16 + (H - 0.26) / 2 + 0.05, 0.012, undefined, 0, true);
   }
+  k.closeBox();
   k.col(0, -D / 2, len + 0.12, D + 0.1);
 }
 
@@ -193,6 +195,7 @@ export function backBar(k: Kit, len: number) {
 
 /** Refrigerated deli case: lit interior, angled glass front, stainless top. */
 export function deliCase(k: Kit, len: number, o: { want?: RegExp } = {}) {
+  k.openBox(0, 0.9, 0, len, 0.5, 0.95);
   const D = 0.95, H = 1.25;
   const ss = M.steel();
   k.box(mat('#efefea', { rough: 0.4 }), len, 0.75, D, 0, 0, 0);
@@ -205,6 +208,7 @@ export function deliCase(k: Kit, len: number, o: { want?: RegExp } = {}) {
   // curved front glass approximated by an angled pane
   const pane = k.face(glass(), len - 0.04, 0.62, 0, 0.75 + 0.27, D / 2 - 0.18, undefined, 0, true);
   pane.rotation.x = -0.45;
+  k.closeBox();
   k.col(0, 0, len + 0.05, D + 0.05);
 }
 
@@ -293,6 +297,7 @@ export function tiered(k: Kit, w: number, o: { color?: string; slats?: boolean; 
 
 /** Glass showcase counter: lit, two glass shelves of goods. */
 export function showcase(k: Kit, len: number, o: { frame?: string; h?: number } = {}) {
+  k.openBox(0, 0.5, 0, len, 1.0, 0.6);
   const H = o.h ?? 1.0, D = 0.6;
   const fr = mat(o.frame ?? '#2a2a2a', { rough: 0.4, metal: 0.5 });
   k.box(fr, len, 0.2, D, 0, 0, 0);
@@ -306,11 +311,13 @@ export function showcase(k: Kit, len: number, o: { frame?: string; h?: number } 
   k.face(glass(), len - 0.04, H - 0.23, 0, 0.2 + (H - 0.23) / 2, D / 2, undefined, 0, true);
   const topGlass = k.face(glass(), len - 0.04, D - 0.04, 0, H - 0.02, 0, undefined, 0, true);
   topGlass.rotation.x = -Math.PI / 2;
+  k.closeBox();
   k.col(0, 0, len + 0.04, D + 0.04);
 }
 
 /** Tall glass curio cabinet (antiques, models). */
 export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number; pitch?: number } = {}) {
+  k.openBox(0, 1.0, -0.22, w, 1.95, 0.45);
   const H = 1.95, D = 0.45, n = o.shelves ?? 4;
   const wood = mat(o.wood ?? '#4a2e1a', { rough: 0.5 });
   k.box(wood, w, 0.12, D, 0, 0, -D / 2);
@@ -324,6 +331,7 @@ export function curio(k: Kit, w: number, o: { wood?: string; shelves?: number; p
   }
   k.box(M.emit('#fff1d6', 1.5), w - 0.1, 0.01, 0.02, 0, H - 0.1, -0.08);
   k.face(glass(), w - 0.04, H - 0.2, 0, H / 2, 0.003, undefined, 0, true);
+  k.closeBox();
   k.col(0, -D / 2, w + 0.04, D + 0.04);
 }
 

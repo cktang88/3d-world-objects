@@ -46,7 +46,11 @@ export interface Layout {
 // ---------------------------------------------------------------- surfaces
 
 const vct = (a: string, b: string): Surface => ({ m: surfMat(vctTile(a, b), { rough: 0.35 }), tile: [0.61, 0.61] });
-const pbrS = (key: string, opts: { color?: string; rough?: number } = {}): Surface => ({ m: surface(key, [1, 1], { color: opts.color, roughness: opts.rough ?? 0.8 }), tile: [1, 1] });
+// varnished wood reads as a mirror in the renderer's reflections unless kept fairly rough
+const pbrS = (key: string, opts: { color?: string; rough?: number } = {}): Surface => ({
+  m: surface(key, [1, 1], { color: opts.color, roughness: /parquet|laminate|oak/.test(key) ? Math.max(0.85, opts.rough ?? 0.8) : opts.rough ?? 0.8 }),
+  tile: [1, 1],
+});
 const paint = (c: string): Surface => ({ m: mat(c, { rough: 0.92 }) });
 
 const COOL: Partial<Env> = { hemi: { sky: '#f2f6ff', ground: '#77746c', intensity: 0.55 }, ambient: 0.08, envIntensity: 0.55, exposure: 0.85 };

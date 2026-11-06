@@ -8,7 +8,7 @@ import { loadRemote, isRebuilt, clearQueue, disposeModel, DATASET_LABEL, type Re
 import { SHOPS } from './nyc';
 import { bake } from './nyc/common';
 import { loadOriginal } from './detail';
-import { Kit, M, quad, surfMat, lit, type Seg } from './shopkit/kit';
+import { Kit, M, quad, surfMat, lit, type Seg, type Container } from './shopkit/kit';
 import { dropTile, tinTile, textTex } from './shopkit/tex';
 import { LAYOUTS, type Style } from './shopkit/layouts';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
@@ -94,6 +94,13 @@ export class ShopLevel implements Level {
   private triBudget = SHOP_BUDGET.tris;
   /** stats for the lab */
   stats = { products: 0, slots: 0, tris: 0, originals: 0, filler: 0 };
+  private prio = 0;
+  /**
+   * Glass-fronted containers (coolers, showcases, curio cabinets, deli cases). Their stock is
+   * not generated until generate() is called: update() does it when the player comes near
+   * and stands in front of one; a seamless-entry system may call it earlier or later.
+   */
+  containers: (Container & { generated: boolean; generate: () => void })[] = [];
 
   constructor(desc: Extract<LevelDesc, { kind: 'interior' }>) {
     this.name = desc.name;
@@ -114,6 +121,7 @@ export class ShopLevel implements Level {
     this.group.add(baked);
     this.group.add(kit.live);
     this.cols.push(...kit.cols);
+    this.containers = kit.containers.map((c) => ({ ...c, generated: false, generate: () => {} }));
     this.spawn.pos.set(doorX, 0, D / 2 - 1.1);
     this.door.pos.set(doorX, 0, D / 2);
     this.room = { W, D, H: st.H };
@@ -241,13 +249,39 @@ export class ShopLevel implements Level {
     if (!this.alive) return;
     const kinds = (SHOP_KINDS[type] ?? []).map((n) => KINDS[n]);
     const byProduct = this.assign(chunks, loaded, r, kinds.length > 0);
+    // the open shop floor now; each container's contents only when it is generated
+    const sets = new Map<number, Map<Loaded | 'filler', Seg[]>>();
+    for (const [p, list] of byProduct)
+      for (const sg of list) {
+        const id = sg.box ?? -1;
+        if (!sets.has(id)) sets.set(id, new Map());
+        const m = sets.get(id)!;
+        if (!m.has(p)) m.set(p, []);
+        m.get(p)!.push(sg);
+      }
+    if (sets.has(-1)) this.stockSet(sets.get(-1)!, kinds, r);
+    for (const c of this.containers) {
+      const set = sets.get(c.id);
+      if (!set) {
+        c.generated = true;
+        continue;
+      }
+      c.generate = () => {
+        if (c.generated || !this.alive) return;
+        c.generated = true;
+        this.stockSet(set, kinds, new Rng(hashN(seed, 100 + c.id)));
+      };
+    }
+  }
+
+  /** place a set of products (and packaging for the rest) and instance them */
+  private stockSet(set: Map<Loaded | 'filler', Seg[]>, kinds: Kind[], r: Rng) {
     const filler = new Filler();
-    let prio = 0;
-    const rest: Seg[] = byProduct.get('filler') ?? [];
-    for (const [p, list] of byProduct) if (p !== 'filler') rest.push(...this.place(p, list, r, prio++));
-    for (const s of rest) this.fill(filler, s, kinds, r);
+    const rest: Seg[] = [...(set.get('filler') ?? [])];
+    for (const [p, list] of set) if (p !== 'filler') rest.push(...this.place(p, list, r, this.prio++));
+    for (const sg of rest) this.fill(filler, sg, kinds, r);
     filler.build(this.group);
-    this.stats.filler = filler.count;
+    this.stats.filler += filler.count;
     this.stats.tris += filler.tris();
   }
 
@@ -608,7 +642,19 @@ export class ShopLevel implements Level {
   portals() {
     return this.ports;
   }
-  update() {}
+  private tmp = new THREE.Vector3();
+  update(_dt: number, player: THREE.Vector3) {
+    for (const c of this.containers) {
+      if (c.generated) continue;
+      const d = this.tmp.set(player.x - c.center.x, 0, player.z - c.center.z);
+      // near, and on the side you can see into
+      if (d.length() < 5.5 && d.x * Math.sin(c.facing) + d.z * Math.cos(c.facing) > -0.2) c.generate();
+    }
+  }
+  /** generate every container's contents now (lab, screenshots) */
+  generateAll() {
+    for (const c of this.containers) c.generate();
+  }
   dispose() {
     this.alive = false;
     clearQueue();

@@ -13,6 +13,16 @@ import type { Surf } from './tex';
  *  - single: one item standing in the area (showroom pieces)
  *  - ceil:   hanging from the ceiling (lamps); p is the ceiling point
  */
+export interface Container {
+  id: number;
+  /** world centre and axis-aligned size */
+  center: THREE.Vector3;
+  size: THREE.Vector3;
+  /** glass-fronted: its contents show while closed (generate when near and facing) */
+  glass: boolean;
+  /** yaw of the side you look in from */
+  facing: number;
+}
 export type SegMode = 'shelf' | 'hang' | 'pile' | 'stack' | 'single' | 'ceil';
 export interface Seg {
   p: THREE.Vector3;
@@ -30,6 +40,8 @@ export interface Seg {
   maxRows?: number;
   /** one of each, at least this far apart (antiques, guitars on hooks) */
   pitch?: number;
+  /** inside container n (kit.containers): stocked only when that container is generated */
+  box?: number;
 }
 
 /** a flat quad whose UVs repeat a texture every `tile` metres */
@@ -181,7 +193,22 @@ export class Kit {
   }
   /** a product segment, local front-edge centre (x, y, z), facing local +z turned by r */
   seg(mode: SegMode, x: number, y: number, z: number, len: number, depth: number, h: number, more: Partial<Seg> = {}, r = 0) {
-    this.segs.push({ p: this.w(x, y, z), rot: this.rot + r, len, depth, h, mode, ...more });
+    this.segs.push({ p: this.w(x, y, z), rot: this.rot + r, len, depth, h, mode, ...more, ...(this.cur >= 0 ? { box: this.cur } : {}) });
+  }
+  /**
+   * Containers (coolers, showcases, curio cabinets, deli cases): the segments made between
+   * openBox() and closeBox() belong to it, and their stock is only generated on demand.
+   * Centre in local coordinates, size along local x, y, z; `glass`: contents visible when closed.
+   */
+  containers: Container[] = [];
+  private cur = -1;
+  openBox(x: number, y: number, z: number, sx: number, sy: number, sz: number, glass = true) {
+    const quarter = Math.abs(Math.sin(this.rot)) > 0.7;
+    this.containers.push({ id: this.containers.length, center: this.w(x, y, z), size: new THREE.Vector3(quarter ? sz : sx, sy, quarter ? sx : sz), glass, facing: this.rot });
+    this.cur = this.containers.length - 1;
+  }
+  closeBox() {
+    this.cur = -1;
   }
   light(l: THREE.Light, x: number, y: number, z: number) {
     l.position.copy(this.w(x, y, z));

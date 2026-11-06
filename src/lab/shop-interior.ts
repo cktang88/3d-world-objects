@@ -43,6 +43,8 @@ const scene: LabScene = {
       camera.position.set(...v);
     }
     await lv.stocked;
+    // containers fill when you walk up to them; &containers=closed leaves them empty
+    if (params.get('containers') !== 'closed') lv.generateAll();
     await new Promise((r) => setTimeout(r, Number(params.get('stockWait') ?? 4000)));
   },
 };
