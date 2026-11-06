@@ -1,10 +1,9 @@
 /** Pedestrians at crossings, simulated at a fixed dt with no renderer: heights, sidewalks/crosswalks only, stepping off on WALK, nobody in the road when cross traffic gets green. */
 import * as THREE from 'three';
-import { test, expect, between, none, fmt, soft } from './qa';
+import { test, expect, between, none, fmt } from './qa';
 import { allowModels, setSearch, settle } from './env';
 import { AX, SZ, BX, BZ, LX, LZ, CYCLE, lightFor } from '../src/nyc/common';
 
-const known = (msg: string) => soft(false, `KNOWN ${msg}`);
 
 interface PedLog { off: string[]; startRed: string[]; caught: number; crossings: number; heights: number[]; n: number }
 async function simulatePeople(seconds: number): Promise<PedLog> {
@@ -52,9 +51,7 @@ const pedLog = () => (peds ??= simulatePeople(2 * CYCLE));
 test('people are 1.5-1.95 m tall', async () => {
   const l = await pedLog();
   expect(l.n >= 30, `only ${l.n} pedestrians spawned`);
-  for (const h of l.heights) between(h, 1.45, 1.95, 'pedestrian height');
-  const short = l.heights.filter((h) => h < 1.5);
-  if (short.length) known(`${short.length} of ${l.n} people under 1.5 m (shortest ${fmt(Math.min(...short))} m)`);
+  for (const h of l.heights) between(h, 1.5, 1.95, 'pedestrian height');
 });
 
 test('pedestrians stay on sidewalks and crosswalks (48 s at dt 0.2)', async () => {
@@ -65,13 +62,11 @@ test('pedestrians stay on sidewalks and crosswalks (48 s at dt 0.2)', async () =
 test('pedestrians step off the kerb only on WALK', async () => {
   const l = await pedLog();
   expect(l.crossings > 3, `only ${l.crossings} crossings in 48 s`);
-  // KNOWN (qa-findings #4b): the odd person steps off on yellow
-  for (const x of l.startRed) known(x);
-  expect(l.startRed.length <= Math.max(1, l.crossings * 0.05), `${l.startRed.length} of ${l.crossings} crossings started against the light: ${l.startRed.slice(0, 3).join('; ')}`);
+  none(l.startRed, `of ${l.crossings} crossings started against the light`);
 });
 
 test('nobody is still in the road when cross traffic gets green', async () => {
   const l = await pedLog();
-  if (l.caught) known(`${l.caught} person-frames (0.2 s) in the roadway while cross traffic has green: walkSignal lets people start crossing a 16 m avenue up to 17.5 s into a 9.5 s green (qa-findings #4)`);
+  expect(l.caught === 0, `${l.caught} person-frames (0.2 s) in the roadway while cross traffic has green`);
 });
 
