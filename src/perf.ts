@@ -204,7 +204,13 @@ function labelOf(o: THREE.Object3D) {
   const names: string[] = [];
   for (let p: THREE.Object3D | null = o; p && names.length < 4; p = p.parent) if (p.name) names.unshift(p.name);
   const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[];
-  const mat = Array.isArray(m) ? m.map((x) => x.name || x.type).join('+') : m ? m.name || m.type : '';
+  // baked chunk meshes are unnamed: describe the material (vertex colours, map, colour) instead
+  const desc = (x: THREE.Material) => {
+    if (x.name) return x.name;
+    const s = x as THREE.MeshStandardMaterial;
+    return [x.type, s.vertexColors ? 'vc' : '', s.map ? `map:${s.map.name || 'tex'}` : '', s.color ? '#' + s.color.getHexString() : '', x.transparent ? 'transp' : ''].filter(Boolean).join(' ');
+  };
+  const mat = Array.isArray(m) ? m.map(desc).join('+') : m ? desc(m) : '';
   const kind = (o as THREE.InstancedMesh).isInstancedMesh ? 'Instanced' : (o as THREE.SkinnedMesh).isSkinnedMesh ? 'Skinned' : 'Mesh';
   return `${names.join('/') || '(unnamed)'} [${kind} ${mat}]`;
 }
