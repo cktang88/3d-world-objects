@@ -833,11 +833,13 @@ export class Lighting {
       if (this.sunOn) {
         this.camera.updateMatrixWorld();
         this.csm.update();
-        // the near cascade re-renders every frame; the wider ones every 2nd / 3rd frame, staggered.
-        // A skipped cascade keeps its previous map and matching shadow matrix, so it stays consistent.
+        // the near cascade re-renders every frame; the wider ones take turns (round-robin), so a
+        // frame never renders more than near + one other cascade. A skipped cascade keeps its
+        // previous map and matching shadow matrix, so it stays consistent.
+        const others = this.csm.lights.length - 1;
         this.csm.lights.forEach((l, i) => {
           l.shadow.autoUpdate = false;
-          if (i === 0 || this.frame % (i + 1) === i % (i + 1) || this.frame < 4) l.shadow.needsUpdate = true;
+          if (i === 0 || (others > 0 && (this.frame % others) + 1 === i) || this.frame < 2) l.shadow.needsUpdate = true;
         });
       } else for (const l of this.csm.lights) l.shadow.autoUpdate = false;
     }
