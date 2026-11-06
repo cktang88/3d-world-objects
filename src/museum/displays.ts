@@ -102,7 +102,7 @@ function itemLines(c: Ctx, m: Measured, big: boolean): Line[] {
     // sized to be read at ~1.5 m (museum labels: a title of ~2 cm, body text of ~1.2 cm)
     { text: e.title, size: big ? 0.08 : 0.06, color: c.labelInk, weight: 700, font: SERIF },
     { text: e.author ? `by ${e.author}` : (DATASET_LABEL[e.ds] ?? e.ds), size: 0.042, color: c.labelSub, weight: 400, font: SANS },
-    { text: fmtDims(m.real), size: 0.042, color: c.labelSub, weight: 500, font: SANS },
+    { text: fmtDims(m.real), size: 0.037, color: c.labelSub, weight: 500, font: SANS },
     { text: Math.abs(m.k - 1) > 0.01 ? 'actual size (corrected from the source)' : 'actual size', size: 0.034, color: c.labelSub, weight: 400, font: SANS },
   ];
 }
