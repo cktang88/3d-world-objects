@@ -7,6 +7,7 @@ import { MuseumBase, shade } from './base';
 import { makeMats, type Ctx, type Unit } from './displays';
 import { assemble, partitionRooms, planRoom, type Plan } from './plan';
 import { buildShell, doorPortal, doorSign, ENTRY_Z } from './shell';
+import { descKeyOf, registerRoom } from './map';
 import { loadThemeSizes, measure, measuredFromCache, prefetchSizes, type Measured } from './sizes';
 import { pageSize, styleFor, STYLES, type Style } from './style';
 import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smithsonian';
@@ -42,6 +43,7 @@ export class GalleryLevel extends MuseumBase {
     const per = si ? SI_PAGE : pageSize(t.collection);
     this.name = `${t.name}${desc.page ? ` · ${roman(desc.page + 1)}` : ''}`;
     this.r = new Rng(hashN(desc.theme, desc.page, 11));
+    this.mapKey = descKeyOf(desc);
     this.setEnv(st);
     this.spawn.pos.set(0, 0, -1.6);
     this.spawn.yaw = 0;
@@ -309,6 +311,12 @@ export class GalleryLevel extends MuseumBase {
 
     this.lighting(plan, ctx);
     this.texts(plan, measured.length, pages, ink);
+    // on the museum's floor plan (the minimap)
+    registerRoom({
+      key: this.mapKey!, desc: this.desc, name: this.name, color: plan.wallColor, W, D, doors: plan.doors,
+      exits: [null, ...exits.map((e) => e.target)],
+      dots: [...plan.floor, ...plan.wall, ...plan.hang].filter((q) => q.u.items.length).map((q) => [q.f.x, q.f.z] as [number, number]),
+    });
     this.flush(!!st.outdoor);
     this.markBuilt();
   }

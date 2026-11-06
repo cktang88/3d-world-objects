@@ -10,6 +10,7 @@ import { buildShell, doorPortal, doorSign } from './shell';
 import { loadThemeSizes, measure, measuredFromCache, type Measured } from './sizes';
 import { siEntries, siMeasured, SI_BASE, SI_ROOMS } from './smithsonian';
 import { STYLES, type Style } from './style';
+import { descKeyOf, markVisited, registerRoom } from './map';
 import { textPlane, SANS, SERIF } from './text';
 
 const PALETTE = ['#7d2e2e', '#2e4d7d', '#2e6b55', '#6b4a2e', '#4d2e6b', '#7d6a2e', '#2e6b7d', '#5b5b5b', '#8a3d5c', '#3d5c2e'];
@@ -140,6 +141,14 @@ export class AtriumLevel extends MuseumBase {
     }
 
     loads.push(...heroes);
+    // on the museum's floor plan (the minimap)
+    this.mapKey = descKeyOf({ kind: 'atrium' });
+    markVisited(this.mapKey);
+    registerRoom({
+      key: this.mapKey, desc: { kind: 'atrium' }, name: 'Atrium', color: '#b89a5a', W, D, doors,
+      exits: doors.map((_, i) => (i < 6 ? { kind: 'gallery', theme: wings[i].theme, page: 0, wing: wings[i].name } : { kind: 'gallery', theme: SI_BASE + siDoors[i - 6][1], page: 0, wing: 'Smithsonian' })),
+      dots: [[CENTRE.x, CENTRE.z], ...previewAt.map((f) => [f.x, f.z] as [number, number])],
+    });
     this.flush();
     this.markBuilt();
     this.ready = Promise.allSettled(loads).then(() => this.settle());

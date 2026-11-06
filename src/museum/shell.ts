@@ -10,6 +10,8 @@ import { textPlane, SANS, SERIF } from './text';
 
 const T = 0.3;
 const CORR = 2.4;
+/** wall thickness (for the plan in map.ts) */
+export const T_WALL = T;
 const glassWall = new THREE.MeshStandardMaterial({ color: '#dfeff5', roughness: 0.05, transparent: true, opacity: 0.16, depthWrite: false });
 
 export function floorMaterial(k: Floor): THREE.Material {
