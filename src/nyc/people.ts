@@ -1049,15 +1049,17 @@ export class Person {
       this.noPhone = true;
       this.walkSpeed = Math.min(this.walkSpeed, r.range(0.95, 1.15));
       const st = new THREE.Mesh(strollerGeo(r.pick(['#1d2433', '#2a2c30', '#3b4232', '#151517', '#6b6e72'])), propVcMat);
-      st.position.set(0, 1.0, 0.5);
+      // the handlebar ~1 m up, within reach of the hands (the arms are solved onto it every frame)
+      st.position.set(0, 0.98, 0.34);
       st.castShadow = true;
       this.root.add(st);
       this.meshes.push(st);
+      const grip = new THREE.Vector3();
       this.pose = (p) => {
-        p.aim('upperarm_r', 'lowerarm_r', _v3.set(0.05, -0.75, 0.55));
-        p.aim('lowerarm_r', 'hand_r', _v3.set(0.12, 0.05, 1));
-        p.aim('upperarm_l', 'lowerarm_l', _v3.set(-0.05, -0.75, 0.55));
-        p.aim('lowerarm_l', 'hand_l', _v3.set(-0.12, 0.05, 1));
+        st.updateMatrixWorld(true);
+        // hands on the foam either side of the middle, elbows bending down and out
+        p.reach('upperarm_r', 'lowerarm_r', 'hand_r', st.localToWorld(grip.set(-0.17, 0.02, -0.03)), _v3.set(-0.4, -1, -0.3));
+        p.reach('upperarm_l', 'lowerarm_l', 'hand_l', st.localToWorld(grip.set(0.17, 0.02, -0.03)), _v3.set(0.4, -1, -0.3));
       };
     } else if (carry < 0.075) {
       // walking a dog on a leash held in the left hand
@@ -1376,6 +1378,27 @@ export class Person {
     const world = b.getWorldQuaternion(_q2).premultiply(_q1.setFromUnitVectors(from, to));
     b.quaternion.copy(b.parent.getWorldQuaternion(_q3).invert().multiply(world));
     b.updateMatrixWorld(true);
+  }
+  /**
+   * two-bone IK: put the hand at a world point (shoulder -> elbow -> wrist), the elbow bending toward `pole`
+   * (a direction in the model's frame: down and out for a hand on a bar). Out of reach: the arm points at it.
+   */
+  reach(upper: string, lower: string, hand: string, target: THREE.Vector3, pole: THREE.Vector3) {
+    const u = this.bones.get(upper), l = this.bones.get(lower), h = this.bones.get(hand);
+    if (!u || !l || !h) return;
+    const S = u.getWorldPosition(new THREE.Vector3()), E = l.getWorldPosition(new THREE.Vector3()), W = h.getWorldPosition(new THREE.Vector3());
+    const a = S.distanceTo(E), b = E.distanceTo(W);
+    const toT = target.clone().sub(S);
+    const d = Math.min(toT.length(), (a + b) * 0.999);
+    const dir = toT.normalize();
+    const cosA = THREE.MathUtils.clamp((a * a + d * d - b * b) / (2 * a * d), -1, 1);
+    const pw = pole.clone().applyQuaternion(this.rq);
+    const n = pw.sub(dir.clone().multiplyScalar(pw.dot(dir))).normalize();
+    const elbow = S.clone().addScaledVector(dir, a * cosA).addScaledVector(n, a * Math.sqrt(1 - cosA * cosA));
+    const inv = this.rq.clone().invert();
+    this.aim(upper, lower, elbow.clone().sub(S).applyQuaternion(inv));
+    const wrist = S.clone().addScaledVector(dir, d);
+    this.aim(lower, hand, wrist.sub(l.getWorldPosition(new THREE.Vector3())).applyQuaternion(inv));
   }
   /** bend a bone forward (about the model's right axis) */
   turn(bone: string, ang: number) {

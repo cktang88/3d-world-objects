@@ -124,3 +124,40 @@ test('a pushed stroller stands on the ground (its wheels were 8 cm in the air)',
   const tris = g.getAttribute('position').count / 3;
   between(tris, 300, 1500, 'stroller triangles');
 });
+
+test('pushing a stroller: both hands are on its handlebar (two-bone IK), within 6 cm, while walking', async () => {
+  allowModels(/assets\/people\//);
+  const { Person, loadPeopleAssets } = await import('../src/nyc/people');
+  const { Rng } = await import('../src/rng');
+  const assets = await loadPeopleAssets();
+  const r = new Rng(21);
+  const found: InstanceType<typeof Person>[] = [];
+  for (let i = 0; i < 400 && found.length < 4; i++) {
+    const p = new Person(assets, r, i % 2 ? 'female' : 'male');
+    if (p.noPhone && !p.dog && p.pose) found.push(p);
+  }
+  expect(found.length > 0, 'no stroller pushers');
+  const bad: string[] = [];
+  let checked = 0;
+  for (const p of found) {
+    const st = p.root.children.find((c) => (c as THREE.Mesh).isMesh && !!(c as THREE.Mesh).geometry.getAttribute('color')) as THREE.Mesh | undefined;
+    if (!st) continue;
+    p.setActivity('walk', 0);
+    p.setSpeed(1.0);
+    for (let i = 0; i < 40; i++) {
+      p.update(1 / 30);
+      p.root.updateMatrixWorld(true);
+      if (i % 10) continue;
+      for (const [hand, x] of [['hand_r', -0.17], ['hand_l', 0.17]] as const) {
+        const h = bone(p.root, hand)!.getWorldPosition(new THREE.Vector3());
+        const g = st.localToWorld(new THREE.Vector3(x, 0.02, -0.03));
+        const d = h.distanceTo(g);
+        checked++;
+        if (d > 0.06) bad.push(`${p.gender} ${hand}: ${fmt(d)} m off the bar`);
+      }
+    }
+  }
+  console.log(`   ${found.length} pushers, ${checked} hand checks`);
+  expect(checked > 0, 'no stroller found on the pushers');
+  expect(!bad.length, bad.slice(0, 6).join('\n'));
+});
