@@ -5,6 +5,7 @@
  */
 
 export interface MatDef {
+  name: string;
   color: [number, number, number];
   rough: number;
   metal: number;
@@ -229,7 +230,7 @@ export function parseUsda(text: string): ParsedObject {
   const materials: MatDef[] = [];
   const walkMats = (p: Prim) => {
     if (p.kind === 'Material') {
-      const md: MatDef = { color: [0.7, 0.7, 0.7], rough: 0.6, metal: 0, opacity: 1, emissive: [0, 0, 0] };
+      const md: MatDef = { name: p.name, color: [0.7, 0.7, 0.7], rough: 0.6, metal: 0, opacity: 1, emissive: [0, 0, 0] };
       for (const c of p.children) {
         if (c.kind !== 'Shader') continue;
         const a = c.attrs;
@@ -248,7 +249,7 @@ export function parseUsda(text: string): ParsedObject {
   const defaultMat = () => {
     if (!matIndex.has('__default__')) {
       matIndex.set('__default__', materials.length);
-      materials.push({ color: [0.7, 0.7, 0.7], rough: 0.6, metal: 0, opacity: 1, emissive: [0, 0, 0] });
+      materials.push({ name: 'default', color: [0.7, 0.7, 0.7], rough: 0.6, metal: 0, opacity: 1, emissive: [0, 0, 0] });
     }
     return matIndex.get('__default__')!;
   };

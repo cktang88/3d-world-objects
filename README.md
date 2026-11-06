@@ -18,6 +18,13 @@ A first-person three.js world built from [**sand3d**](https://github.com/Sandflo
 - Articulated objects (from Articraft and AutoMate) **move**: their real joints swing and slide.
 - Look at any object and press <kbd>E</kbd>: its source, author, size, joints, a link to the dataset row, Sandflow's render, and **the actual sand3d program** that builds it.
 
+## Detail
+
+- **Original models:** every Objaverse-derived sand3d object knows where its original textured model lives in [allenai/objaverse](https://huggingface.co/datasets/allenai/objaverse). When you get close (museum exhibits, shop products, street props), the original streams in and replaces the sand3d version, scaled to sand3d's real-world size. Draco, Meshopt and KTX2 are supported, and huge textures are downscaled. Press <kbd>O</kbd> to switch back to the pure sand3d programs.
+- **Materials from sand3d kinds:** sand3d names each material after its kind (`oak__…`, `brushed_steel__…`, `fabric__…`). `src/materials.ts` turns those into triplanar procedural surfaces (wood grain, brushed metal, weave, leather, marble veins, concrete pores, rubber) with colour, roughness and bump detail, without needing UVs. Glass becomes transmissive glass. Untextured CAD parts render as machined aluminium.
+- **Rendering:** MSAA, ground-truth ambient occlusion (GTAO), bloom, a physical sky that also lights the reflections, and 4K shadow maps. Press <kbd>G</kbd> to cycle ultra / high / low, or open `?quality=high`.
+- **NYC architecture:** instanced 3D windows (frames, mullions, sills, lintels, reflective glass), normal-mapped brick and stone, reflective curtain-wall towers, extruded car bodies, and detailed shop windows.
+
 ## Run
 
 ```bash

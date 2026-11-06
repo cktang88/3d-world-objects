@@ -45,6 +45,8 @@ export interface Env {
   ambient: number;
   envIntensity: number;
   exposure: number;
+  /** use the physical sky (and bake it into reflections) instead of a gradient */
+  physicalSky?: boolean;
 }
 
 export interface Level {
@@ -73,5 +75,6 @@ export function disposeTree(o: THREE.Object3D) {
     const m = c as THREE.Mesh;
     // Only dispose geometry we own (procedural); model geometries are shared from the loader cache.
     if (m.isMesh && m.userData.owned) m.geometry.dispose();
+    if ((c as THREE.InstancedMesh).isInstancedMesh) (c as THREE.InstancedMesh).dispose();
   });
 }

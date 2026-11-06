@@ -43,8 +43,8 @@ function cached<T>(key: string, make: () => T): T {
 export type FacadeStyle = 'brick' | 'plaster' | 'glass' | 'panel' | 'adobe' | 'timber' | 'brownstone' | 'prewar' | 'castiron';
 
 /** 4 bays x 4 floors; each bay is 3 m wide and each floor 3.2 m tall. */
-export function facade(style: FacadeStyle, wall: string, lit: number, seed: number) {
-  return cached(`facade:${style}:${wall}:${lit}:${seed}`, () => {
+export function facade(style: FacadeStyle, wall: string, lit: number, seed: number, opts: { windows?: boolean } = {}) {
+  return cached(`facade:${style}:${wall}:${lit}:${seed}:${opts.windows !== false}`, () => {
     const S = 512;
     const cell = S / 4;
     const rng = new Rng(seed);
@@ -83,7 +83,7 @@ export function facade(style: FacadeStyle, wall: string, lit: number, seed: numb
       for (let j = 0; j < 4; j++) g.fillRect(0, j * cell - 3, S, 6);
     }
     noise(g, S, S, style === 'glass' ? 6 : 18, rng);
-    for (let fy = 0; fy < 4; fy++) {
+    for (let fy = 0; fy < (opts.windows === false ? 0 : 4); fy++) {
       for (let bx = 0; bx < 4; bx++) {
         const x0 = bx * cell;
         const y0 = fy * cell;
@@ -163,7 +163,7 @@ export function facade(style: FacadeStyle, wall: string, lit: number, seed: numb
         }
       }
     }
-    return { map: tex(c), emissive: tex(ce) };
+    return { map: tex(c), emissive: tex(ce), normal: normalFrom(c, style === 'glass' ? 0.5 : 3) };
   });
 }
 
@@ -184,6 +184,10 @@ export function roofTex(color: string) {
     }
     return tex(c);
   });
+}
+
+export function concreteNormal(base: string, tile = 64) {
+  return cached(`concreteN:${base}:${tile}`, () => normalFrom(concreteTex(base, tile).image as HTMLCanvasElement, 4));
 }
 
 export function concreteTex(base: string, tile = 64) {
@@ -543,4 +547,31 @@ export function signTex(text: string, bg: string, fg: string) {
     g.fillText(text, 256, 68, 480);
     return tex(c, false);
   });
+}
+
+/** Tangent-space normal map from a canvas, treating luminance as height (mortar, joints and pores sink). */
+export function normalFrom(src: HTMLCanvasElement, strength = 2): THREE.CanvasTexture {
+  const w = src.width, h = src.height;
+  const d = src.getContext('2d')!.getImageData(0, 0, w, h).data;
+  const H = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) H[i] = (d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11) / 255;
+  const [c, g] = canvas(w, h);
+  const img = g.createImageData(w, h);
+  const at = (x: number, y: number) => H[((y + h) % h) * w + ((x + w) % w)];
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+      const l = Math.hypot(dx, dy, 1);
+      const k = (y * w + x) * 4;
+      img.data[k] = (-dx / l * 0.5 + 0.5) * 255;
+      img.data[k + 1] = (dy / l * 0.5 + 0.5) * 255;
+      img.data[k + 2] = (1 / l * 0.5 + 0.5) * 255;
+      img.data[k + 3] = 255;
+    }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  return t;
 }

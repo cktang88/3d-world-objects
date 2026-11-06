@@ -5,6 +5,7 @@ import { box, cyl, mat, glow, plane } from './build';
 import { museum, themeMembers, type Theme } from './museumData';
 import { loadRemote, animate, disposeModel, clearQueue, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { Rng, hashN } from './rng';
+import { trackForDetail } from './detail';
 import { woodFloorTex, tileFloorTex } from './textures';
 
 export const PAGE = 25; // 8 cases x 3 + 1 hero
@@ -155,6 +156,8 @@ abstract class MuseumBase implements Level {
         const s = Math.min(fit.x / Math.max(1e-4, Math.hypot(m.size.x, m.size.z)), fit.y / Math.max(1e-4, m.size.y), 1e4);
         holder.remove(placeholder);
         holder.add(m.object);
+        // the original, textured model takes over when it arrives
+        trackForDetail(holder, m.object, entry.id, entry.og, m.size);
         holder.userData.baseScale = s;
         holder.userData.fade = 0;
         holder.scale.setScalar(s * 0.6);
@@ -361,13 +364,13 @@ export class AtriumLevel extends MuseumBase {
       { text: 'THE SAND3D MUSEUM', size: 0.62, color: '#2b2217' },
       { text: `${m.total.toLocaleString()} objects, each one written as a short program`, size: 0.24, color: '#5a4a35', weight: 400 },
       { text: 'Every doorway leads to rooms of similar things. There is no last room.', size: 0.19, color: '#6b5a42', weight: 400 },
-    ], 18, 2.4, null, 128);
+    ], 18, 2.4, '#e6dccb', 128);
     title.position.set(0, 6.6, -D / 2 + 0.17);
     g.add(title);
     const credit = textPlane([
       { text: 'Objects: sand3d by Sandflow · datasets on Hugging Face under CC BY 4.0', size: 0.1, color: '#5a4a35', weight: 400, font: 'system-ui, sans-serif' },
       { text: 'Look at anything and press E to read its program', size: 0.1, color: '#5a4a35', weight: 400, font: 'system-ui, sans-serif' },
-    ], 8, 0.7, null);
+    ], 8, 0.7, '#e6dccb');
     credit.position.set(0, 3.4, D / 2 - 0.17);
     credit.rotation.y = Math.PI;
     g.add(credit);
@@ -459,7 +462,7 @@ export class GalleryLevel extends MuseumBase {
     const tt = textPlane([
       { text: t.name, size: 0.5, color: '#fff' },
       { text: `${t.collection} · ${t.size} object${t.size === 1 ? '' : 's'}${pages > 1 ? ` · room ${desc.page + 1} of ${pages}` : ''}`, size: 0.12, color: '#f0e4cc', weight: 400, font: 'system-ui, sans-serif' },
-    ], 12, 1.2, null, 160);
+    ], 12, 1.2, wallColor, 160);
     tt.position.set(0, H - 0.72, -D / 2 + 0.17);
     this.group.add(tt);
     if (t.words.length) {

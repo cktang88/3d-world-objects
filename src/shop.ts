@@ -7,6 +7,7 @@ import { Rng, hashN } from './rng';
 import { loadPools } from './museumData';
 import { loadRemote, clearQueue, disposeModel, DATASET_LABEL, type RemoteEntry, type RemoteModel } from './remote';
 import { SHOPS } from './nyc';
+import { loadOriginal, trackForDetail } from './detail';
 
 const H = 3.6;
 const SHOWROOM = new Set(['furniture', 'lighting', 'music', 'models', 'garden']);
@@ -26,7 +27,7 @@ export class ShopLevel implements Level {
   spawn = { pos: new THREE.Vector3(), yaw: 0 };
   env: Env = {
     skyTop: '#1a1a1a', skyBottom: '#222', stars: false, fog: null, fogNear: 0, fogFar: 0, sun: null,
-    hemi: { sky: '#f4f8ff', ground: '#6a6458', intensity: 0.75 }, ambient: 0.12, envIntensity: 0.6, exposure: 1.0,
+    hemi: { sky: '#f4f8ff', ground: '#6a6458', intensity: 0.5 }, ambient: 0.06, envIntensity: 0.5, exposure: 0.82,
   };
   private cols: Rect[] = [];
   private ports: Portal[] = [];
@@ -82,7 +83,7 @@ export class ShopLevel implements Level {
       for (let z = -D / 2 + 2.5; z < D / 2 - 1; z += 4.5) g.add(box(mat('#ffffff', { emissive: '#f4f8ff', ei: 1.4 }), 0.3, 0.06, 2.2, x, H - 0.08, z, false));
     }
     for (const z of [-D / 4, D / 4]) {
-      const l = new THREE.PointLight('#f2f6ff', 10 + W * D * 0.06, Math.max(W, D) * 1.2, 1.3);
+      const l = new THREE.PointLight('#f2f6ff', 6 + W * D * 0.035, Math.max(W, D) * 1.2, 1.4);
       l.position.set(0, H - 0.4, z);
       g.add(l);
     }
@@ -207,6 +208,7 @@ export class ShopLevel implements Level {
       holder.scale.setScalar(s);
       holder.rotation.y = Math.random() * Math.PI * 2;
       holder.add(m.object);
+      trackForDetail(holder, m.object, e.id, e.og, m.size);
       this.group.add(holder);
       this.models.push(m);
       this.portalFor(e, new THREE.Box3(at.clone().add(new THREE.Vector3(-0.8, 0, -0.8)), at.clone().add(new THREE.Vector3(0.8, m.size.y * s + 0.1, 0.8))));
@@ -220,24 +222,15 @@ export class ShopLevel implements Level {
       this.models.push(m);
       const cell = facings[0].cell;
       const s = Math.min(cell.x / Math.max(1e-4, m.size.x), (cell.y - 0.04) / Math.max(1e-4, m.size.y), cell.z / Math.max(1e-4, m.size.z));
-      m.object.updateMatrixWorld(true);
-      const meshes: THREE.Mesh[] = [];
-      m.object.traverse((o) => (o as THREE.Mesh).isMesh && meshes.push(o as THREE.Mesh));
       const slots: { p: THREE.Vector3; rot: number }[] = [];
       for (const f of facings) for (const p of f.slots) slots.push({ p, rot: f.rotY });
-      const tmp = new THREE.Matrix4();
-      const place = new THREE.Matrix4();
-      for (const mesh of meshes) {
-        const im = new THREE.InstancedMesh(mesh.geometry, mesh.material, slots.length);
-        slots.forEach((sl, i) => {
-          place.compose(sl.p, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), sl.rot), new THREE.Vector3(s, s, s));
-          tmp.multiplyMatrices(place, mesh.matrixWorld);
-          im.setMatrixAt(i, tmp);
-        });
-        im.instanceMatrix.needsUpdate = true;
-        im.computeBoundingSphere();
-        this.group.add(im);
-      }
+      const sand = this.instance(m.object, slots, s);
+      // then the original textured model, if this product has one
+      loadOriginal(e.id, e.og, m.size, { prio: 50 + prio, texMax: 512 }).then((orig) => {
+        if (!orig || !this.alive) return;
+        for (const im of sand) this.group.remove(im);
+        this.instance(orig, slots, s);
+      });
       for (const f of facings) {
         const b = new THREE.Box3();
         for (const p of f.slots) b.expandByPoint(p).expandByPoint(p.clone().add(new THREE.Vector3(0, m.size.y * s, 0)));
@@ -245,6 +238,33 @@ export class ShopLevel implements Level {
         this.portalFor(e, b);
       }
     }).catch(() => {});
+  }
+
+  /** every mesh under root becomes one InstancedMesh across all slots */
+  private instance(root: THREE.Object3D, slots: { p: THREE.Vector3; rot: number }[], s: number) {
+    root.updateMatrixWorld(true);
+    const meshes: THREE.Mesh[] = [];
+    root.traverse((o) => (o as THREE.Mesh).isMesh && meshes.push(o as THREE.Mesh));
+    const tmp = new THREE.Matrix4();
+    const place = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const sc = new THREE.Vector3(s, s, s);
+    const out: THREE.InstancedMesh[] = [];
+    for (const mesh of meshes) {
+      const im = new THREE.InstancedMesh(mesh.geometry, mesh.material, slots.length);
+      slots.forEach((sl, i) => {
+        place.compose(sl.p, q.setFromAxisAngle(up, sl.rot), sc);
+        tmp.multiplyMatrices(place, mesh.matrixWorld);
+        im.setMatrixAt(i, tmp);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.computeBoundingSphere();
+      im.receiveShadow = true;
+      this.group.add(im);
+      out.push(im);
+    }
+    return out;
   }
 
   colliders() {

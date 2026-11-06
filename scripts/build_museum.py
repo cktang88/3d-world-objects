@@ -64,9 +64,30 @@ def h(tok):
     return v % D, 1.0 if (v >> 20) & 1 else -1.0
 
 
+OG = None
+
+
+def original_folder(oid):
+    """Objaverse objects: the glbs/000-NNN folder of the original textured model (0 = none)."""
+    global OG
+    if OG is None:
+        import gzip
+        p = os.path.join(HERE, ".cache", "objaverse-paths.json.gz")
+        OG = json.load(gzip.open(p)) if os.path.exists(p) else {}
+    if not oid.startswith("objaverse-"):
+        return 0
+    path = OG.get(oid[len("objaverse-"):])
+    return int(path.split("/")[1].split("-")[1]) if path else 0
+
+
 def compact(r):
     ds, split, row, oid, fam, entry, title, author, url, lic, path, nbytes, f, joints = r[:14]
-    return [ds, split, row, oid, fam, entry, title, author, url, lic, path, nbytes, f, joints]
+    if ds == "cad":
+        # CAD rows have no title: name them from the most frequent words in their program
+        c = collections.Counter(w for w in r[14].split() if w not in EXTRA_STOP and len(w) > 3)
+        words = [w for w, _ in c.most_common(3)]
+        title = (" ".join(w.title() for w in words) + (" part" if len(words) < 2 else "")) if words else f"CAD part {oid[-6:]}"
+    return [ds, split, row, oid, fam, entry, title, author, url, lic, path, nbytes, f, joints, original_folder(oid)]
 
 
 def nice(fam):
@@ -206,7 +227,12 @@ def main():
         cands = [i for i, t in enumerate(themes) if t["col"] == col]
         if not cands:
             continue
-        best = max(cands, key=lambda i: len(themes[i]["members"]))
+        # the biggest theme that is clearly about something (a two-word name, not a catch-all)
+        named = [i for i in cands if " & " in themes[i]["name"] and len(themes[i]["members"]) <= 120]
+        if ds == "cad":
+            good = ("Gear", "Flange", "Bracket", "Shaft", "Bearing", "Pulley", "Hinge", "Coupling", "Knob", "Sprocket")
+            named = [i for i in named if any(g in themes[i]["name"] for g in good)] or named
+        best = max(named or cands, key=lambda i: len(themes[i]["members"]))
         prev = [compact(r) for r in themes[best]["members"] if r[11] < 900_000][:2]
         wings.append({"name": name, "blurb": blurb, "theme": best, "preview": prev})
 

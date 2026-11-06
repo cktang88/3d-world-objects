@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Rng, hashN } from './rng';
 import { pickModel, spawn, normScale, type ModelEntry } from './assets';
 import { mat, glow } from './build';
-import { facade, concreteTex, signTex, type FacadeStyle } from './textures';
+import { facade, concreteTex, concreteNormal, signTex, type FacadeStyle } from './textures';
 import type { Env, Level, LevelDesc, Portal, Rect } from './level';
 import { disposeTree, rect } from './level';
 import { BIOMES } from './biomes';
@@ -156,8 +156,18 @@ function facadeMat(style: FacadeStyle, seed: number) {
   const key = `${style}:${seed}`;
   let m = facadeMats.get(key);
   if (!m) {
-    const fac = facade(style, '#d9d9d9', 0.12, seed + 40);
-    m = new THREE.MeshStandardMaterial({ map: fac.map, vertexColors: true, roughness: style === 'glass' ? 0.2 : 0.85, metalness: style === 'glass' ? 0.4 : 0 });
+    const glass = style === 'glass';
+    // masonry walls carry no painted windows: real 3D windows are instanced on top
+    const fac = facade(style, '#d9d9d9', 0.12, seed + 40, { windows: glass });
+    m = new THREE.MeshStandardMaterial({
+      map: fac.map,
+      normalMap: glass ? null : fac.normal,
+      normalScale: new THREE.Vector2(1.2, 1.2),
+      vertexColors: true,
+      roughness: glass ? 0.08 : 0.88,
+      metalness: glass ? 0.75 : 0,
+      envMapIntensity: glass ? 1.4 : 0.6,
+    });
     facadeMats.set(key, m);
   }
   return m;
@@ -264,32 +274,106 @@ function shopWindowTex(type: string, seed: number) {
   const key = `${type}:${seed % 4}`;
   let t = windowTexCache.get(key);
   if (t) return t;
-  const r = new Rng(seed);
-  t = canvasTex(256, 192, (g) => {
-    const grad = g.createLinearGradient(0, 0, 0, 192);
-    grad.addColorStop(0, '#fff3d6');
-    grad.addColorStop(1, '#c9a46a');
+  const r = new Rng(hashN(seed % 4, type.length * 31 + type.charCodeAt(0)));
+  const W = 1024, H = 768;
+  t = canvasTex(W, H, (g) => {
+    // warm interior falling off into depth
+    const grad = g.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#fff6e2');
+    grad.addColorStop(0.6, '#e9cf9e');
+    grad.addColorStop(1, '#8a6a44');
     g.fillStyle = grad;
-    g.fillRect(0, 0, 256, 192);
-    const cols = ['#d33', '#3a3', '#36c', '#fc3', '#f80', '#a3c', '#fff', '#333', '#0aa'];
-    for (let y = 40; y < 190; y += 38) {
-      g.fillStyle = '#7a5a36';
-      g.fillRect(0, y, 256, 4);
-      for (let x = 6; x < 250; x += 10 + r.int(0, 10)) {
-        g.fillStyle = r.pick(cols);
-        const h = 8 + r.int(0, 22);
-        g.fillRect(x, y - h, 6 + r.int(0, 8), h);
+    g.fillRect(0, 0, W, H);
+    // a smaller row of shelves further back in the shop
+    g.globalAlpha = 0.45;
+    for (let y = 120; y < H - 120; y += 90) {
+      g.fillStyle = '#6b5136';
+      g.fillRect(140, y, W - 280, 5);
+      for (let x = 150; x < W - 150; x += 14 + r.int(0, 10)) {
+        g.fillStyle = `hsl(${r.int(0, 360)},${r.int(30, 70)}%,${r.int(35, 70)}%)`;
+        const h = 20 + r.int(0, 40);
+        g.fillRect(x, y - h, 10 + r.int(0, 8), h);
       }
     }
-    if (r.chance(0.6)) {
-      g.fillStyle = '#ff2a2a';
-      g.font = 'bold 26px system-ui';
-      g.fillText('OPEN', 170, 30);
+    g.globalAlpha = 1;
+    // front display shelves with products of different shapes
+    const palette = ['#c0392b', '#27ae60', '#2980b9', '#f1c40f', '#e67e22', '#8e44ad', '#ecf0f1', '#2c3e50', '#16a085', '#d35400', '#7f8c8d'];
+    for (let y = 230; y < H; y += 175) {
+      g.fillStyle = 'rgba(0,0,0,0.25)';
+      g.fillRect(0, y + 10, W, 18);
+      g.fillStyle = '#7a5a36';
+      g.fillRect(0, y, W, 12);
+      g.fillStyle = '#a07a4a';
+      g.fillRect(0, y, W, 3);
+      let x = 12;
+      while (x < W - 40) {
+        const kind = r.int(0, 2);
+        const col = r.pick(palette);
+        const w = kind === 0 ? 34 + r.int(0, 20) : kind === 1 ? 26 : 50 + r.int(0, 40);
+        const h = kind === 0 ? 90 + r.int(0, 50) : kind === 1 ? 110 + r.int(0, 30) : 60 + r.int(0, 50);
+        const n = r.int(2, 4);
+        for (let k = 0; k < n && x < W - 40; k++) {
+          const top = y - h;
+          g.fillStyle = col;
+          if (kind === 1) {
+            // bottle
+            g.beginPath();
+            g.roundRect(x, top + 30, w, h - 30, 6);
+            g.fill();
+            g.fillRect(x + w * 0.35, top + 5, w * 0.3, 30);
+            g.fillStyle = '#f5f0e6';
+            g.fillRect(x + 2, top + 55, w - 4, 26);
+          } else if (kind === 2) {
+            // can or jar
+            g.beginPath();
+            g.roundRect(x, top, w, h, 10);
+            g.fill();
+            g.fillStyle = 'rgba(255,255,255,0.8)';
+            g.fillRect(x + 4, top + h * 0.35, w - 8, h * 0.3);
+          } else {
+            // box with a label
+            g.fillRect(x, top, w, h);
+            g.fillStyle = 'rgba(255,255,255,0.85)';
+            g.fillRect(x + 4, top + 10, w - 8, 14);
+            g.fillStyle = 'rgba(0,0,0,0.25)';
+            g.fillRect(x + w - 6, top, 6, h);
+          }
+          g.fillStyle = 'rgba(255,255,255,0.22)';
+          g.fillRect(x + 3, top + 4, 4, h - 10);
+          x += w + 4;
+        }
+        // price tag
+        g.fillStyle = '#fffbe0';
+        g.fillRect(x - 40, y + 14, 34, 16);
+        g.fillStyle = '#c0392b';
+        g.font = 'bold 12px system-ui';
+        g.fillText('$' + r.int(1, 49) + '.' + r.pick(['99', '49', '29']), x - 38, y + 27);
+        x += 10 + r.int(0, 20);
+      }
     }
-    g.fillStyle = 'rgba(255,255,255,0.18)';
-    g.beginPath();
-    g.moveTo(0, 0); g.lineTo(90, 0); g.lineTo(0, 120);
-    g.fill();
+    if (r.chance(0.7)) {
+      g.fillStyle = 'rgba(20,0,0,0.6)';
+      g.beginPath();
+      g.roundRect(W - 230, 30, 190, 70, 14);
+      g.fill();
+      g.strokeStyle = '#ff3b3b';
+      g.lineWidth = 5;
+      g.stroke();
+      g.fillStyle = '#ff5050';
+      g.font = 'bold 50px system-ui';
+      g.fillText('OPEN', W - 200, 85);
+    }
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.font = '18px system-ui';
+    g.fillText(r.pick(['WE ACCEPT ALL MAJOR CREDIT CARDS', 'ATM INSIDE', 'OPEN 7 DAYS', 'EST. 1962', 'FREE DELIVERY']), 30, 40);
+    // reflections on the glass
+    const rg = g.createLinearGradient(0, 0, W, H);
+    rg.addColorStop(0, 'rgba(255,255,255,0.28)');
+    rg.addColorStop(0.35, 'rgba(255,255,255,0.0)');
+    rg.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+    rg.addColorStop(0.62, 'rgba(255,255,255,0.0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, W, H);
     void type;
   });
   windowTexCache.set(key, t);
@@ -308,8 +392,9 @@ const sidewalkTex = (() => {
 
 // ---------------------------------------------------------------- materials
 
+let sidewalkMat: THREE.MeshStandardMaterial | null = null;
 const M = {
-  sidewalk: () => mat('#ffffff', { map: sidewalkTex(), rough: 0.9 }),
+  sidewalk: () => (sidewalkMat ??= new THREE.MeshStandardMaterial({ map: sidewalkTex(), normalMap: concreteNormal('#b9b5ad', 96), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.9 })),
   curb: () => mat('#8f8b84', { rough: 0.8 }),
   tar: () => mat('#3a3836', { rough: 0.95 }),
   iron: () => mat('#1c1d1f', { metal: 0.6, rough: 0.5 }),
@@ -366,9 +451,9 @@ export class NycLevel implements Level {
     this.name = desc.name;
     const b = BIOMES.metropolis;
     this.env = {
-      skyTop: '#5d8cc4', skyBottom: '#e9dcc8', stars: false, fog: '#d9d2c6', fogNear: 80, fogFar: 300,
-      sun: { color: '#ffdcae', intensity: 2.8, elev: 28, azim: 235 }, hemi: { sky: '#d8e4f2', ground: '#6b6052', intensity: 0.85 },
-      ambient: 0.1, envIntensity: 0.5, exposure: 1.0,
+      skyTop: '#5d8cc4', skyBottom: '#e9dcc8', stars: false, fog: '#aab6c2', fogNear: 110, fogFar: 420,
+      sun: { color: '#ffd9a8', intensity: 4.2, elev: 30, azim: 235 }, hemi: { sky: '#cfdcec', ground: '#5a5046', intensity: 0.9 },
+      ambient: 0.05, envIntensity: 0.55, exposure: 0.62, physicalSky: true,
     };
     void b;
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.ensure(dx, dz);
@@ -488,7 +573,7 @@ export class NycLevel implements Level {
     // the hidden backyard core of the block
     B(stat, mat('#5a564f'), LX * 2 - 1, 2.5, LZ * 2 - 1, 0, 0, 0, false);
 
-    const ctx: Ctx = { rng, group, stat, colliders, portals, cx, cz, seed: hashN(this.seed, cx, cz, 5), doors: [] };
+    const ctx: Ctx = { rng, group, stat, colliders, portals, cx, cz, seed: hashN(this.seed, cx, cz, 5), doors: [], windows: [] };
 
     // avenue frontage: both ends of the block
     for (const end of [-1, 1]) {
@@ -531,6 +616,23 @@ export class NycLevel implements Level {
     // merge everything static into a few meshes
     const baked = bake(stat);
     group.add(baked);
+    // every window in the block: two instanced draws
+    if (ctx.windows.length) {
+      const { frame, glass } = windowGeo();
+      const fi = new THREE.InstancedMesh(frame, windowMats().frame, ctx.windows.length);
+      const gi = new THREE.InstancedMesh(glass, windowMats().glass, ctx.windows.length);
+      ctx.windows.forEach((w, i) => {
+        fi.setMatrixAt(i, w.m);
+        gi.setMatrixAt(i, w.m);
+        fi.setColorAt(i, w.frame);
+        gi.setColorAt(i, w.glass);
+      });
+      fi.receiveShadow = gi.receiveShadow = true;
+      fi.castShadow = true;
+      fi.computeBoundingSphere();
+      gi.computeBoundingSphere();
+      group.add(fi, gi);
+    }
     // dispose the per-building geometries that were merged
     stat.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -568,7 +670,10 @@ export class NycLevel implements Level {
       const tiers = rng.int(1, 3);
       for (let t = 0; t < tiers; t++) {
         const th = t === tiers - 1 ? h - y : (h - y) * rng.range(0.45, 0.65);
-        for (const s of sides) wallQuad(stat, fm, rr, s, y, y + th, 12, 14.4, wall);
+        for (const s of sides) {
+          wallQuad(stat, fm, rr, s, y, y + th, 12, 14.4, wall);
+          if (style !== 'glass') addWindows(ctx, rr, s, style, Math.max(y, ground), Math.floor((th - (y < ground ? ground : 0)) / 3.6), 3.6, new THREE.Color('#2a2e33'));
+        }
         roof(stat, rr, y + th);
         y += th;
         const inset = rng.range(2, 4);
@@ -577,9 +682,13 @@ export class NycLevel implements Level {
       }
       if (rng.chance(0.5)) C(stat, M.iron(), 0.12, rng.range(8, 20), (rr.minX + rr.maxX) / 2, y, (rr.minZ + rr.maxZ) / 2);
     } else {
+      const frameCol = new THREE.Color(rng.pick(type === 'brownstone' ? ['#2a1d16', '#e8e2d6', '#1d2a22'] : type === 'castiron' ? ['#1c1c1c', '#3a4a3a', '#e8e4da'] : ['#ece6da', '#1c1c1c', '#2f3b2f', '#6b3a2a', '#d8d0c0']));
       for (const s of sides) {
         const isFront = s === front;
-        if (isFront || exposed(s)) wallQuad(stat, fm, r, s, isFront ? ground : 0, h, 12, 12.8, wall);
+        if (isFront || exposed(s)) {
+          wallQuad(stat, fm, r, s, isFront ? ground : 0, h, 12, 12.8, wall);
+          addWindows(ctx, r, s, style, isFront || store ? ground : 0.6, floors - (isFront || store ? 1 : 0), fh, frameCol);
+        }
         else wallQuad(stat, plain, r, s, 0, h);
         if (isFront) wallQuad(stat, mat(shade(wall, type === 'brownstone' ? 0.75 : 0.45), { rough: 0.8 }), r, s, 0, ground, 3, 3);
       }
@@ -850,7 +959,82 @@ export class NycLevel implements Level {
 }
 
 type BType = 'brownstone' | 'tenement' | 'prewar' | 'midrise' | 'tower' | 'castiron';
+
+// ---------------------------------------------------------------- windows
+
+const WIN: Partial<Record<FacadeStyle, { w: number; h: number; bay: number; sill: number }>> = {
+  brick: { w: 1.05, h: 1.62, bay: 2.3, sill: 0.85 },
+  brownstone: { w: 1.0, h: 2.15, bay: 1.95, sill: 0.6 },
+  prewar: { w: 1.15, h: 1.7, bay: 2.5, sill: 0.85 },
+  castiron: { w: 2.1, h: 2.5, bay: 3.0, sill: 0.45 },
+  panel: { w: 2.5, h: 1.35, bay: 3.0, sill: 1.0 },
+};
+let winGeo: { frame: THREE.BufferGeometry; glass: THREE.BufferGeometry } | null = null;
+/** a unit window (1 wide, 1 tall, wall at z=0): jambs, head, mullion + transom, sill, lintel */
+function windowGeo() {
+  if (winGeo) return winGeo;
+  const parts: THREE.BufferGeometry[] = [];
+  const bx = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.translate(x, y, z);
+    parts.push(g);
+  };
+  bx(0.07, 1, 0.12, -0.465, 0.5, 0.05); // jambs
+  bx(0.07, 1, 0.12, 0.465, 0.5, 0.05);
+  bx(1, 0.07, 0.12, 0, 0.965, 0.05); // head
+  bx(1, 0.05, 0.1, 0, 0.035, 0.05); // bottom rail
+  bx(0.035, 1, 0.07, 0, 0.5, 0.05); // mullion
+  bx(1, 0.04, 0.07, 0, 0.56, 0.05); // meeting rail
+  bx(1.18, 0.06, 0.24, 0, -0.03, 0.11); // sill
+  bx(1.22, 0.11, 0.1, 0, 1.06, 0.05); // lintel
+  const frame = mergeGeometries(parts)!;
+  parts.forEach((g) => g.dispose());
+  const glass = new THREE.PlaneGeometry(0.93, 0.93);
+  glass.translate(0, 0.5, 0.012);
+  winGeo = { frame, glass };
+  return winGeo;
+}
+let winMats: { frame: THREE.MeshStandardMaterial; glass: THREE.MeshStandardMaterial } | null = null;
+function windowMats() {
+  winMats ??= {
+    frame: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.55 }),
+    // dark, mirror-like panes that pick up the sky
+    glass: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.05, metalness: 0.92, envMapIntensity: 1.3 }),
+  };
+  return winMats;
+}
+const GLASS_TINTS = ['#2c3a46', '#33414d', '#26313a', '#3a4752', '#4a4e52', '#5c5446', '#2a3640'];
+function addWindows(ctx: Ctx, r: Rect, side: Side, style: FacadeStyle, y0: number, floors: number, fh: number, frame: THREE.Color) {
+  const spec = WIN[style];
+  if (!spec || floors <= 0) return;
+  const alongX = side === 'N' || side === 'S';
+  const len = alongX ? r.maxX - r.minX : r.maxZ - r.minZ;
+  const n = Math.floor((len - 0.8) / spec.bay);
+  if (n <= 0) return;
+  const a0 = (alongX ? r.minX : r.minZ) + (len - n * spec.bay) / 2 + spec.bay / 2;
+  const line = side === 'N' ? r.minZ : side === 'S' ? r.maxZ : side === 'E' ? r.maxX : r.minX;
+  const [nx, nz] = NORMAL[side];
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), { S: 0, N: Math.PI, E: Math.PI / 2, W: -Math.PI / 2 }[side]);
+  const scale = new THREE.Vector3(spec.w, spec.h, 1);
+  for (let f = 0; f < floors; f++) {
+    const y = y0 + f * fh + spec.sill;
+    for (let i = 0; i < n; i++) {
+      const a = a0 + i * spec.bay;
+      const pos = alongX ? new THREE.Vector3(a, y, line + nz * 0.01) : new THREE.Vector3(line + nx * 0.01, y, a);
+      const m = new THREE.Matrix4().compose(pos, q, scale);
+      const g = new THREE.Color(ctx.rng.pick(GLASS_TINTS));
+      if (ctx.rng.chance(0.12)) g.set(ctx.rng.pick(['#8a7a5c', '#9a8f7a', '#7a6a6a'])); // drawn blinds
+      ctx.windows.push({ m, frame, glass: g });
+    }
+  }
+}
+interface WinInst {
+  m: THREE.Matrix4;
+  frame: THREE.Color;
+  glass: THREE.Color;
+}
 interface Ctx {
+  windows: WinInst[];
   rng: Rng;
   group: THREE.Group;
   stat: THREE.Group;
@@ -1091,19 +1275,56 @@ function carMesh(kind: 'cab' | 'sedan' | 'bus', rng: Rng): THREE.Group {
       w.position.y = 0.5;
     }
   } else {
-    B(g, body, 1.8, 0.7, 4.6, 0, 0.35, 0);
-    B(g, glass, 1.6, 0.55, 2.4, 0, 1.05, 0.15, false);
-    B(g, body, 1.62, 0.06, 2.0, 0, 1.6, 0.2, false);
-    B(g, mat('#fff6d0', { emissive: '#fff2c0', ei: 0.8 }), 1.4, 0.12, 0.04, 0, 0.75, -2.31, false);
-    B(g, mat('#a01010', { emissive: '#ff2020', ei: 0.6 }), 1.4, 0.12, 0.04, 0, 0.75, 2.31, false);
-    for (const z of [-1.45, 1.45]) for (const x of [-0.85, 0.85]) {
-      const w = C(g, black, 0.33, 0.24, x, 0, z, false);
-      w.rotation.z = Math.PI / 2;
-      w.position.y = 0.33;
+    // body: an extruded side profile with rounded (bevelled) edges, nose toward -z
+    const prof = (pts: [number, number][]) => {
+      const sh = new THREE.Shape();
+      pts.forEach(([x, y], i) => (i ? sh.lineTo(x, y) : sh.moveTo(x, y)));
+      sh.closePath();
+      return sh;
+    };
+    const extrude = (sh: THREE.Shape, width: number, bevel: number, m: THREE.Material) => {
+      const geo = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 4, curveSegments: 8 });
+      geo.translate(0, 0, -(width - bevel * 2) / 2);
+      geo.rotateY(-Math.PI / 2); // profile x -> world z, nose toward -z
+      const mesh = new THREE.Mesh(geo, m);
+      mesh.castShadow = true;
+      g.add(mesh);
+      return mesh;
+    };
+    const L = 2.3;
+    const bodyPts: [number, number][] = [
+      [-L, 0.32], [-L - 0.04, 0.5], [-L + 0.05, 0.74], [-1.25, 0.86], [-0.62, 1.36], [0.72, 1.4], [1.35, 0.96], [L - 0.06, 0.9], [L + 0.02, 0.62], [L - 0.02, 0.32],
+      [1.75, 0.32], [1.68, 0.55], [1.2, 0.62], [1.02, 0.42], [-1.05, 0.42], [-1.22, 0.62], [-1.7, 0.55], [-1.77, 0.32],
+    ];
+    extrude(prof(bodyPts), 1.8, 0.07, body);
+    // glasshouse slightly wider than the body so it shows on the sides
+    extrude(prof([[-1.18, 0.9], [-0.6, 1.32], [0.68, 1.36], [1.28, 0.95]]), 1.84, 0.02, glass);
+    // bumpers, lights, plate, mirrors
+    const chromeM = mat('#c9ccd0', { metal: 0.9, rough: 0.25 });
+    B(g, black, 1.86, 0.18, 0.18, 0, 0.3, -L - 0.03);
+    B(g, black, 1.86, 0.18, 0.18, 0, 0.3, L + 0.01);
+    B(g, mat('#fff6d0', { emissive: '#fff2c0', ei: 0.9 }), 0.36, 0.12, 0.04, -0.62, 0.66, -L - 0.03, false);
+    B(g, mat('#fff6d0', { emissive: '#fff2c0', ei: 0.9 }), 0.36, 0.12, 0.04, 0.62, 0.66, -L - 0.03, false);
+    B(g, mat('#a01010', { emissive: '#ff2020', ei: 0.7 }), 0.4, 0.12, 0.04, -0.6, 0.72, L + 0.02, false);
+    B(g, mat('#a01010', { emissive: '#ff2020', ei: 0.7 }), 0.4, 0.12, 0.04, 0.6, 0.72, L + 0.02, false);
+    B(g, mat('#f2f2ee'), 0.5, 0.13, 0.02, 0, 0.42, L + 0.11, false);
+    B(g, chromeM, 0.9, 0.14, 0.02, 0, 0.55, -L - 0.06, false);
+    for (const sx of [-1, 1]) B(g, body, 0.18, 0.1, 0.12, sx * 0.98, 0.98, -0.95, false);
+    // wheels: tyre + rim + hub
+    const rim = mat('#b8bcc2', { metal: 0.85, rough: 0.3 });
+    for (const z of [-1.4, 1.4]) for (const x of [-0.8, 0.8]) {
+      const t = C(g, black, 0.34, 0.24, x, 0, z, true);
+      t.rotation.z = Math.PI / 2;
+      t.position.y = 0.34;
+      const rr = C(g, rim, 0.2, 0.25, x + Math.sign(x) * 0.005, 0, z, false);
+      rr.rotation.z = Math.PI / 2;
+      rr.position.y = 0.34;
     }
     if (kind === 'cab') {
-      B(g, mat('#ffffff', { emissive: '#fff4c0', ei: 0.6 }), 0.8, 0.28, 0.25, 0, 1.66, 0.2, false);
-      B(g, black, 1.82, 0.1, 1.2, 0, 0.62, 0.3, false);
+      // roof sign, checker stripe, medallion number
+      B(g, mat('#ffffff', { emissive: '#fff4c0', ei: 0.7 }), 0.85, 0.3, 0.26, 0, 1.4, 0.0, false);
+      B(g, black, 0.86, 0.04, 0.27, 0, 1.4, 0.0, false);
+      for (let k = 0; k < 10; k++) for (const sx of [-1, 1]) B(g, k % 2 ? black : mat('#ffffff'), 0.02, 0.07, 0.36, sx * 0.915, 0.66, -1.6 + k * 0.36, false);
     }
   }
   const baked = bake(g);

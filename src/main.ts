@@ -13,6 +13,13 @@ import { DATASET_LABEL, type RemoteEntry } from './remote';
 import type { Env, Level, LevelDesc, Portal } from './level';
 import { skyTex } from './textures';
 import { hashStr } from './rng';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
 
 // ---------------------------------------------------------------- renderer
 
@@ -29,13 +36,87 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 900);
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environment = roomEnv;
+initDetail(renderer);
+
+// physical sky (NYC): also baked into the environment map so glass and metal reflect it
+const sky = new Sky();
+sky.visible = false;
+scene.add(sky);
+const skyScene = new THREE.Scene();
+const skyForEnv = new Sky();
+skyScene.add(skyForEnv);
+let skyEnv: THREE.WebGLRenderTarget | null = null;
+for (const sk of [sky, skyForEnv]) {
+  const u = sk.material.uniforms;
+  u.turbidity.value = 5.5;
+  u.rayleigh.value = 1.2;
+  u.mieCoefficient.value = 0.004;
+  u.mieDirectionalG.value = 0.82;
+}
+skyForEnv.scale.setScalar(1000);
+
+// ---------------------------------------------------------------- post-processing
+
+type Quality = 'ultra' | 'high' | 'low';
+const params0 = new URLSearchParams(location.search);
+let quality: Quality = (params0.get('quality') as Quality) || 'ultra';
+const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+const renderPass = new RenderPass(scene, camera);
+const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.6, thickness: 1.2, scale: 1.1, samples: 16 });
+gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+gtao.blendIntensity = 0.85;
+// sprites (glows, steam) and see-through glass would be written into GTAO's depth/normal
+// buffer as solid quads; hide them for that internal pass only
+{
+  const hidden: THREE.Object3D[] = [];
+  let tick = 0;
+  const refresh = () => {
+    hidden.length = 0;
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if ((o as THREE.Sprite).isSprite || (m && !Array.isArray(m) && m.transparent && (m.opacity < 0.6 || (m as THREE.MeshPhysicalMaterial).transmission > 0))) hidden.push(o);
+    });
+  };
+  const original = gtao.render.bind(gtao);
+  gtao.render = (r, w, rd, dt, mask) => {
+    if (tick++ % 20 === 0) refresh();
+    const vis = hidden.map((o) => o.visible);
+    hidden.forEach((o) => (o.visible = false));
+    // GTAOPass renders its normal/depth pass first, then composites over readBuffer
+    original(r, w, rd, dt, mask);
+    hidden.forEach((o, i) => (o.visible = vis[i]));
+  };
+}
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.28, 0.5, 2.2);
+composer.addPass(renderPass);
+composer.addPass(gtao);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+function applyQuality() {
+  gtao.enabled = quality === 'ultra';
+  bloom.enabled = quality !== 'low';
+  renderer.setPixelRatio(quality === 'low' ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(innerWidth, innerHeight);
+  sun.shadow.mapSize.setScalar(quality === 'low' ? 2048 : 4096);
+  sun.shadow.map?.dispose();
+  sun.shadow.map = null;
+}
+function draw() {
+  if (quality === 'low') renderer.render(scene, camera);
+  else composer.render();
+}
 
 const hemi = new THREE.HemisphereLight('#ffffff', '#444444', 1);
 const ambient = new THREE.AmbientLight('#ffffff', 0.1);
 const sun = new THREE.DirectionalLight('#ffffff', 2);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(4096, 4096);
 const sc = sun.shadow.camera;
 sc.left = sc.bottom = -70;
 sc.right = sc.top = 70;
@@ -49,6 +130,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
 });
 
 const player = new Player(camera, renderer.domElement);
@@ -125,7 +207,21 @@ function descName(d: LevelDesc): string {
 
 const sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
 function applyEnv(env: Env) {
-  scene.background = skyTex(env.skyTop, env.skyBottom, env.stars, hashStr(env.skyTop));
+  if (env.physicalSky && env.sun) {
+    const el = THREE.MathUtils.degToRad(env.sun.elev), az = THREE.MathUtils.degToRad(env.sun.azim);
+    const dir = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
+    sky.material.uniforms.sunPosition.value.copy(dir);
+    skyForEnv.material.uniforms.sunPosition.value.copy(dir);
+    skyEnv?.dispose();
+    skyEnv = pmrem.fromScene(skyScene as unknown as THREE.Scene, 0, 1, 2000);
+    scene.environment = skyEnv.texture;
+    scene.background = null;
+    sky.visible = true;
+  } else {
+    sky.visible = false;
+    scene.environment = roomEnv;
+    scene.background = skyTex(env.skyTop, env.skyBottom, env.stars, hashStr(env.skyTop));
+  }
   scene.fog = env.fog ? new THREE.Fog(env.fog, env.fogNear, env.fogFar) : null;
   hemi.color.set(env.hemi.sky);
   hemi.groundColor.set(env.hemi.ground);
@@ -143,6 +239,7 @@ function applyEnv(env: Env) {
   } else sun.visible = false;
   camera.far = env.fog ? env.fogFar + 60 : 220;
   camera.updateProjectionMatrix();
+  sky.scale.setScalar(camera.far * 1.1);
 }
 
 function setLevel(next: Level, pos?: THREE.Vector3, yaw?: number) {
@@ -205,7 +302,7 @@ async function zoomInto(target: THREE.Vector3, ms: number) {
       camera.position.lerpVectors(start, target, e * 0.92);
       camera.fov = fov0 - e * 45;
       camera.updateProjectionMatrix();
-      renderer.render(scene, camera);
+      draw();
       if (t < 1) requestAnimationFrame(step);
       else resolve();
     };
@@ -408,6 +505,14 @@ addEventListener('keydown', (e) => {
       goBack().then(() => (transitioning = false));
     }
   } else if (e.code === 'KeyC') toggleCredits();
+  else if (e.code === 'KeyG') {
+    quality = quality === 'ultra' ? 'high' : quality === 'high' ? 'low' : 'ultra';
+    applyQuality();
+    toast(`Graphics: ${quality === 'ultra' ? 'ultra (ambient occlusion, bloom, 4K shadows)' : quality === 'high' ? 'high (bloom, 4K shadows)' : 'low'}`);
+  } else if (e.code === 'KeyO') {
+    applyOriginals(!originalsEnabled);
+    toast(originalsEnabled ? 'Original textured models: on (streamed from Objaverse as you get close)' : 'Original models off: pure sand3d programs');
+  }
 });
 
 function toggleCredits() {
@@ -504,8 +609,9 @@ function frame() {
       sun.position.copy(player.pos).addScaledVector(sunDir, 150);
       sun.target.position.copy(player.pos);
     }
-    renderer.render(scene, camera);
-  } else if (level && !transitioning) renderer.render(scene, camera);
+    updateDetail(player.pos, mode === 'museum' ? 40 : 30);
+    draw();
+  }
   requestAnimationFrame(frame);
 }
 
@@ -548,6 +654,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
   }),
 );
 
+applyQuality();
 ready.then(() => {
   hud.loading.classList.add('hidden');
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => (b.disabled = false));

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Rng } from './rng';
+import { enhanceTree } from './materials';
+import { trackForDetail } from './detail';
 
 export interface ModelEntry {
   id: string;
@@ -15,6 +17,7 @@ export interface ModelEntry {
   url: string | null;
   license: string | null;
   attribution: string | null;
+  og?: number;
 }
 
 let manifest: ModelEntry[] = [];
@@ -119,6 +122,7 @@ function load(file: string): Promise<THREE.Object3D> {
   let p = cache.get(file);
   if (!p) {
     p = loader.loadAsync(`${import.meta.env.BASE_URL}models/${file}`).then((g) => {
+      enhanceTree(g.scene);
       g.scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) {
@@ -159,7 +163,10 @@ export function spawn(e: ModelEntry, scale = normScale(e)): Spawned {
       inner.add(scene.clone());
     })
     .catch((err) => console.warn('model failed', e.file, err));
-  return { obj, size: new THREE.Vector3(e.size[0] * scale, e.size[1] * scale, e.size[2] * scale), entry: e };
+  const size = new THREE.Vector3(e.size[0] * scale, e.size[1] * scale, e.size[2] * scale);
+  // swap in the original textured model when the player comes close
+  trackForDetail(obj, inner, e.id, e.og, size);
+  return { obj, size, entry: e };
 }
 
 export function preload(files: string[]): Promise<unknown> {

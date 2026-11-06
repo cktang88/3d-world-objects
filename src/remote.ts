@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ParsedObject, JointDef } from './usda/parse';
+import { kindOf, enhance, glassFrom } from './materials';
 
 /** One object anywhere in the sand3d release, streamed from Hugging Face on demand. */
 export interface RemoteEntry {
@@ -18,6 +19,8 @@ export interface RemoteEntry {
   f: number;
   joints: number;
   attribution?: string;
+  /** Objaverse glbs/000-NNN folder of the original textured model, 0 if none */
+  og?: number;
 }
 
 export const DATASET_LABEL: Record<string, string> = {
@@ -97,12 +100,19 @@ export function clearQueue() {
 
 // ---- three.js objects -------------------------------------------------------
 
-const matCache = new Map<string, THREE.MeshStandardMaterial>();
+const matCache = new Map<string, THREE.Material>();
 function material(m: ParsedObject['materials'][number]) {
-  const key = `${m.color.map((c) => c.toFixed(3))}|${m.rough}|${m.metal}|${m.opacity}|${m.emissive}`;
-  let mt = matCache.get(key);
-  if (!mt) {
-    mt = new THREE.MeshStandardMaterial({
+  // geometry with no material at all (most CAD parts) is shown as machined aluminium
+  const unbound = m.name === 'default';
+  if (unbound) {
+    m = { ...m, color: [0.78, 0.8, 0.83], metal: 0.9, rough: 0.32 };
+  }
+  const kind = unbound ? 'aluminium' : kindOf(m.name);
+  const key = `${kind}|${m.color.map((c) => c.toFixed(3))}|${m.rough}|${m.metal}|${m.opacity}|${m.emissive}`;
+  const hit = matCache.get(key);
+  if (hit) return hit;
+  {
+    const mt = new THREE.MeshStandardMaterial({
       color: new THREE.Color(...m.color.map((c) => Math.min(1, Math.max(0, c))) as [number, number, number]),
       roughness: Math.min(1, Math.max(0.04, m.rough)),
       metalness: Math.min(1, Math.max(0, m.metal)),
@@ -114,9 +124,11 @@ function material(m: ParsedObject['materials'][number]) {
     if (m.emissive.some((c) => c > 0)) {
       mt.emissive = new THREE.Color(...(m.emissive as [number, number, number]));
     }
-    matCache.set(key, mt);
+    mt.name = m.name;
+    const out: THREE.Material = kind === 'glass' ? glassFrom(mt) : kind ? enhance(mt, kind) : mt;
+    matCache.set(key, out);
+    return out;
   }
-  return mt;
 }
 
 export interface Animator {

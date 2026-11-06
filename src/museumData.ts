@@ -30,8 +30,8 @@ let data: { total: number; themes: Theme[]; wings: Wing[] } | null = null;
 const shards = new Map<number, Promise<Record<string, unknown[][]>>>();
 
 export function toEntry(a: unknown[]): RemoteEntry {
-  const [ds, split, row, id, family, entry, title, author, url, license, path, bytes, f, joints] = a as [string, string, number, string, string, string, string, string, string, string, string, number, number, number];
-  return { ds, split, row, id, family, entry, title, author, url, license, path, bytes, f, joints };
+  const [ds, split, row, id, family, entry, title, author, url, license, path, bytes, f, joints, og] = a as [string, string, number, string, string, string, string, string, string, string, string, number, number, number, number];
+  return { ds, split, row, id, family, entry, title, author, url, license, path, bytes, f, joints, og: og || 0 };
 }
 
 export async function loadMuseum() {
