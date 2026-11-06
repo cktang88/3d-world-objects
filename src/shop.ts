@@ -391,6 +391,7 @@ export class ShopLevel implements Level {
         const f = this.fit(p, s);
         let score = f >= 0.95 ? 2 : f >= 0.6 ? 1 + f : f * 1.5 - (s.big ? 0 : 1);
         if (s.mode === 'single' || s.mode === 'ceil') score += Math.min(1, Math.max(p.dim.x, p.dim.y, p.dim.z) / Math.max(s.len, 0.5)) * 1.5;
+        if ((s.mode === 'single' || s.mode === 'ceil') && f < 0.35) score -= 2; // a shrunken ship on a plinth is a toy
         else {
           // tiny things on a big shelf read as empty: prefer things that fill it
           const fill = (p.dim.y * Math.min(1, f)) / s.h;
@@ -429,7 +430,7 @@ export class ShopLevel implements Level {
     for (const s of segs) {
       const cordsBefore = cords.length;
       const f = this.fit(p, s);
-      const sc = p.k * Math.max(f, s.big || s.mode === 'single' ? 0.3 : 0.12) * (f < 1 ? 0.97 : 1);
+      const sc = p.k * (s.mode === 'single' || s.mode === 'ceil' ? f : Math.max(f, s.big ? 0.3 : 0.12)) * (f < 1 ? 0.97 : 1);
       const w = sz.x * sc, h = sz.y * sc, d = sz.z * sc;
       const n = new THREE.Vector3(Math.sin(s.rot), 0, Math.cos(s.rot));
       const right = new THREE.Vector3(Math.cos(s.rot), 0, -Math.sin(s.rot));
