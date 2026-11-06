@@ -1,3 +1,94 @@
+# Seamless doors and lazy insides
+
+Code: `src/seamless.ts` (levels behind doors), `src/lazy.ts` (rooms and containers inside a level),
+lab: `/?lab=seamless` (a facade with a door and window, and the real ShopLevel built in slices and
+placed behind it). Turn the game behaviour off with `?seamless=0` to compare.
+
+## What happens at a door
+
+1. **Predictive prebuild.** Every 6th frame `Seamless.update` looks at the active level's portals.
+   Door portals into `interior`, `gallery` or `atrium` levels within 14 m that you face
+   (view direction · direction to the door > 0.5), or any within 3 m, are wanted (nearest two).
+   Wanted levels not yet cached start building: `build(desc, staged = true)`.
+2. **Time slices.** A staged level leaves its construction in `Level.staging` (an iterator); each
+   frame runs `next()` until a 4 ms budget is spent. A level that does not support staging is
+   built at once. Half-built levels you turn away from are dropped.
+3. **LRU cache.** Built levels stay in `Seamless.slots`, keyed by `descKey(desc)`. Leaving a level
+   no longer disposes it: the active level and its two parents on the stack are pinned, three more
+   are kept, older ones are disposed (`Level.dispose`, with `remote.ts` `clearQueue()` held off so
+   an evicted room cannot cancel the active room's model loads).
+4. **Preview.** For a portal whose `door.see` is set (storefronts), a ready level is placed in
+   world space so its entry doorway lands on the street door:
+   `M = T(door.pos) · Ry(door.yaw − entry.yaw) · T(−entry.pos)`. Its lights are taken out while
+   it is a preview (adding lights to the street would recompile every shader), its shaders are
+   compiled with `renderer.compileAsync` before it is shown, `doorway.hide` objects (the shop's
+   own front wall) are hidden, and the storefront's fake-interior glass is cut away inside
+   `door.hole` (clipped to the interior's width) by `cutHoles()`. The nearest two previews within
+   11 m are drawn; others are removed from the scene.
+5. **Walking through.** While a preview is up and you are within 8 m, the street's colliders are
+   carved by the interior's footprint and a corridor through the door, and the interior's own
+   colliders are added, so you can walk in. Once you are 0.35 m past its threshold (and inside its
+   footprint), the active level switches in the same frame: the player is moved into the
+   interior's frame with `M⁻¹` (position and yaw; pitch kept), so the picture does not jump.
+   Pressing E from the pavement does the same but steps you just inside. Walking back out past
+   the threshold (or Q / the 'back' portal) switches back the same way; the street was never
+   disposed, so you are where you went in.
+6. **Lighting.** No black fade: `lighting.apply` runs at once and `Seamless.blendFrom` eases the
+   tone-mapping exposure from the old value to the new one over 0.45 s.
+7. **Fallback.** If the level is not ready (you pressed E on a door you never faced) the old fade
+   is used and the build is finished during the black frame (`stats.fades`).
+8. **Museum.** Gallery doorways are auto portals with `returnYaw`; `doorOf()` derives the doorway
+   from the portal box and the next room's entry from its own 'back' portal, so galleries are
+   prebuilt as you face a doorway and entered without a fade, the player carried from one corridor
+   into the next. (No preview through the doorway: each gallery's corridor ends in a wall.)
+   Auto portals you are standing in after a switch are disarmed until you step out of them.
+
+`window.__world.seam.stats` has the counters: `builds` (constructions), `hits` (cache reuse),
+`prebuilds`, `seamless` (no-fade switches), `fades`, `evicted`, `maxSliceMs`, and a `log`.
+
+## How a level author exposes an entry
+
+- `Level.doorway = { pos, yaw, hide? }` — the threshold of the door you come in by (floor level,
+  in level coordinates) and the player yaw of someone walking in (yaw 0 faces −z). `hide` lists
+  objects to hide while the level is seen from outside (ShopLevel: its baked front wall).
+  Without it the level's `'back'` portal is used (box centre, `returnYaw`).
+- `Portal.door = { pos, yaw, see?, hole? }` on the door you enter from (world/level coordinates of
+  the parent level, same conventions). `see`: the door is glass, show the prebuilt level behind
+  it. `hole`: the box of fake-interior glass to cut while it shows. Make that glass material
+  cuttable with `cutHoles(material)`.
+- Staged construction: take `opts.staged`, put the work in a generator with a `yield` after each
+  room / fixture run, assign it to `this.staging` and, when not staged, drain it at once with
+  `finishBuilding(this)` (src/level.ts). ShopLevel and InteriorLevel do this.
+
+## Rooms (cells) — `src/lazy.ts` `CellGraph`
+
+A level that has `cells: { group, bounds: Rect, doors: { x, z, width, height, axis, to }[], room?,
+generate? }[]` (InteriorLevel does) gets a cell graph automatically. Each frame: find the cell the
+camera is in, project each doorway rectangle to the screen, intersect it with the current clip
+rectangle, and recurse (up to 3 doorways deep) into the cells seen; everything else gets
+`group.visible = false`. `door.axis` 'x' means the doorway lies in the plane x = const. A cell
+with `generate()` is filled once its doorway comes into view or you are within 4 m of it
+(generators run in a 2 ms per-frame budget), so far rooms need not exist yet.
+
+## Containers — `registerContainer(obj, spec)`
+
+```ts
+registerContainer(obj, {
+  label: 'freezer',
+  size,                       // outer w/h/d; obj at the front-centre base, +z out of the front
+  generate: () => contents,   // Object3D, Promise<Object3D>, or a generator returning it (sliced)
+  door?, drawer?, open?(t),   // what moves: a leaf swung about its origin, a drawer slid out, or your own pose (t 0..1)
+  closedOpaque: true,         // false for glass coolers / display cases: generated when near (7 m) and facing
+});
+```
+
+E on a closed container opens it (0.4 s ease) and generates the contents in time slices; E again
+closes it and the contents are hidden. Sixteen closed contents are kept, older ones are disposed.
+`jointOpener(animator)` turns a sand3d object's revolute/prismatic joints (remote.ts) into an
+`open(t)` pose. Levels may instead list `containers: { kind, obj, size, generate, door?, drawer?,
+closedOpaque? }[]` (InteriorLevel does): main.ts adopts them on first update. Without a `door`,
+`drawer` or `open`, the contents slide out of the front so they can be seen — give the moving part
+to get the real motion.
 
 ## Museum galleries (src/museum/)
 

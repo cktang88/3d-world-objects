@@ -22,6 +22,8 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
 import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
+import { Seamless, descKey, doorOf, type Slot } from './seamless';
+import { Lazy, type LazyContainer } from './lazy';
 
 // ---------------------------------------------------------------- renderer
 
@@ -178,15 +180,35 @@ let currentDesc: LevelDesc;
 let scale = 1;
 let roomsVisited = 0;
 
-function build(desc: LevelDesc): Level {
+function build(desc: LevelDesc, staged = false): Level {
   switch (desc.kind) {
     case 'city': return new CityLevel(desc);
     case 'nyc': return new NycLevel(desc);
     case 'atrium': return new AtriumLevel();
     case 'gallery': return new GalleryLevel(desc);
-    case 'interior': return desc.shop ? new ShopLevel(desc) : new InteriorLevel(desc);
+    case 'interior': return desc.shop ? new ShopLevel(desc, { staged }) : new InteriorLevel(desc, { staged });
   }
 }
+
+// ---- seamless doors (src/seamless.ts): levels are prebuilt as you approach a door, cached, and
+// entered/left without a fade when ready. ?seamless=0 turns it off.
+const seam = new Seamless({ scene, camera, renderer, build });
+seam.enabled = params0.get('seamless') !== '0';
+const seamFeet = new THREE.Vector3();
+/** lazy.ts: room cells drawn only when visible, container contents generated only when opened */
+const lazy = new Lazy();
+let aimedBox: LazyContainer | null = null;
+/** switch to an already built level without fading; pos/yaw in its frame */
+function seamSwitch(s: Slot, pos: THREE.Vector3 | undefined, yaw: number | undefined) {
+  const exposure = renderer.toneMappingExposure;
+  const pitch = player.pitch;
+  setLevel(s, pos, yaw);
+  player.pitch = pitch;
+  seam.blendFrom(exposure);
+  seam.disarm(level, seamFeet.set(player.pos.x, 1, player.pos.z));
+  seam.stats.seamless++;
+}
+// ---- end seamless
 
 function descName(d: LevelDesc): string {
   switch (d.kind) {
@@ -213,12 +235,11 @@ function applyEnv(env: Env, place: Place = lighting.place) {
   lighting.apply(env, place);
 }
 
-function setLevel(next: Level, pos?: THREE.Vector3, yaw?: number) {
-  if (level) {
-    scene.remove(level.group);
-    level.dispose();
-  }
-  level = next;
+function setLevel(next: Slot, pos?: THREE.Vector3, yaw?: number) {
+  // the previous level stays alive in seamless.ts' cache (disposed when evicted)
+  if (level) scene.remove(level.group);
+  level = next.level;
+  seam.setActive(next, stack.slice(-2).map((f) => descKey(f.desc)));
   scene.add(level.group);
   applyEnv(level.env, placeOf(currentDesc));
   player.place(pos ?? level.spawn.pos, yaw ?? level.spawn.yaw);
@@ -299,6 +320,19 @@ async function enter(p: Portal) {
   const target = p.target;
   const shrink = target.kind === 'city';
   const quick = target.kind === 'gallery' || target.kind === 'atrium';
+  if (!shrink && seam.enabled && seam.ready(target)) {
+    // seamless: already built (and maybe on show behind this door): no fade, no rebuild
+    const s = seam.take(target);
+    const carried = doorOf(p) && seam.placeAt(s, p) ? seam.carry(s, 'in', player.pos, player.yaw) : null;
+    stack.push({ desc: currentDesc, pos: (p.returnPos ?? player.pos).clone(), yaw: p.returnYaw ?? player.yaw, exact: !!p.returnPos, scale });
+    currentDesc = target;
+    roomsVisited++;
+    seamSwitch(s, carried?.pos, carried?.yaw);
+    if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
+    transitioning = false;
+    return;
+  }
+  if (!shrink) seam.stats.fades++;
   hud.fade.style.background = shrink ? '#fff' : '#000';
   if (shrink) {
     const c = new THREE.Vector3();
@@ -311,7 +345,7 @@ async function enter(p: Portal) {
   currentDesc = target;
   if (shrink && p.shrink) scale *= p.shrink / 1000;
   roomsVisited++;
-  setLevel(build(target));
+  setLevel(seam.take(target));
   if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
   else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : `Welcome to ${target.name}`);
   else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} wing — every doorway leads somewhere similar`);
@@ -326,14 +360,26 @@ async function goBack() {
     return;
   }
   const wasCity = currentDesc.kind === 'city';
+  const parent = seam.slots.get(descKey(f.desc));
+  if (seam.enabled && !wasCity && parent?.ready) {
+    // seamless: the level you came from is still alive; walk back out where you went in
+    const child = seam.slotOf(level);
+    const carried = child?.portal && child.placement ? seam.carry(child, 'out', player.pos, player.yaw) : null;
+    currentDesc = f.desc;
+    scale = f.scale;
+    if (carried) seamSwitch(seam.take(f.desc), carried.pos, carried.yaw);
+    else if (f.exact) seamSwitch(seam.take(f.desc), f.pos, f.yaw);
+    else seamSwitch(seam.take(f.desc), f.pos.clone().add(new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)).multiplyScalar(0.8)), f.yaw + Math.PI);
+    return;
+  }
   hud.fade.style.background = wasCity ? '#fff' : '#000';
   await fadeTo(1, wasCity ? 450 : 240);
   currentDesc = f.desc;
   scale = f.scale;
-  if (f.exact) setLevel(build(f.desc), f.pos, f.yaw);
+  if (f.exact) setLevel(seam.take(f.desc), f.pos, f.yaw);
   else {
     const back = new THREE.Vector3(Math.sin(f.yaw), 0, Math.cos(f.yaw)).multiplyScalar(0.8);
-    setLevel(build(f.desc), f.pos.clone().add(back), f.yaw + Math.PI);
+    setLevel(seam.take(f.desc), f.pos.clone().add(back), f.yaw + Math.PI);
   }
   await fadeTo(0, wasCity ? 600 : 260);
 }
@@ -383,7 +429,7 @@ function target(): Portal | null {
 const feet = new THREE.Vector3();
 function autoPortal(): Portal | null {
   feet.set(player.pos.x, 1, player.pos.z);
-  for (const p of level.portals()) if (p.auto && p.box.containsPoint(feet)) return p;
+  for (const p of level.portals()) if (p.auto && p.box.containsPoint(feet) && seam.armed(p, feet)) return p;
   return null;
 }
 
@@ -469,7 +515,8 @@ addEventListener('keydown', (e) => {
   }
   if (!started) return;
   if (e.code === 'KeyE' || e.code === 'Enter') {
-    if (aimed) enter(aimed);
+    if (aimedBox) lazy.toggle(aimedBox);
+    else if (aimed) enter(aimed);
   } else if (e.code === 'KeyQ' || e.code === 'Backspace') {
     if (!transitioning) {
       transitioning = true;
@@ -573,12 +620,29 @@ function frame() {
   }
   if (level && !transitioning) {
     const active = started || coarse;
-    player.update(dt, level.colliders(player.pos), !active || infoOpen);
+    player.update(dt, seam.colliders(level.colliders(player.pos), player.pos), !active || infoOpen);
     level.update(dt, player.pos, time);
+    const walked = seam.update(dt, level, player.pos); // seamless.ts: prebuild, previews, walking through doors
+    if (active && walked.enter) enter(walked.enter);
+    else if (active && walked.exit && !transitioning) {
+      transitioning = true;
+      goBack().then(() => (transitioning = false));
+    }
     const auto = active ? autoPortal() : null;
     if (auto) enter(auto);
     aimed = active && !infoOpen ? target() : null;
-    if (aimed) {
+    lazy.update(dt, camera, level);
+    const box = active && !infoOpen ? lazy.aim(ray, 2.4, level) : null; // ray was set by target()
+    aimedBox = box && (!aimed || box.d < 1.6) ? box.c : null;
+    if (aimedBox) {
+      outline.box.copy(aimedBox.box);
+      outline.visible = true;
+      outlineMat.opacity = 0.55 + 0.35 * Math.sin(time * 6);
+      hud.promptKey.textContent = 'E';
+      hud.promptLabel.textContent = `${aimedBox.open ? 'Close' : 'Open'} the ${aimedBox.label}`;
+      hud.promptSub.textContent = '';
+      hud.prompt.classList.add('show');
+    } else if (aimed) {
       outline.box.copy(aimed.box);
       outline.visible = true;
       outlineMat.opacity = 0.55 + 0.35 * Math.sin(time * 6);
@@ -617,7 +681,9 @@ async function startMode(m: Mode) {
     const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;
     currentDesc = params.get('biome') ? { kind: 'city', seed, biome: params.get('biome')!, name: 'The World' } : { kind: 'nyc', seed, name: 'Manhattan' };
   }
-  setLevel(build(currentDesc));
+  if (level) scene.remove(level.group);
+  seam.clear();
+  setLevel(seam.take(currentDesc));
   started = true;
   hud.start.classList.add('hidden');
   hud.start.classList.remove('paused');
@@ -681,7 +747,7 @@ ready.then(() => {
 });
 
 Object.assign(window, {
-  __world: { renderer, lighting, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+  __world: { seam, renderer, lighting, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
 });
 
 // ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----

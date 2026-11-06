@@ -203,7 +203,7 @@ export class Seamless {
     this.camera = o.camera;
     this.renderer = o.renderer;
     this.builder = o.build;
-    this.capacity = o.capacity ?? 5;
+    this.capacity = o.capacity ?? 3;
     this.budget = o.budget ?? 4;
   }
 
@@ -358,7 +358,7 @@ export class Seamless {
       if (ahead > 0.35 && l.x > f.minX + 0.1 && l.x < f.maxX - 0.1 && l.z > f.minZ + 0.1 && l.z < f.maxZ - 0.1) out.enter = s.portal;
     }
     const a = this.active;
-    if (a && a.inverse && a.entry && a.level === level) {
+    if (a && a.inverse && a.entry && a.level === level && a.portal?.door?.see) {
       const d = V().copy(player).sub(a.entry.pos);
       const ahead = d.dot(facing(a.entry.yaw));
       const side = Math.abs(d.dot(facing(a.entry.yaw + Math.PI / 2)));
@@ -416,6 +416,11 @@ export class Seamless {
     }
     setHoles(holes);
     void level;
+  }
+
+  /** place slot s behind portal p of the active level (for carry()); false if it has no doorway */
+  placeAt(s: Slot, p: Portal) {
+    return this.place(s, p);
   }
 
   private place(s: Slot, p: Portal) {
@@ -539,7 +544,7 @@ export class Seamless {
     if (dir === 'in') {
       // pressed E from the pavement: step just inside instead of standing in the void
       const ahead = V().copy(p).sub(s.entry.pos).dot(facing(s.entry.yaw));
-      if (ahead < 0.6) p.copy(s.entry.pos).addScaledVector(facing(s.entry.yaw), 0.9);
+      if (ahead < -0.2) p.copy(s.entry.pos).addScaledVector(facing(s.entry.yaw), 0.9);
     } else {
       const door = s.portal ? doorOf(s.portal) : null;
       if (door) {
