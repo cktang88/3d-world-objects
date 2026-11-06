@@ -12,8 +12,8 @@ import { Rng } from '../rng';
 const scene: LabScene = {
   name: 'vehicles-street',
   description: 'parked + moving cars along a 240 m avenue (counts: __vehStats())',
-  cam: [7.2, 1.6, 30],
-  look: [0, 1.0, -20],
+  cam: [5.1, 1.65, 14],
+  look: [0, 1.2, -30],
   env: 'nyc',
   ground: true,
   async build({ group, renderer, params }) {
