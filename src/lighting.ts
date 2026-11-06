@@ -149,12 +149,21 @@ export const CASTER_FAR = 7;
 // Kept here so it survives the cascades being rebuilt (quality / place changes).
 const cascadeHook: { extra: number[]; farOnly: number | null } = { extra: [], farOnly: null };
 let activeCsm: CSM | null = null;
+/**
+ * lighting.ts: the far cascade is proxy-only only while proxies are actually in the scene (the
+ * NYC level); in labs, the studio or a city biome it keeps lighting's default (big casters), else
+ * it would cast nothing at all there.
+ */
+let proxiesPresent = false;
 function applyCascadeHook(csm: CSM | null) {
   if (!csm) return;
   const n = csm.lights.length;
   csm.lights.forEach((l, i) => {
     const L = l.shadow.camera.layers;
-    if (cascadeHook.farOnly !== null && i === n - 1 && n > 1) {
+    // lighting's defaults first (mid: casters >= 0.8 m, far: >= 6 m), then the hook on top
+    if (i === 1) L.set(CASTER_MID);
+    if (i === 2) L.set(CASTER_FAR);
+    if (cascadeHook.farOnly !== null && proxiesPresent && i === n - 1 && n > 1) {
       L.set(cascadeHook.farOnly);
       return;
     }
@@ -1289,11 +1298,7 @@ export class Lighting {
       lightMargin: 300,
     });
     csm.fade = q !== 'low';
-    // the wider cascades only draw casters big enough to matter at their distance
-    csm.lights.forEach((l, i) => {
-      if (i === 1) l.shadow.camera.layers.set(CASTER_MID);
-      if (i === 2) l.shadow.camera.layers.set(CASTER_FAR);
-    });
+    // the wider cascades only draw casters big enough to matter at their distance (applyCascadeHook)
     fixCsmChunk();
     csm.lights.forEach((l, i) => {
       l.shadow.bias = -0.00025 * (i + 1);
@@ -1340,6 +1345,8 @@ export class Lighting {
     // only what will be drawn this frame needs it (hidden things are wrapped when they show up)
     const n = this.lightCount;
     n.point = n.spot = n.pointShadow = n.spotShadow = 0;
+    const farOnly = cascadeHook.farOnly;
+    let proxies = false;
     this.scene.traverseVisible((o) => {
       if ((o as THREE.Light).isLight) {
         if (o.parent !== this.padGroup) {
@@ -1350,6 +1357,7 @@ export class Lighting {
       }
       const mats = (o as THREE.Mesh).material;
       if ((o as THREE.Mesh).isMesh && o.castShadow && o.userData.casterR === undefined) tagCaster(o as THREE.Mesh);
+      if (farOnly !== null && !proxies && o.castShadow && o.layers.isEnabled(farOnly)) proxies = true;
       if (!mats || !wrap) return;
       for (const m of Array.isArray(mats) ? mats : [mats]) {
         if (!(m as THREE.MeshStandardMaterial).isMeshStandardMaterial && !(m as THREE.MeshLambertMaterial).isMeshLambertMaterial && !(m as THREE.MeshPhongMaterial).isMeshPhongMaterial) continue;
@@ -1375,6 +1383,10 @@ export class Lighting {
         this.csmWraps++;
       }
     });
+    if (proxies !== proxiesPresent) {
+      proxiesPresent = proxies;
+      applyCascadeHook(this.csm);
+    }
   }
 
   // ------------------------------------------------------------ street lights and glowing things
