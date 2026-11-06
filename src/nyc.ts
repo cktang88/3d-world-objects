@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { AX, SZ, AVE, ST, SW, BX, BZ, LX, LZ, CURB, RX, RZ, avenueName, streetName, bake, unitBox, unitCyl, unitSphere, B, C, NORMAL, canvasTex, M, SIG, lightFor, type Side } from './nyc/common';
 import { signalPole, nameSign, lampPost, tree, hydrant, subway } from './nyc/streetprops';
+import { litWindows, wetSurface } from './lighting';
 import { carMesh, Traffic } from './nyc/vehicles';
 import { Pedestrians } from './nyc/people';
 export { avenueName, streetName };
@@ -271,6 +272,7 @@ function roadMat() {
   if (roadMaterial) return roadMaterial;
   const m = new THREE.MeshStandardMaterial({ map: nycRoadTex(), roughness: 1 });
   roadMaterial = m;
+  wetSurface(m); // lighting.ts: wet sheen at night
   const p = pbr('nyc_asphalt');
   p?.ready.then(() => {
     const rep = (t: THREE.Texture | null) => {
@@ -869,6 +871,7 @@ function windowMats() {
     // dark, mirror-like panes that pick up the sky
     glass: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.05, metalness: 0.92, envMapIntensity: 1.3 }),
   };
+  litWindows(winMats.glass); // lighting.ts: some panes glow at dusk/night
   return winMats;
 }
 const GLASS_TINTS = ['#2c3a46', '#33414d', '#26313a', '#3a4752', '#4a4e52', '#5c5446', '#2a3640'];

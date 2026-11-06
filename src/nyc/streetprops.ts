@@ -4,6 +4,7 @@ import { mat, glow } from '../build';
 import { surface } from '../pbr';
 import { signTex } from '../textures';
 import { B, C, M, SIG, CURB, unitSphere, streetName } from './common';
+import { streetLightMarker } from '../lighting';
 
 /** Street furniture: signals, name signs, lamp posts, trees, hydrants, subway entrances. */
 export function signalPole(parent: THREE.Object3D, x: number, z: number, sx: number, sz: number) {
@@ -59,7 +60,7 @@ export function lampPost(parent: THREE.Object3D, group: THREE.Group, x: number, 
   const hx = x + (axis === 'z' ? side * 3.0 : 0), hz = z + (axis === 'x' ? side * 3.0 : 0);
   B(parent, mat('#5a5f5a', { metal: 0.4, rough: 0.5 }), axis === 'z' ? 0.9 : 0.4, 0.22, axis === 'x' ? 0.9 : 0.4, hx, 8.05, hz);
   B(parent, mat('#fff3d8', { emissive: '#ffe2b0', ei: 1 }), axis === 'z' ? 0.7 : 0.3, 0.04, axis === 'x' ? 0.7 : 0.3, hx, 8.02, hz, false);
-  void group;
+  group.add(streetLightMarker(hx, 7.9, hz)); // lighting.ts lights it at night
 }
 
 /** a lumpy, displaced leaf cluster (shared geometry, a few variants) */

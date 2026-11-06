@@ -11,7 +11,6 @@ import { AtriumLevel, GalleryLevel } from './museum';
 import { loadMuseum, museum } from './museumData';
 import { DATASET_LABEL, loadRebuiltIndex, type RemoteEntry } from './remote';
 import type { Env, Level, LevelDesc, Portal } from './level';
-import { skyTex } from './textures';
 import { hashStr } from './rng';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { labScenes, LabLevel, vec } from './lab';
@@ -20,7 +19,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
 import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
 
@@ -32,7 +31,8 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// AgX keeps hue in bright sunlit/neon areas instead of ACES' skew to yellow/cyan; ?tm= to compare
+renderer.toneMapping = ({ aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping } as Record<string, THREE.ToneMapping>)[new URLSearchParams(location.search).get('tm') ?? ''] ?? THREE.AgXToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 app.appendChild(renderer.domElement);
 
@@ -43,22 +43,6 @@ const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environment = roomEnv;
 initDetail(renderer);
 
-// physical sky (NYC): also baked into the environment map so glass and metal reflect it
-const sky = new Sky();
-sky.visible = false;
-scene.add(sky);
-const skyScene = new THREE.Scene();
-const skyForEnv = new Sky();
-skyScene.add(skyForEnv);
-let skyEnv: THREE.WebGLRenderTarget | null = null;
-for (const sk of [sky, skyForEnv]) {
-  const u = sk.material.uniforms;
-  u.turbidity.value = 5.5;
-  u.rayleigh.value = 1.2;
-  u.mieCoefficient.value = 0.004;
-  u.mieDirectionalG.value = 0.82;
-}
-skyForEnv.scale.setScalar(1000);
 
 // ---------------------------------------------------------------- post-processing
 
@@ -99,6 +83,7 @@ composer.addPass(renderPass);
 composer.addPass(gtao);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+// lighting.grade (colour grading) is appended once the lighting rig exists, below
 function applyQuality() {
   gtao.enabled = quality === 'ultra';
   setPbrResolution(quality === 'low' ? '1k' : '2k');
@@ -110,6 +95,7 @@ function applyQuality() {
   sun.shadow.mapSize.setScalar(quality === 'low' ? 2048 : 4096);
   sun.shadow.map?.dispose();
   sun.shadow.map = null;
+  lighting.setQuality(quality);
 }
 function draw() {
   if (quality === 'low') renderer.render(scene, camera);
@@ -129,12 +115,17 @@ sc.far = 320;
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.04;
 scene.add(hemi, ambient, sun, sun.target);
+const lighting = new Lighting(renderer, scene, camera, pmrem, sun, hemi, ambient, roomEnv);
+lighting.bloom = bloom;
+composer.addPass(lighting.grade);
+if (params0.get('tod') && (TIMES as string[]).includes(params0.get('tod')!)) lighting.setTime(params0.get('tod') as TimeOfDay);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
+  lighting.resize();
 });
 
 const player = new Player(camera, renderer.domElement);
@@ -209,41 +200,17 @@ function descName(d: LevelDesc): string {
   }
 }
 
-const sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
-function applyEnv(env: Env) {
-  if (env.physicalSky && env.sun) {
-    const el = THREE.MathUtils.degToRad(env.sun.elev), az = THREE.MathUtils.degToRad(env.sun.azim);
-    const dir = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
-    sky.material.uniforms.sunPosition.value.copy(dir);
-    skyForEnv.material.uniforms.sunPosition.value.copy(dir);
-    skyEnv?.dispose();
-    skyEnv = pmrem.fromScene(skyScene as unknown as THREE.Scene, 0, 1, 2000);
-    scene.environment = skyEnv.texture;
-    scene.background = null;
-    sky.visible = true;
-  } else {
-    sky.visible = false;
-    scene.environment = roomEnv;
-    scene.background = skyTex(env.skyTop, env.skyBottom, env.stars, hashStr(env.skyTop));
+function placeOf(d: LevelDesc): Place {
+  switch (d.kind) {
+    case 'nyc': return 'outdoor';
+    case 'atrium':
+    case 'gallery': return 'museum';
+    case 'interior': return d.shop ? 'shop' : 'interior';
+    default: return 'studio';
   }
-  scene.fog = env.fog ? new THREE.Fog(env.fog, env.fogNear, env.fogFar) : null;
-  hemi.color.set(env.hemi.sky);
-  hemi.groundColor.set(env.hemi.ground);
-  hemi.intensity = env.hemi.intensity;
-  ambient.intensity = env.ambient;
-  scene.environmentIntensity = env.envIntensity;
-  renderer.toneMappingExposure = env.exposure;
-  if (env.sun) {
-    sun.visible = true;
-    sun.color.set(env.sun.color);
-    sun.intensity = env.sun.intensity;
-    const el = THREE.MathUtils.degToRad(env.sun.elev);
-    const az = THREE.MathUtils.degToRad(env.sun.azim);
-    sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
-  } else sun.visible = false;
-  camera.far = env.fog ? env.fogFar + 60 : 220;
-  camera.updateProjectionMatrix();
-  sky.scale.setScalar(camera.far * 1.1);
+}
+function applyEnv(env: Env, place: Place = lighting.place) {
+  lighting.apply(env, place);
 }
 
 function setLevel(next: Level, pos?: THREE.Vector3, yaw?: number) {
@@ -253,7 +220,7 @@ function setLevel(next: Level, pos?: THREE.Vector3, yaw?: number) {
   }
   level = next;
   scene.add(level.group);
-  applyEnv(level.env);
+  applyEnv(level.env, placeOf(currentDesc));
   player.place(pos ?? level.spawn.pos, yaw ?? level.spawn.yaw);
   renderCrumbs();
 }
@@ -513,6 +480,9 @@ addEventListener('keydown', (e) => {
     quality = quality === 'ultra' ? 'high' : quality === 'high' ? 'low' : 'ultra';
     applyQuality();
     toast(`Graphics: ${quality === 'ultra' ? 'ultra (ambient occlusion, bloom, 4K shadows)' : quality === 'high' ? 'high (bloom, 4K shadows)' : 'low'}`);
+  } else if (e.code === 'KeyT') {
+    const label = lighting.cycle(e.shiftKey ? -1 : 1);
+    toast(lighting.place === 'outdoor' ? `Time of day: ${label}` : `Time of day: ${label} (outside)`);
   } else if (e.code === 'KeyO') {
     applyOriginals(!originalsEnabled);
     toast(originalsEnabled ? 'Original textured models: on (streamed from Objaverse as you get close)' : 'Original models off: pure sand3d programs');
@@ -595,10 +565,7 @@ function frame() {
   if (lab) {
     lab.controls.update();
     lab.level.update(dt, camera.position, time);
-    if (sun.visible) {
-      sun.position.copy(lab.controls.target).addScaledVector(sunDir, 150);
-      sun.target.position.copy(lab.controls.target);
-    }
+    lighting.update(dt, lab.controls.target);
     updateDetail(camera.position, 60);
     draw();
     requestAnimationFrame(frame);
@@ -623,10 +590,7 @@ function frame() {
       outline.visible = false;
       hud.prompt.classList.remove('show');
     }
-    if (sun.visible) {
-      sun.position.copy(player.pos).addScaledVector(sunDir, 150);
-      sun.target.position.copy(player.pos);
-    }
+    lighting.update(dt, player.pos);
     updateDetail(player.pos, mode === 'museum' ? 40 : 30);
     draw();
   }
@@ -670,7 +634,9 @@ async function startLab(name: string) {
   if (params.get('env')) lv.env = (await import('./lab')).LAB_ENVS[params.get('env')!] ?? lv.env;
   level = lv;
   scene.add(lv.group);
-  applyEnv(lv.env);
+  const envName = params.get('env') ?? sc.env ?? 'studio';
+  if (envName === 'night') lighting.setTime('night');
+  applyEnv(lv.env, envName === 'nyc' || envName === 'night' ? 'outdoor' : envName === 'museum' ? 'museum' : 'studio');
   camera.position.copy(vec(params.get('cam'), sc.cam ?? [3, 2, 4]));
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.copy(vec(params.get('look'), sc.look ?? [0, 0.6, 0]));
@@ -682,10 +648,11 @@ async function startLab(name: string) {
     .then(() => {
       // a scene may hand over its own environment and a camera (e.g. a whole interior level)
       const u = lv.group.userData;
-      if (u.env) applyEnv((lv.env = u.env));
+      if (u.env) applyEnv((lv.env = u.env), u.place);
       if (u.cam && !params.has('cam')) camera.position.copy(u.cam);
       if (u.look && !params.has('look')) controls.target.copy(u.look);
     })
+    .then(() => lighting.ready)
     .then(() => new Promise((r) => setTimeout(r, Number(params.get('settle') ?? 1500))));
   (window as unknown as { __labReady: Promise<unknown> }).__labReady = done;
 }
@@ -714,5 +681,5 @@ ready.then(() => {
 });
 
 Object.assign(window, {
-  __world: { renderer, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
+  __world: { renderer, lighting, scene, camera, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode },
 });
