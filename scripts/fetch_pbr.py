@@ -31,7 +31,7 @@ SETS = {
     # sand3d material kinds
     "oak": "oak_veneer_01", "walnut": "american_walnut_veneer", "pine": "coated_pine", "birch": "ash_veneer",
     "fabric": "rough_linen", "velvet": "velour_velvet", "leather": "brown_leather",
-    "marble": "marble_01", "concrete": "concrete_floor_02",
+    "concrete": "concrete_floor_02",
     # architecture
     "nyc_brick": "brick_wall_02", "nyc_brick2": "dark_brick_wall", "nyc_brownstone": "red_sandstone_wall",
     "nyc_limestone": "large_sandstone_blocks", "nyc_castiron": "painted_plaster_wall", "nyc_panel": "concrete_wall_008",
@@ -50,6 +50,8 @@ ACG = {
     "chrome": ("Metal049B", 0.6), "brass": ("Metal048B", 0.5), "copper": ("Metal058A", 0.5),
     "painted_metal": ("Metal029", 0.6), "plastic": ("Plastic010", 0.5), "glossy_plastic": ("Plastic013B", 0.5),
     "rubber": ("Rubber004", 0.75), "ceramic": ("Porcelain002", 0.5),
+    # Poly Haven marble_01 is a tiled floor (grout lines showed as seams on objects)
+    "marble": ("Marble019", 1.0),
 }
 
 

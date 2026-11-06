@@ -533,7 +533,7 @@
 ## Material textures (CC0)
 
 - Poly Haven texture sets streamed from dl.polyhaven.org (CC0), listed in `public/pbr.json`: https://polyhaven.com/textures
-- ambientCG (CC0), repacked to WebP in `public/assets/materials/`: Metal009, Metal011, Metal012, Metal029, Metal048B, Metal049B, Metal058A, Plastic010, Plastic013B, Porcelain002, Rubber004 — https://ambientcg.com/view?id=<id>
+- ambientCG (CC0), repacked to WebP in `public/assets/materials/`: Metal009, Metal011, Metal012, Metal029, Metal048B, Metal049B, Metal058A, Plastic010, Plastic013B, Porcelain002, Rubber004, Marble019 — https://ambientcg.com/view?id=<id>
 
 ## HDRI environments (CC0, src/lighting.ts)
 

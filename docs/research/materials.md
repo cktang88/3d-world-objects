@@ -110,11 +110,12 @@ Filament's material guide (https://google.github.io/filament/Materials.html) —
 ## Texture sources (CC0)
 
 - Poly Haven (streamed from the CDN): oak_veneer_01, american_walnut_veneer, coated_pine, ash_veneer,
-  rough_linen, velour_velvet, brown_leather, marble_01, concrete_floor_02 (+ architecture sets).
+  rough_linen, velour_velvet, brown_leather, concrete_floor_02 (+ architecture sets). (marble_01 was
+  dropped: it is a tiled floor, its grout lines showed as seams on objects.)
 - ambientCG (repacked to WebP in `public/assets/materials/`): Metal011 (steel), Metal009 (brushed),
   Metal012 (aluminium), Metal049B (chrome smudges), Metal048B (brass, fingerprints), Metal058A (copper
   smudge), Metal029 (powder-coat paint), Plastic010, Plastic013B (glossy, scratched), Rubber004,
-  Porcelain002. Pages: https://ambientcg.com/view?id=<id>.
+  Porcelain002, Marble019 (Carrara-like). Pages: https://ambientcg.com/view?id=<id>.
 
 ## What was built (and what we learned)
 

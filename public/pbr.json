@@ -7,7 +7,6 @@
   "fabric": "rough_linen",
   "velvet": "velour_velvet",
   "leather": "brown_leather",
-  "marble": "marble_01",
   "concrete": "concrete_floor_02",
   "nyc_brick": "brick_wall_02",
   "nyc_brick2": "dark_brick_wall",
@@ -36,7 +35,8 @@
   "plastic": "Plastic010",
   "glossy_plastic": "Plastic013B",
   "rubber": "Rubber004",
-  "ceramic": "Porcelain002"
+  "ceramic": "Porcelain002",
+  "marble": "Marble019"
  },
  "sets": {
   "american_walnut_veneer": {
@@ -532,35 +532,6 @@
    },
    "rough": 0.822
   },
-  "marble_01": {
-   "dim": [
-    1.5,
-    1.5
-   ],
-   "maps": {
-    "diff": {
-     "1k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_01/marble_01_diff_1k.jpg",
-     "2k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/marble_01/marble_01_diff_2k.jpg",
-     "4k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/marble_01/marble_01_diff_4k.jpg"
-    },
-    "disp": {
-     "1k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_01/marble_01_disp_1k.jpg",
-     "2k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/marble_01/marble_01_disp_2k.jpg",
-     "4k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/marble_01/marble_01_disp_4k.jpg"
-    },
-    "arm": {
-     "1k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_01/marble_01_arm_1k.jpg",
-     "2k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/marble_01/marble_01_arm_2k.jpg",
-     "4k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/marble_01/marble_01_arm_4k.jpg"
-    },
-    "nor": {
-     "1k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_01/marble_01_nor_gl_1k.jpg",
-     "2k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/marble_01/marble_01_nor_gl_2k.jpg",
-     "4k": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/marble_01/marble_01_nor_gl_4k.jpg"
-    }
-   },
-   "rough": 0.506
-  },
   "marble_tiles": {
    "dim": [
     2.0,
@@ -976,6 +947,28 @@
    },
    "rough": 0.095,
    "src": "https://ambientcg.com/view?id=Porcelain002"
+  },
+  "Marble019": {
+   "dim": [
+    1.0,
+    1.0
+   ],
+   "maps": {
+    "diff": {
+     "1k": "assets/materials/Marble019/diff.webp"
+    },
+    "nor": {
+     "1k": "assets/materials/Marble019/nor.webp"
+    },
+    "arm": {
+     "1k": "assets/materials/Marble019/arm.webp"
+    },
+    "disp": {
+     "1k": "assets/materials/Marble019/disp.webp"
+    }
+   },
+   "rough": 0.365,
+   "src": "https://ambientcg.com/view?id=Marble019"
   }
  }
 }

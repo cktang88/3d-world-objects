@@ -46,6 +46,8 @@ interface KindSpec {
   ior?: number;
   /** albedo contrast of the photo (1 = as scanned) */
   contrast?: number;
+  /** wide triplanar blend (big isotropic patterns) */
+  softBlend?: boolean;
   /** texture bombing against visible repeats */
   antiTile?: boolean;
   /** edge wear with a baked convexity mask: 0 none */
@@ -73,7 +75,7 @@ const KINDS: Record<string, KindSpec> = {
   fabric: { tex: 'weave', tile: 0.025, strength: 0.3, bump: 0.7, rough: 0.05, dark: 0.6, diff: 0.9, arm: 0.6, nor: 1.0, detail: 0, r: [0.8, 1], sheen: 0.6, sheenRough: 0.75, spec: 0.35, antiTile: true },
   velvet: { tex: 'weave', tile: 0.012, strength: 0.25, bump: 0.4, rough: 0.05, dark: 0.55, diff: 0.9, arm: 0.5, nor: 0.7, detail: 0, r: [0.85, 1], sheen: 1, sheenRough: 0.35, spec: 0.3, antiTile: true },
   leather: { tex: 'leather', tile: 0.05, strength: 0.25, bump: 0.8, rough: 0.2, dark: 0.6, diff: 0.75, arm: 0.8, nor: 1.0, detail: 0, r: [0.35, 0.75], clearcoat: 0.15, clearcoatRough: 0.35, antiTile: true, wear: 0.5 },
-  marble: { tex: 'marble', tile: 0.7, strength: 0.6, bump: 0.05, rough: 0.1, dark: 0.45, contrast: 2.2, diff: 0.95, arm: 0.5, nor: 0.3, detail: 0, r: [0.08, 0.5], clearcoat: 0.5, clearcoatRough: 0.05 },
+  marble: { tex: 'marble', tile: 0.7, strength: 0.6, bump: 0.05, rough: 0.1, dark: 0.45, softBlend: true, diff: 0.95, arm: 0.5, nor: 0.3, detail: 0, r: [0.08, 0.5], clearcoat: 0.5, clearcoatRough: 0.05 },
   concrete: { tex: 'concrete', tile: 0.5, strength: 0.35, bump: 0.7, rough: 0.15, dark: 0.6, diff: 0.9, arm: 0.8, nor: 1.0, detail: 0, r: [0.7, 1], antiTile: true },
   ceramic: { tex: 'micro', tile: 0.15, strength: 0.03, bump: 0.04, rough: 0.05, dark: 0.9, diff: 0.15, arm: 0.6, nor: 0.15, detail: 0, r: [0.2, 0.8], clearcoat: 1, clearcoatRough: 0.04 },
 };
@@ -244,6 +246,7 @@ uniform sampler2D uTriArm;    // AO / roughness / metalness
 uniform sampler2D uTriDetail; // procedural height
 uniform vec3 uTriMean;
 uniform float uTriRoughMean, uContrast;
+uniform vec2 uTriBlend;
 uniform float uTriScale, uProcScale, uTriStrength, uTriBump, uTriRough, uTriDark;
 uniform float uDiffMix, uArmMix, uNorMix, uWear, uWearAll, uBakeAo, uDust, uDbg;
 
@@ -314,7 +317,9 @@ vec4 triDiff, triArm; vec3 triNorO; float triH;
   triH = texture2D(uTriDetail, vTriUv * uProcScale).r;
   vec3 triBrush = vec3(0.0);
 #else
-  vec3 triW = pow(max(abs(triN) - 0.2, 0.0), vec3(3.0));
+  // projection weights: sharp by default; soft (wide blend, no visible seam) for big isotropic
+  // patterns like marble veins, where a hard switch between projections shows as a line
+  vec3 triW = pow(max(abs(triN) - uTriBlend.x, 0.0), vec3(uTriBlend.y));
   triW /= max(triW.x + triW.y + triW.z, 1e-5);
   vec3 triSg = vec3(triN.x < 0.0 ? -1.0 : 1.0, triN.y < 0.0 ? -1.0 : 1.0, triN.z < 0.0 ? -1.0 : 1.0);
   vec3 triP = vTriPos * uTriScale;
@@ -448,6 +453,7 @@ interface KindUniforms {
   uTriMean: { value: THREE.Color };
   uTriRoughMean: { value: number };
   uContrast: { value: number };
+  uTriBlend: { value: THREE.Vector2 };
   uTriScale: { value: number };
   uProcScale: { value: number };
   uTriStrength: { value: number };
@@ -508,7 +514,7 @@ function uniformsFor(kind: string, spec: KindSpec): KindUniforms {
   if (u) return u;
   const uu: KindUniforms = {
     uTriDiff: { value: white }, uTriNor: { value: flatNormal }, uTriArm: { value: armNeutral }, uTriDetail: { value: tex(spec.tex) },
-    uTriMean: { value: new THREE.Color(1, 1, 1) }, uTriRoughMean: { value: 0.5 }, uContrast: { value: spec.contrast ?? 1 },
+    uTriMean: { value: new THREE.Color(1, 1, 1) }, uTriRoughMean: { value: 0.5 }, uContrast: { value: spec.contrast ?? 1 }, uTriBlend: { value: spec.softBlend ? new THREE.Vector2(0, 1.5) : new THREE.Vector2(0.2, 3) },
     uTriScale: { value: 1 / spec.tile }, uProcScale: { value: 1 / spec.tile }, uTriStrength: { value: spec.strength }, uTriBump: { value: spec.bump },
     uTriRough: { value: spec.rough }, uTriDark: { value: spec.dark }, uDiffMix: { value: 0 }, uArmMix: { value: 0 }, uNorMix: { value: 0 },
     uWear: { value: spec.wear ?? 0 }, ...globals,
