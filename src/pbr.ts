@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 
 /**
- * CC0 photo-scanned PBR textures from Poly Haven (catalogue: public/pbr.json, built by
+ * CC0 PBR textures from Poly Haven and ambientCG (catalogue: public/pbr.json, built by
  * scripts/fetch_pbr.py). Each set knows its real-world size, so it tiles at physical scale.
  */
 
 interface SetInfo {
   dim: [number, number];
   maps: Partial<Record<'diff' | 'disp' | 'arm' | 'nor', Record<string, string>>>;
+  /** mean of the roughness channel */
+  rough?: number;
 }
 let catalogue: { kinds: Record<string, string>; sets: Record<string, SetInfo> } | null = null;
 let res: '1k' | '2k' = '2k';
@@ -35,6 +37,8 @@ export interface PbrMaps {
   nor: THREE.Texture | null;
   /** linear mean colour of the diffuse map, filled when it loads */
   mean: THREE.Color;
+  /** mean roughness of the ARM map's green channel */
+  rough: number;
   ready: Promise<void>;
 }
 
@@ -85,8 +89,10 @@ export function pbr(key: string, resolution = res): PbrMaps | null {
   const id = `${slug}@${resolution}`;
   let s = sets.get(id);
   if (s) return s;
-  const pick = (m: keyof SetInfo['maps']) => info.maps[m]?.[resolution] ?? info.maps[m]?.['1k'];
-  const out: PbrMaps = { key, tile: info.dim, diff: null, disp: null, arm: null, nor: null, mean: new THREE.Color(0.5, 0.5, 0.5), ready: Promise.resolve() };
+  // Poly Haven maps stream from its CDN; ambientCG ones are served with the app (relative paths)
+  const abs = (u: string | undefined) => (u && !/^https?:/.test(u) ? `${import.meta.env.BASE_URL}${u}` : u);
+  const pick = (m: keyof SetInfo['maps']) => abs(info.maps[m]?.[resolution] ?? info.maps[m]?.['1k']);
+  const out: PbrMaps = { key, tile: info.dim, diff: null, disp: null, arm: null, nor: null, mean: new THREE.Color(0.5, 0.5, 0.5), rough: info.rough ?? 0.5, ready: Promise.resolve() };
   out.ready = Promise.all([load(pick('diff'), true), load(pick('disp'), false), load(pick('arm'), false), load(pick('nor'), false)]).then(([d, h, a, n]) => {
     out.diff = d;
     out.disp = h;

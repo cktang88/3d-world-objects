@@ -529,3 +529,8 @@
 
 - **male.glb, female.glb, hair.glb** — "Universal Base Characters [Standard]" by Quaternius, https://quaternius.com/packs/universalbasecharacters.html (https://quaternius.itch.io/universal-base-characters), CC0 1.0; modified: light skin textures swapped in, textures resized to 1024 webp, meshopt-compressed (scripts/build-people.mjs)
 - **anims.glb** — "Universal Animation Library [Standard]" by Quaternius, https://quaternius.com/packs/universalanimationlibrary.html (https://quaternius.itch.io/universal-animation-library), CC0 1.0; modified: 6 clips kept, scale/bone-translation tracks removed, resampled, meshopt-compressed
+
+## Material textures (CC0)
+
+- Poly Haven texture sets streamed from dl.polyhaven.org (CC0), listed in `public/pbr.json`: https://polyhaven.com/textures
+- ambientCG (CC0), repacked to WebP in `public/assets/materials/`: Metal009, Metal011, Metal012, Metal029, Metal048B, Metal049B, Metal058A, Plastic010, Plastic013B, Porcelain002, Rubber004 — https://ambientcg.com/view?id=<id>
