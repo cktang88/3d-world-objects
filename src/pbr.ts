@@ -91,7 +91,7 @@ function load(url: string | undefined, srgb: boolean): Promise<THREE.Texture | n
  * its maps (a material compiled without maps and given them later compiles a second shader program, a
  * stall each time a set arrives), and the photo maps simply replace these textures.
  */
-const placeholder = (() => {
+export const placeholder = (() => {
   const mk = (r: number, g: number, b: number, srgb: boolean) => {
     const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;

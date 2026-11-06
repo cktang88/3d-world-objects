@@ -832,11 +832,18 @@ async function startMode(m: Mode) {
   mark('level build start');
   setLevel(seam.take(currentDesc));
   mark('level built');
-  if (FLAGS.fast) {
-    // ?fast=1: compile every program up front, in parallel where KHR_parallel_shader_compile allows,
-    // instead of one blocking compile after another inside the first frame
+  if (FLAGS.fast || params.get('precompile') !== '0') {
+    // (?precompile=0 skips it, for A/B timing)
+    // compile every program up front while the start screen is still up, in parallel where
+    // KHR_parallel_shader_compile allows, instead of one blocking compile after another inside the
+    // first frames. The lighting runs once first so outdoor materials get their CSM (cascade) variant
+    // and the light rig is padded to LIGHT_BUDGET: the programs compiled here are the ones drawn.
     transitioning = true;
-    stripTextures(scene);
+    if (FLAGS.fast) stripTextures(scene);
+    lighting.update(0, player.pos);
+    camera.position.set(player.pos.x, player.pos.y + 1.65, player.pos.z);
+    camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
+    camera.updateMatrixWorld();
     await renderer.compileAsync(scene, camera).catch(() => {});
     transitioning = false;
     mark(`programs compiled (${renderer.info.programs?.length ?? 0})`);

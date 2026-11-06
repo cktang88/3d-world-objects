@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mat } from '../build';
-import { surface, pbr } from '../pbr';
+import { surface, pbr, placeholder } from '../pbr';
 import { wallpaperTex } from '../textures';
 import { marbleTex, subwayTex, hexTex, checkerTex, dropCeilingTex, carpetTileTex, spinesTex, leafTex } from './tex';
 
@@ -30,20 +30,27 @@ function satin(key: string, color: string, rough: number) {
   return memo(`satin:${key}:${color}:${rough}`, () => {
     const m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, envMapIntensity: 0.35 });
     const p = pbr(key);
+    // compiled once with its maps: 1x1 stand-ins until the photo maps arrive (src/pbr.ts placeholder), so
+    // their arrival swaps textures instead of compiling a second shader program
+    const ph = p ? placeholder() : null;
+    if (ph) {
+      m.map = ph.diff;
+      m.normalMap = ph.nor;
+      m.aoMap = ph.arm;
+      m.normalScale.setScalar(0.6);
+      m.aoMapIntensity = 0.6;
+    }
     p?.ready.then(() => {
-      const rep = (t: THREE.Texture | null) => {
-        if (!t) return null;
+      const rep = (t: THREE.Texture | null, fallback: THREE.Texture) => {
+        if (!t) return fallback;
         const c = t.clone();
         c.repeat.set(1 / p.tile[0], 1 / p.tile[1]);
         c.needsUpdate = true;
         return c;
       };
-      m.map = rep(p.diff);
-      m.normalMap = rep(p.nor);
-      m.normalScale.setScalar(0.6);
-      m.aoMap = rep(p.arm);
-      m.aoMapIntensity = 0.6;
-      m.needsUpdate = true;
+      m.map = rep(p.diff, ph!.diff);
+      m.normalMap = rep(p.nor, ph!.nor);
+      m.aoMap = rep(p.arm, ph!.arm);
     });
     return m;
   });
