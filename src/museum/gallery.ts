@@ -119,7 +119,7 @@ export class GalleryLevel extends MuseumBase {
       exits.push({ top: `sand3d · ${n.collection}`, label: n.name, target: { kind: 'gallery', theme: n.id, page: 0, wing: d.wing } });
     }
     er.shuffle(exits);
-    this.build(items.map((e, i) => siMeasured(e, i === 0)), exits, pages);
+    await this.build(items.map((e, i) => siMeasured(e, i === 0)), exits, pages);
     await this.settle();
   }
 
@@ -147,7 +147,7 @@ export class GalleryLevel extends MuseumBase {
       }
     }
     roomMembers.set(key, measured.map((m) => m.entry.id));
-    this.build(measured, exits, pages);
+    await this.build(measured, exits, pages);
     // learn the sizes in the rooms behind the doors while you look around
     this.settle().then(() => {
       if (!this.alive) return;
@@ -233,7 +233,21 @@ export class GalleryLevel extends MuseumBase {
     doorPortal(this, { wall: 'S', at: 0, w: 2.4, h: 3.2 }, 6, 6, 'Go back', 'to the previous room', 'back');
   }
 
-  private build(measured: Measured[], exits: Exit[], pages: number) {
+  /** yield to the browser when this slice of work has run for more than a few ms */
+  private sliceT = 0;
+  private async slice(force = false) {
+    if (!force && performance.now() - this.sliceT < 6) return;
+    await new Promise((r) => setTimeout(r, 0));
+    this.sliceT = performance.now();
+  }
+
+  /**
+   * Build the room. Time-sliced: the plan is made at once (this.plan), the shell is built and
+   * merged, then the displays one by one, yielding every few milliseconds; `ready` resolves when
+   * everything (and every exhibit) is in.
+   */
+  private async build(measured: Measured[], exits: Exit[], pages: number) {
+    this.sliceT = performance.now();
     const st = this.style;
     if (this.ante) {
       this.group.remove(this.ante);
@@ -274,13 +288,16 @@ export class GalleryLevel extends MuseumBase {
       doorPortal(this, d, W, D, ex.label, ex.top, ex.target);
     });
 
+    this.flush(!!st.outdoor);
+    await this.slice(true);
+
     // displays (the hero first, so it streams first)
     const order = [...plan.floor].sort((a, b) => Number(!!b.u.hero) - Number(!!a.u.hero));
-    for (const p of order) p.u.build(ctx, p.f);
-    for (const p of plan.wall) p.u.build(ctx, p.f);
-    for (const p of plan.hang) {
-      (p.u as Unit & { ceiling?: number }).ceiling = p.ceiling;
+    for (const p of plan.hang) (p.u as Unit & { ceiling?: number }).ceiling = p.ceiling;
+    for (const p of [...order, ...plan.wall, ...plan.hang]) {
+      if (!this.alive) return;
       p.u.build(ctx, p.f);
+      await this.slice();
     }
 
     this.lighting(plan, ctx);
