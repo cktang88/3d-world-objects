@@ -46,6 +46,8 @@ interface Outfit {
   sole: string;
   skin: string;
   hair: string;
+  /** knee-length coat skirt (open coats only): extra length below the knee, or -1 */
+  coatLen: number;
 }
 
 function pickOutfit(r: Rng, gender: Gender): Outfit {
@@ -68,6 +70,7 @@ function pickOutfit(r: Rng, gender: Gender): Outfit {
     sole: light || r.chance(0.4) ? '#ecebe6' : '#1a1a1a',
     skin: r.pick(SKIN_TINT),
     hair: r.pick(HAIR),
+    coatLen: topStyle === 3 && r.chance(0.65) ? r.pick([0.0, 0.08, 0.15]) : -1,
   };
 }
 
@@ -105,7 +108,7 @@ function bodyMaterial(base: THREE.MeshStandardMaterial, o: Outfit, g: Gender, ge
     uGeoScale: { value: geoScale },
     uGeoInv: { value: geo.clone().invert() },
     uSlimA: { value: new THREE.Vector4(r.range(0.74, 0.88), b.armY, b.armZ, b.shoulderX) },
-    uSlimB: { value: new THREE.Vector4(r.range(0.82, 0.93), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
+    uSlimB: { value: new THREE.Vector4(o.coatLen >= 0 ? 0.76 : r.range(0.82, 0.93), b.legX, g === 'male' ? r.range(0.015, 0.035) : r.range(0.0, 0.012), b.legZ) },
     uSlimC: { value: new THREE.Vector4(r.range(0.8, 0.95), b.neck, 0, 0) },
     uCut: { value: new THREE.Vector4(b.waist, neck, sleeve, hem) },
     uBody: { value: new THREE.Vector4(b.shoulderX, b.ankle, o.topStyle === 2 ? b.waist - 0.1 : b.waist - 0.06, o.topStyle) },
@@ -337,6 +340,55 @@ function shoeGeo(upper: string, sole: string, len: number, boot: boolean) {
   return g;
 }
 const shoeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
+
+/** the lower half of a long coat: an elliptical skirt from the waist to below the knee, skinned
+ *  to pelvis + both thighs so it swings with the legs and stretches between them */
+const skirtGeos = new Map<string, THREE.BufferGeometry>();
+function coatSkirtGeo(g: Gender, len: number) {
+  const k = `${g}|${len}`;
+  let geo = skirtGeos.get(k);
+  if (geo) return geo;
+  const b = BODY[g];
+  const top = b.waist - 0.02, bot = b.knee - len;
+  const seg = 20, rows = 6;
+  const pos: number[] = [], idx: number[] = [], si: number[] = [], sw: number[] = [];
+  const [rx0, rz0, rx1, rz1, cz] = g === 'male' ? [0.19, 0.155, 0.25, 0.22, -0.035] : [0.195, 0.16, 0.255, 0.225, -0.04];
+  for (let j = 0; j <= rows; j++) {
+    const h = j / rows;
+    const y = THREE.MathUtils.lerp(top, bot, h);
+    const ease = Math.sin((h * Math.PI) / 2);
+    const rx = THREE.MathUtils.lerp(rx0, rx1, ease), rz = THREE.MathUtils.lerp(rz0, rz1, ease);
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      const x = Math.sin(a) * rx, z = cz + Math.cos(a) * rz;
+      pos.push(x, y, z);
+      // bones: 0 pelvis, 1 thigh_l (+x), 2 thigh_r (-x)
+      const pw = Math.pow(1 - h, 2.5);
+      const left = THREE.MathUtils.clamp(0.5 + (x / rx) * 0.9, 0, 1);
+      si.push(0, 1, 2, 0);
+      sw.push(pw, (1 - pw) * left, (1 - pw) * (1 - left), 0);
+    }
+  }
+  for (let j = 0; j < rows; j++)
+    for (let i = 0; i < seg; i++) {
+      const a = j * (seg + 1) + i, c = a + seg + 1;
+      idx.push(a, c, a + 1, a + 1, c, c + 1);
+    }
+  geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  skirtGeos.set(k, geo);
+  return geo;
+}
+const clothMats = new Map<string, THREE.MeshStandardMaterial>();
+function clothMat(color: string) {
+  let m = clothMats.get(color);
+  if (!m) clothMats.set(color, (m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide })));
+  return m;
+}
 const propMats = new Map<string, THREE.MeshStandardMaterial>();
 function propMat(color: string, rough = 0.8) {
   const k = `${color}|${rough}`;
@@ -445,6 +497,15 @@ export class Person {
     } else if (bagRoll < 0.4) {
       const bc = r.pick(['#151517', '#3a2416', '#5a3a22', '#7a1d1d', '#c8b48c', '#2a2c30']);
       attach('pelvis', new THREE.Mesh(propGeo.crossbody, propMat(bc, 0.5)), at(-0.19, b.waist - 0.04, 0.02, 0, -Math.PI / 2 + 0.25, 0));
+    }
+    // long coats (most of the open coats in the reference photos reach the knee)
+    if (o.coatLen >= 0) {
+      const bones = ['pelvis', 'thigh_l', 'thigh_r'].map((n) => this.bones.get(n)!);
+      const skirt = new THREE.SkinnedMesh(coatSkirtGeo(gender, o.coatLen), clothMat(o.top));
+      skirt.bind(new THREE.Skeleton(bones, ['pelvis', 'thigh_l', 'thigh_r'].map((n) => A.bindInv.get(n)!.clone())), new THREE.Matrix4());
+      skirt.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.7, 0), 0.8);
+      model.add(skirt);
+      this.meshes.push(skirt);
     }
     // shoes (the bare feet are shrunk inside them in the shader)
     const dark = !/^#[de]/.test(o.shoe);
