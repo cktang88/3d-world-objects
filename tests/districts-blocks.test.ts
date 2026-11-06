@@ -70,3 +70,46 @@ test('districts change the street: shop mix differs by district', () => {
   expect(SPECIAL.length < 2 || sig(SPECIAL[0][1], SPECIAL[0][2]) !== sig(SPECIAL[1][1], SPECIAL[1][2]), 'two different districts built identical blocks');
   void BZ;
 });
+
+test('showcase slots wait until their block is placed, then load around the player (teleport case)', async () => {
+  const { slotDebug, showcaseReady, updateShowcases, SHOWCASE } = await import('../src/nyc/district-showcase');
+  const THREE = await import('three');
+  await showcaseReady();
+  const c = nycChunk(1, 4, -4); // auto row, built block-local and not yet in the world
+  const player = new THREE.Vector3(4 * AX - 41, 0, -4 * SZ);
+  const loads = SHOWCASE.loads;
+  SHOWCASE.loads = 0; // measure distances without starting real (remote) loads
+  for (let i = 0; i < 24; i++) updateShowcases(player);
+  expect(slotDebug(c.group).every((s) => Number.isNaN(s.x)), 'a slot took its position before its block was placed');
+  const scene = new THREE.Scene();
+  const holder = new THREE.Group();
+  holder.position.set(4 * AX, 0, -4 * SZ);
+  holder.add(c.group);
+  scene.add(holder);
+  for (let i = 0; i < 24; i++) updateShowcases(player);
+  const d = slotDebug(c.group);
+  SHOWCASE.loads = loads;
+  const near = d.filter((s) => s.dist < 20);
+  expect(near.length >= 4, `only ${near.length} showroom slots within 20 m of a player standing in the showroom (e.g. ${d.slice(0, 3).map((s) => `${fmt(s.x)},${fmt(s.z)}`).join(' ')})`);
+  holder.remove(c.group);
+});
+
+test('storefront variety: no two neighbouring shops of the same kind on the spawn blocks', () => {
+  const bad: string[] = [];
+  for (const [cx, cz] of [[0, 0], [1, 0]] as [number, number][]) {
+    const lines = new Map<string, { t: number; kind: string; label: string }[]>();
+    for (const p of nycChunk(1, cx, cz).portals) {
+      if (!/ · stocked with sand3d /.test(p.sub ?? '')) continue;
+      const cxm = (p.box.min.x + p.box.max.x) / 2, czm = (p.box.min.z + p.box.max.z) / 2;
+      // which frontage: the avenue fronts lie near x = ±LX, the street fronts near z = ±LZ
+      const k = Math.abs(Math.abs(cxm) - 47.5) < 3 ? `x${Math.sign(cxm)}` : `z${Math.sign(czm)}`;
+      if (!lines.has(k)) lines.set(k, []);
+      lines.get(k)!.push({ t: k[0] === 'x' ? czm : cxm, kind: (p.sub ?? '').split('stocked with sand3d ')[1], label: p.label });
+    }
+    for (const [k, list] of lines) {
+      list.sort((a, b) => a.t - b.t);
+      for (let i = 1; i < list.length; i++) if (list[i].kind === list[i - 1].kind && list[i].t - list[i - 1].t < 14) bad.push(`${cx},${cz} ${k}: ${list[i - 1].label} / ${list[i].label}`);
+    }
+  }
+  none(bad, 'same-kind shops side by side');
+});

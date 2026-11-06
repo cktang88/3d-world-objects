@@ -53,6 +53,10 @@ interface Slot {
   entry?: RemoteEntry;
   /** world position (set once the holder is in the scene) */
   wp: THREE.Vector3;
+  /** distance to the player at the last update (load priority) */
+  dist: number;
+  /** give up an in-flight load (chunk dropped, player walked or teleported away) */
+  abort?: () => void;
 }
 
 const slots: Slot[] = [];
@@ -95,7 +99,7 @@ export function addSlot(parent: THREE.Object3D, portals: Portal[], spec: SlotSpe
   parent.add(holder);
   const portal: Portal = { box: new THREE.Box3(), label: '', target: 'inspect' };
   portals.push(portal);
-  slots.push({ spec, holder, portal, state: 'idle', tries: 0, tris: 0, wp: new THREE.Vector3(NaN, 0, 0) });
+  slots.push({ spec, holder, portal, state: 'idle', tries: 0, tris: 0, wp: new THREE.Vector3(NaN, 0, 0), dist: Infinity });
   void loadPools();
   return holder;
 }
@@ -211,13 +215,23 @@ function flatten(root: THREE.Object3D): THREE.Group {
 
 async function load(s: Slot) {
   const spec = s.spec;
+  // an abort settles the load at once: the slot's place in the queue goes to slots near the player
+  const aborted = new Promise<null>((res) => (s.abort = () => res(null)));
   while (s.tries < 6) {
     const e = pickNext(s);
     s.tries++;
     if (!e) break;
     let m;
     try {
-      m = await loadRemote(e, { prio: s.wp.length(), shadows: true });
+      const req = loadRemote(e, { prio: s.dist, shadows: true });
+      m = await Promise.race([req, aborted]);
+      if (!m) {
+        // the late model is dropped when it arrives
+        req.then((late) => disposeModel(late.object)).catch(() => {});
+        s.tries = 0;
+        if (!s.holder.userData.disposed) s.state = 'idle';
+        return;
+      }
     } catch {
       continue;
     }
@@ -298,6 +312,13 @@ function unload(s: Slot) {
   s.state = 'idle';
 }
 
+/** a holder counts as placed once its ancestors reach a scene (or a root marked as the world) */
+function placed(o: THREE.Object3D) {
+  let a: THREE.Object3D | null = o;
+  while (a.parent) a = a.parent;
+  return (a as THREE.Scene).isScene === true;
+}
+
 let frame = 0;
 /** call every frame with the player position */
 export function updateShowcases(p: THREE.Vector3) {
@@ -307,19 +328,24 @@ export function updateShowcases(p: THREE.Vector3) {
     const s = slots[i];
     if (!s.holder.userData.disposed) continue;
     if (s.state === 'shown') unload(s);
+    if (s.state === 'loading') s.abort?.();
     slots.splice(i, 1);
   }
   if (!pools) return;
   const want: { s: Slot; d: number }[] = [];
   for (const s of slots) {
     if (Number.isNaN(s.wp.x)) {
-      if (!s.holder.parent) continue;
+      // only once the chunk is placed in the world: blocks are built over several frames and
+      // positioned at the end (a position taken earlier is block-local and never near the player)
+      if (!placed(s.holder)) continue;
       s.holder.updateWorldMatrix(true, false);
       s.holder.getWorldPosition(s.wp);
     }
     const d = Math.hypot(s.wp.x - p.x, s.wp.z - p.z);
+    s.dist = d;
     const R = Math.min(SHOWCASE.cap, s.spec.radius ?? SHOWCASE.radius);
     if (s.state === 'shown' && d > R + 40) unload(s);
+    else if (s.state === 'loading' && d > R + 40) s.abort?.();
     else if (s.state === 'idle' && d < R) want.push({ s, d });
   }
   want.sort((a, b) => a.d - b.d);
@@ -340,6 +366,19 @@ export function slotsUnder(root: THREE.Object3D) {
   }).map((s) => s.spec);
 }
 
+/** per-slot state under a root (qa) */
+export function slotDebug(root: THREE.Object3D) {
+  return slots.filter((s) => {
+    let o: THREE.Object3D | null = s.holder;
+    while (o && o !== root) o = o.parent;
+    return o === root;
+  }).map((s) => ({ state: s.state, x: s.wp.x, z: s.wp.z, dist: s.dist }));
+}
+/** resolves once the pools are loaded (qa) */
+export function showcaseReady() {
+  return loadPools();
+}
+
 /** stats for the labs */
 export function showcaseStats() {
   return { slots: slots.length, shown: slots.filter((s) => s.state === 'shown').length, failed: slots.filter((s) => s.state === 'failed').length, loading, tris: shownTris };
@@ -348,3 +387,6 @@ export function showcaseStats() {
 export function shownEntries() {
   return slots.filter((s) => s.entry).map((s) => ({ kind: s.spec.kind, title: s.entry!.title, family: s.entry!.family }));
 }
+
+// e2e: the harness imports modules separately, so expose the live stats on the page
+if (typeof window !== 'undefined') (window as unknown as { __showcase: unknown }).__showcase = { stats: showcaseStats, shown: shownEntries };

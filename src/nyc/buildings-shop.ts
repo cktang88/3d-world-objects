@@ -415,11 +415,20 @@ function shade(hex: string, f: number) {
  * pilasters, a sign band, display windows over a bulkhead, a recessed glass door, and
  * sometimes a roll-down gate (open or shut), an awning, a projecting blade sign and neon.
  */
+/** the shop type of the last storefront built in each block (variety along a frontage) */
+const lastShop = new WeakMap<BCtx, number>();
 export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: number, addr: string, btype: BType) {
   const { rng } = ctx;
   const st = ctx.style;
   const pool = st.shops?.length ? SHOPS.map((x, i) => (st.shops!.includes(x.type) ? i : -1)).filter((i) => i >= 0) : [];
-  const shopIdx = pool.length ? rng.pick(pool) : rng.int(0, SHOPS.length - 1);
+  let shopIdx = pool.length ? rng.pick(pool) : rng.int(0, SHOPS.length - 1);
+  // never the same kind of shop as the unit just built next to it (four pharmacies in a row)
+  const prev = lastShop.get(ctx);
+  if (shopIdx === prev) {
+    const others = (pool.length ? pool : SHOPS.map((_, i) => i)).filter((i) => i !== prev);
+    if (others.length) shopIdx = rng.pick(others);
+  }
+  lastShop.set(ctx, shopIdx);
   const shop = SHOPS[shopIdx];
   const name = `${rng.chance(0.5) ? rng.pick(PREFIX) + ' ' : ''}${rng.pick(shop.names)}`;
   const color = rng.pick(shop.colors);

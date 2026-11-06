@@ -34,8 +34,13 @@ export function floorsFor(d: District, n: number) {
 }
 /** style knobs for one building: its storefronts draw from the district's shop mix */
 export function districtStyle(d: District, r: Rng, cx = 99, cz = 99): BuildingStyle {
-  const shops = [pickW(r, d.shops, 'deli')];
-  if (r.chance(0.35)) shops.push(pickW(r, d.shops, 'deli'));
+  // three or four different types per building (a wide avenue building has 4+ storefronts);
+  // storefront() never puts the same type in two neighbouring units
+  const shops: string[] = [];
+  for (let i = 0; i < 12 && shops.length < 4; i++) {
+    const t = pickW(r, d.shops, 'deli');
+    if (!shops.includes(t)) shops.push(t);
+  }
   const s: BuildingStyle = { shops };
   if (d.kind === 'industrial') Object.assign(s, { fireEscape: 0.2, waterTower: 0.5, awning: 0.1, gate: 0.7 });
   if (d.kind === 'timesq') Object.assign(s, { signs: ['lightbox', 'letters'], awning: 0.2 });
