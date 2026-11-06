@@ -84,6 +84,8 @@ interface Owner {
   inst: number;
   name: string;
   world: THREE.Matrix4;
+  /** look key: instances of one untextured InstancedMesh with the same instance colour look identical */
+  look?: string;
 }
 
 class Soup {
@@ -184,7 +186,9 @@ function collect(roots: THREE.Object3D | THREE.Object3D[], opts: ZOptions): Soup
       for (let k = 0; k < im.count; k++) {
         im.getMatrixAt(k, _m);
         const W = new THREE.Matrix4().multiplyMatrices(m.matrixWorld, _m);
-        const oi = soup.owners.push({ obj: m, inst: k, name: nameOf(o), world: W }) - 1;
+        const mt = m.material as THREE.MeshStandardMaterial;
+        const look = !mt.map && im.instanceColor ? `${m.uuid}|${im.instanceColor.getX(k).toFixed(3)},${im.instanceColor.getY(k).toFixed(3)},${im.instanceColor.getZ(k).toFixed(3)}` : undefined;
+        const oi = soup.owners.push({ obj: m, inst: k, name: nameOf(o), world: W, look }) - 1;
         addGeometry(soup, oi, m.geometry, W, minArea);
       }
     } else {
@@ -293,6 +297,8 @@ function findPairs(soup: Soup, opts: ZOptions, visit: (i: number, j: number, ove
         const os = soup.owner[s], ot = soup.owner[t];
         if (os === ot && !same) continue;
         if (os === ot && soup.face[s] === soup.face[t]) continue;
+        // two instances of one untextured kit in the same colour: whichever wins, the pixel is the same
+        if (os !== ot && soup.owners[os].look !== undefined && soup.owners[os].look === soup.owners[ot].look) continue;
         // really the same plane: near-parallel normals and t's corners within ~2 res of s's plane
         const so = s * 14, to = t * 14;
         if (F[so + 9] * F[to + 9] + F[so + 10] * F[to + 10] + F[so + 11] * F[to + 11] < 0.9995) continue;

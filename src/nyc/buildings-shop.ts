@@ -463,12 +463,12 @@ export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: numb
   for (const s of [-1, 1]) {
     // [zfix] stops under the sign band (their tops and backs were coplanar)
     B(G, frameM, 0.22, top - 0.95, 0.14, uc + s * (W / 2 - 0.11), 0, 0.07);
-    B(Fi, frameM, 0.3, 0.12, 0.2, uc + s * (W / 2 - 0.11), top - 1.0, 0.1, false);
+    B(Fi, frameM, 0.3, 0.12, 0.2, uc + s * (W / 2 - 0.11), top - 1.0, 0.11, false); // [zfix] back 1 cm off (piers at 1 mm)
   }
   // ---- sign band
   const sb0 = top - 0.95;
   B(G, frameM, W, 0.95, 0.16, uc, sb0, 0.08);
-  B(G, mat(shade(frameC, 1.3), { rough: 0.5 }), W + 0.06, 0.07, 0.24, uc, top - 0.05, 0.125, false); // [zfix] back 5 mm off the sign band's
+  B(G, mat(shade(frameC, 1.3), { rough: 0.5 }), W + 0.06, 0.07, 0.24, uc, top - 0.05, 0.13, false); // [zfix] back 1 cm off: the sign band and the belt course put theirs at 0 and 5 mm
   const signW = W - 0.6;
   if (signKind === 'lightbox') {
     // internally lit box sign, white face with coloured letters

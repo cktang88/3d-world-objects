@@ -389,7 +389,7 @@ function cornice(F: Face, kind: CorniceKind, y: number, color: string, scale = 1
   if (kind === 'deco') {
     // stepped Art Deco crown: three shallow setbacks of stone
     F.band(cm, y - 0.6, 0.6, 0.06);
-    F.band(cm, y - 0.3, 0.304, 0.12, -0.2); // [zfix] top 4 mm over the lower step's
+    F.band(cm, y - 0.3, 0.31, 0.12, -0.2); // [zfix] top 1 cm over the lower step's
     return;
   }
   const fh = (kind === 'bracket' ? 1.0 : 1.2) * s; // total height
@@ -409,7 +409,7 @@ function cornice(F: Face, kind: CorniceKind, y: number, color: string, scale = 1
     if (kind === 'bracket') {
       const bw = (end ? 0.26 : 0.16) * s;
       B(F.f, cm, bw, fh * 0.62, 0.16 * s, u, y - fh * 0.9, 0.08 * s + 0.07, false);
-      B(F.f, cm, bw + 0.008, fh * 0.2 + 0.004, 0.32 * s, u, y - fh * 0.48, 0.16 * s + 0.07, false); // [zfix] 4 mm over and wider than the console
+      B(F.f, cm, bw + 0.008, fh * 0.2 + 0.01, 0.32 * s, u, y - fh * 0.48, 0.16 * s + 0.07, false); // [zfix] 4 mm over and wider than the console
       B(F.f, cm, bw * 0.9, fh * 0.14, 0.26 * s, u, y - fh * 0.98, 0.13 * s + 0.04, false);
       if (!end && i < n) {
         // panel between brackets
@@ -676,7 +676,7 @@ function stoop(F: Face, uc: number, parlor: number, stoneM: THREE.Material, tint
     const hgt = parlor - (k + 1) * rise + rise;
     PB(F.g, stoneM, w, hgt, tread + 0.02, uc, 0, land + k * tread + tread / 2, tint);
     // nosing
-    B(F.f, mat(shade(tint, 0.8), { rough: 0.9 }), w + 0.04, 0.034, 0.04, uc, hgt - 0.03, land + k * tread + 0.01, false); // [zfix] top 4 mm over the tread
+    B(F.f, mat(shade(tint, 0.8), { rough: 0.9 }), w + 0.04, 0.034, 0.036, uc, hgt - 0.03, land + k * tread + 0.014, false); // [zfix] top 4 mm over the tread, back 4 mm off the riser
   }
   // cheek walls with a sloped coping
   for (const s of [-1, 1]) {
@@ -1077,7 +1077,8 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       const colM = mat(shade(tint, 1.0), { rough: 0.55, metal: 0.1 });
       for (const ly of levels)
         for (let k = 0; k <= n; k++) {
-          const u = -L / 2 + 0.2 + ((L - 0.4) * k) / n;
+          // [zfix] end piers stay inside the lot (they overlapped the neighbour's at the party line)
+          const u = -L / 2 + 0.32 + ((L - 0.64) * k) / n;
           PB(F.g, fm, 0.62, fh - 0.4, 0.1, u, ly + 0.4 + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), 0.05, tint); // [zfix] corner piers of side faces 4 mm up
           C(F.g, colM, 0.21, fh - 1.05, u, ly + 0.62, 0.17);
           // [zfix] capitals and bases 3 mm off the wall, the base 4 mm above the pier's foot
@@ -1090,7 +1091,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
     } else if (type === 'prewar') {
       F.band(bandM, levels[levels.length - 1] - 0.1, 0.3, 0.1, 0.05);
       // brick quoins at the corners
-      for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), ((yy / 0.6) % 2 < 1 ? 0.7 : 0.45) + (F.side === 'E' || F.side === 'W' ? 0.04 : 0), 0.3, F.side === 'E' || F.side === 'W' ? 0.06 : 0.05, s2 * (L / 2 - 0.3), yy + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), F.side === 'E' || F.side === 'W' ? 0.031 : 0.026, '#e3dccb', false); // [zfix] side-face quoins 4 mm up (they cross at the corner)
+      for (const s2 of [-1, 1]) for (let yy = baseTop; yy < h - 1.5; yy += 0.6) PB(F.g, stoneMat(), ((yy / 0.6) % 2 < 1 ? 0.7 : 0.45) + (F.side === 'E' || F.side === 'W' ? 0.04 : 0), 0.3, F.side === 'E' || F.side === 'W' ? 0.06 : 0.05, s2 * (L / 2 - 0.37), /* [zfix] inside the lot: neighbours' quoins overlapped */ yy + (F.side === 'E' || F.side === 'W' ? 0.004 : 0), F.side === 'E' || F.side === 'W' ? 0.031 : 0.026, '#e3dccb', false); // [zfix] side-face quoins 4 mm up (they cross at the corner)
     }
     // ---- cornice
     const cKind: CorniceKind = opts.cornice ?? (type === 'midrise' ? 'parapet' : type === 'prewar' ? (rng.chance(0.65) ? 'modillion' : 'deco') : 'bracket');

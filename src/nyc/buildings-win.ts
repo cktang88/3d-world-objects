@@ -290,7 +290,8 @@ export function windowMats() {
   if (mats) return mats;
   mats = {
     reveal: anchored(new THREE.MeshStandardMaterial({ roughness: 0.95 }), 'reveal'),
-    trim: anchored(new THREE.MeshStandardMaterial({ roughness: 0.85 }), 'trim'),
+    // [zfix] trims cross belt courses and lintel bands laid on the same wall: drawn over them in depth
+    trim: anchored(new THREE.MeshStandardMaterial({ roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), 'trim'),
     sash: anchored(new THREE.MeshStandardMaterial({ roughness: 0.5 }), 'sash'),
     ac: anchored(new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.2 }), 'ac'),
     glass: roomMaterial(false),
@@ -485,11 +486,27 @@ export interface WinSpec {
  * frames on sashes): lifted apart once per kit geometry (src/zfix.ts), not per window. Returns a fixed copy.
  */
 const kitCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+const sashCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+/** a sash kit lifted off the given (fixed) kits it shares each window's frame with; cached per sash geometry */
+function sashFixed(g: THREE.BufferGeometry, others: THREE.BufferGeometry[]) {
+  let f = sashCache.get(g);
+  if (!f) {
+    const grp = new THREE.Group();
+    const sash = new THREE.Mesh(g.clone(), new THREE.MeshBasicMaterial());
+    sash.geometry.userData.zfixOwned = true;
+    grp.add(sash, ...others.map((o) => new THREE.Mesh(o, new THREE.MeshBasicMaterial())));
+    fixZFight(grp, { step: 0.004, minOverlap: 0.001, res: 0.0005, movable: (o) => o === sash });
+    f = sash.geometry;
+    sashCache.set(g, f);
+    kitCache.set(f, f);
+  }
+  return f;
+}
 function kitFixed(g: THREE.BufferGeometry) {
   let f = kitCache.get(g);
   if (!f) {
     const mesh = new THREE.Mesh(g.clone(), new THREE.MeshBasicMaterial());
-    fixZFight(mesh, { step: 0.002, minOverlap: 0.002 });
+    fixZFight(mesh, { step: 0.004, minOverlap: 0.001, res: 0.0005 });
     f = mesh.geometry;
     kitCache.set(g, f);
     kitCache.set(f, f);
@@ -531,7 +548,9 @@ export class WindowBatch {
     const L = this.list;
     make(revealGeo(), M.reveal, L, (s) => s.revealColor, false);
     for (const k of ['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]) make(trimGeo(k), M.trim, L.filter((s) => s.trim === k), (s) => s.trimColor, false, undefined, fine);
-    for (const k of ['dh', 'case', 'store'] as SashKind[]) make(sashGeo(k), M.sash, L.filter((s) => s.sash === k), (s) => s.sashColor, false, undefined, fine);
+    // [zfix] sashes are lifted off every trim kit (and the reveal) once, so a window's sash and trim never share a plane
+    const against = [revealGeo(), ...(['stone', 'hood', 'flat', 'arch', 'none'] as TrimKind[]).map((k) => kitFixed(trimGeo(k)))];
+    for (const k of ['dh', 'case', 'store'] as SashKind[]) make(sashFixed(kitFixed(sashGeo(k)), against), M.sash, L.filter((s) => s.sash === k), (s) => s.sashColor, false, undefined, fine);
     for (const k of ['window', 'big', 'sleeve'] as AcKind[]) make(acGeo(k), M.ac, L.filter((s) => s.ac && (s.acKind ?? 'window') === k), (s) => s.ac!, false, undefined, fine);
     make(stainGeo(), stainMat(), L.filter((s) => s.ac && s.acKind !== 'sleeve' && s.stain), () => null, false, undefined, fine);
     const gl = L.filter((s) => !s.noGlass);
