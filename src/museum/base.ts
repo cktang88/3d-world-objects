@@ -7,6 +7,7 @@ import { trackForDetail } from '../detail';
 import type { Measured } from './sizes';
 import { fmtDims } from './text';
 import { fixZFight } from './zfight';
+import { fixOffThread } from './zoff';
 
 // ---------------------------------------------------------------- frames & batching
 
@@ -726,11 +727,17 @@ export abstract class MuseumBase implements Level {
             mergeStatic(mod.object, new Set(mod.animator?.joints.map((j) => j.node) ?? []));
             // the flicker fix in idle time, one exhibit at a time; kept for the next visit
             const obj = mod.object, lift = 0.002 / Math.max(1e-3, m.k), anim = !!mod.animator;
-            idle(() => {
-              if (!this.alive) return;
-              fixZFight(obj, undefined, lift, 'exhibit');
-              if (!anim) rememberParts(e.id, obj);
-            });
+            // on a worker (zoff.ts); without one, in idle time on the main thread
+            const remember = () => {
+              if (this.alive && !anim) rememberParts(e.id, obj);
+            };
+            fixOffThread(obj, lift, remember, () =>
+              idle(() => {
+                if (!this.alive) return;
+                fixZFight(obj, undefined, lift, 'exhibit');
+                remember();
+              }),
+            );
           }
         }
         holder.add(mod.object);

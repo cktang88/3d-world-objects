@@ -750,8 +750,9 @@ export function wallCase(items: Measured[], len0: number, storage: boolean): { u
       build(c, f) {
         const lv = c.lv;
         const zc = depth / 2;
-        lv.bx(c.m.caseBase, len, base, depth, 0, 0, zc, f);
-        lv.bx(c.m.frame, len, 0.03, depth, 0, base, zc, f);
+        // 4 mm clear of the wall (its back is not drawn on the wall's face), the strip 2 mm inside the base
+        lv.bx(c.m.caseBase, len, base, depth - 0.004, 0, 0, zc + 0.002, f);
+        lv.bx(c.m.frame, len - 0.004, 0.03, depth - 0.008, 0, base, zc + 0.002, f);
         lv.bx(c.m.glass, len, gh, 0.012, 0, base, depth, f);
         // back panel and side frames off the wall and the base strip by a few millimetres
         lv.bx(c.m.caseBase, len, gh, 0.02, 0, base, 0.012, f);
