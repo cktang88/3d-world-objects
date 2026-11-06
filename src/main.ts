@@ -678,7 +678,15 @@ async function startLab(name: string) {
   controls.autoRotate = params.has('spin');
   lab = { controls, level: lv };
   hud.crumbs.textContent = `lab · ${sc.name}`;
-  const done = Promise.resolve(sc.build({ params, group: lv.group, renderer, camera })).then(() => new Promise((r) => setTimeout(r, Number(params.get('settle') ?? 1500))));
+  const done = Promise.resolve(sc.build({ params, group: lv.group, renderer, camera }))
+    .then(() => {
+      // a scene may hand over its own environment and a camera (e.g. a whole interior level)
+      const u = lv.group.userData;
+      if (u.env) applyEnv((lv.env = u.env));
+      if (u.cam && !params.has('cam')) camera.position.copy(u.cam);
+      if (u.look && !params.has('look')) controls.target.copy(u.look);
+    })
+    .then(() => new Promise((r) => setTimeout(r, Number(params.get('settle') ?? 1500))));
   (window as unknown as { __labReady: Promise<unknown> }).__labReady = done;
 }
 

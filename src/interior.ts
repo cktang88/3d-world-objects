@@ -12,7 +12,7 @@ const H = 3.2; // ceiling height
 const T = 0.16; // wall thickness
 const DOOR = 1.25;
 
-interface Room {
+export interface Room {
   x0: number;
   z0: number;
   x1: number;
@@ -192,6 +192,8 @@ export class InteriorLevel implements Level {
   private ports: Portal[] = [];
   private rng: Rng;
   private lights: THREE.PointLight[] = [];
+  /** generated rooms (for the lab and for debugging) */
+  rooms: Room[] = [];
 
   constructor(private desc: Extract<LevelDesc, { kind: 'interior' }>) {
     this.rng = new Rng(hashN(desc.seed, desc.floor));
@@ -258,6 +260,7 @@ export class InteriorLevel implements Level {
       }
     };
     divide(bounds.x0, bounds.z0, bounds.x1, bounds.z1, 0);
+    this.rooms = leaves;
 
     // one door per split, away from T-junctions
     for (const s of splits) {
@@ -296,6 +299,7 @@ export class InteriorLevel implements Level {
     // ceiling
     const ceil = plane(mat('#f3f0ea', { rough: 1 }), W + 1, D + 1, 0, H, 0);
     ceil.rotation.x = Math.PI / 2;
+    ceil.userData.ceiling = true;
     g.add(ceil);
 
     // walls
