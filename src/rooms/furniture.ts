@@ -482,8 +482,6 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
   k.box(inside, run, 0.02, d - 0.04, cx, 0.1, -0.02);
   k.box(inside, run, ch - 0.335, 0.015, cx, 0.12, -d / 2 + 0.008);
   const parts: Part[] = [];
-  // counter
-  k.box(o.counter, run + 0.02, 0.035, d + 0.03, cx, ch - 0.035, 0.015);
   // range and sink positions
   const rw = 0.76;
   const rx = THREE.MathUtils.clamp(x0 + run * o.rangeAt, x0 + rw / 2, x1 - rw / 2);
@@ -493,6 +491,13 @@ export function kitchenRun(k: Kit, r: Rng, o: KitchenOpts): Piece {
   const hasSink = run > 2.2 || !hasRange;
   // base cabinets either side of the range
   const baseSegs: [number, number][] = hasRange ? [[x0, rx - rw / 2], [rx + rw / 2, x1]] : [[x0, x1]];
+  // Cut the worktop around the cooker. A continuous slab and the black hob previously
+  // both ended at ch, giving two overlapping upward faces (visible flicker at any angle).
+  for (const [a, b] of baseSegs) {
+    const left = a === x0 ? a - 0.01 : a + 0.002;
+    const right = b === x1 ? b + 0.01 : b - 0.002;
+    if (right > left) k.box(o.counter, right - left, 0.035, d + 0.03, (left + right) / 2, ch - 0.035, 0.015);
+  }
   // doors: shaker doors every ~0.5 m in each stretch beside the range, a drawer row on top
   let di = 0;
   for (const [a, b] of baseSegs) {

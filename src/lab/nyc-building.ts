@@ -35,7 +35,8 @@ const scene: LabScene = {
     }
     for (const w of ws) {
       const store = params.has('store') ? params.get('store') === '1' : type !== 'brownstone' && rng.chance(0.7);
-      building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, rng.int(...floorsOf[type]), store, [false, false]);
+      const floors = params.has('floors') ? Math.max(1, Number(params.get('floors')) || 1) : rng.int(...floorsOf[type]);
+      building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, floors, store, [false, false]);
       x += w;
     }
     // sidewalk and street

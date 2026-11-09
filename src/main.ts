@@ -21,6 +21,8 @@ import { labScenes, LabLevel, vec } from './lab';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { stabilizeGtao } from './ambient-occlusion';
+import { museumRoutes } from './museum/routes';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
@@ -75,10 +77,9 @@ if (!params0.has('lab')) void preloadFleet();
 // ---- end vehicles
 let quality: Quality = (params0.get('quality') as Quality) || 'ultra';
 const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
-// the main pass's depth, shared by both composer buffers, feeds GTAO (no second scene pass)
+// Each composer buffer owns its depth: sharing lets later MSAA resolves overwrite scene depth.
 rt.depthTexture = new THREE.DepthTexture(1, 1);
 const composer = new EffectComposer(renderer, rt);
-composer.renderTarget2.depthTexture = rt.depthTexture;
 const renderPass = new RenderPass(scene, camera);
 const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
 gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.6, thickness: 1.2, scale: 1.1, samples: 16 });
@@ -88,6 +89,7 @@ gtao.blendIntensity = 0.85;
 // scene with an override material, so sprites, glass, the sky dome and vertex-shader tricks
 // (window anchors, wind) are seen exactly as drawn
 gtao.setGBuffer(rt.depthTexture);
+stabilizeGtao(gtao);
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.28, 0.5, 2.2);
 composer.addPass(renderPass);
 composer.addPass(gtao);
@@ -130,7 +132,11 @@ function applyQuality() {
 }
 function draw() {
   if (quality === 'low') renderer.render(scene, camera);
-  else composer.render();
+  else {
+    // The odd number of swapping passes alternates the main scene's buffer every frame.
+    gtao.setGBuffer(composer.readBuffer.depthTexture!);
+    composer.render();
+  }
 }
 
 const hemi = new THREE.HemisphereLight('#ffffff', '#444444', 1);
@@ -843,6 +849,7 @@ async function startMode(m: Mode) {
   }
   if (level) scene.remove(level.group);
   seam.clear();
+  museumRoutes.reset(museum().wings.map((w) => ({ kind: 'gallery', theme: w.theme, page: 0 })));
   mark('level build start');
   setLevel(seam.take(currentDesc));
   mark('level built');

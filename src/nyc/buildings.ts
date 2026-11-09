@@ -1166,7 +1166,7 @@ function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean
 /**
  * A tower's double-height lobby front (references: Lever House, Seagram, 590 Madison): polished
  * granite piers, tall glass in slim steel mullions with a transom, the lit lobby behind (the
- * entrance-hall cell of the shop-glass atlas, cuttable so seamless.ts shows the real lobby through
+ * dedicated office interior shader, cuttable so seamless.ts shows the real lobby through
  * it), and on the front a revolving door (glass drum, steel canopy and floor ring, four glass
  * wings) with the building number in steel letters on the canopy.
  */
@@ -1185,9 +1185,9 @@ function towerLobby(ctx: BCtx, F: Face, isFront: boolean, lobby: number, finM: T
   for (let k = 0; k < np; k++) {
     const u0 = -F.len / 2 + 0.9 + ((F.len - 0.9) * k) / np, u1 = -F.len / 2 + ((F.len - 0.9) * (k + 1)) / np;
     const bw = u1 - u0;
-    // glass: the lobby behind (one pane up to the transom, one above)
-    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, 0.05, gz)), bw, transom - 0.05, 15, 9, 0.4 + k * 0.07, 1);
-    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, transom + 0.08, gz)), bw, lobby - 0.9 - transom - 0.08, 15, 9, 0.6 + k * 0.07, 1);
+    // One double-height room behind the transom, rather than two stacked apartment halls.
+    // Cell 16 selects the office lobby shader; cell 15 remains the residential entrance.
+    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, 0.05, gz)), bw, lobby - 0.95, 16, 9, 0.4 + k * 0.07, 1);
     holeU[0] = Math.min(holeU[0], u0);
     holeU[1] = Math.max(holeU[1], u1);
     // slim steel mullions every ~1.5 m, a transom bar, a sill

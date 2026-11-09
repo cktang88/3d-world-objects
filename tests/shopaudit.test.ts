@@ -45,7 +45,7 @@ const KNOWN_TIGHT = new Set(['deli', 'pharmacy', 'lighting', 'furniture']);
 test('aisles between facing fixtures are >= 0.9 m wide (gaps under 0.3 m are fixtures butted together)', () => {
   const bad: string[] = [];
   for (const t of TYPES)
-    for (const seed of [3, 7])
+    for (const seed of [2, 3, 7])
       for (const a of narrowAisles(shop(t, seed))) {
         if (KNOWN_TIGHT.has(t)) soft(false, `KNOWN ${t}#${seed}: staff-side gap ${a}`);
         else bad.push(`${t}#${seed}: ${a}`);

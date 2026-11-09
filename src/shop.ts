@@ -16,6 +16,7 @@ import { Kit, M, quad, surfMat, lit, type Seg, type Container } from './shopkit/
 import * as F from './shopkit/fixtures';
 import { dropTile, tinTile, textTex } from './shopkit/tex';
 import { LAYOUTS, type Layout, type Style } from './shopkit/layouts';
+import { RETAIL_PLANS } from './shopkit/rows';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
 import { DRINK } from './shopkit/fixtures';
 import { searchLibrary, loadLibraryModel, type LibraryEntry, type LibraryQuery } from './libraries';
@@ -212,7 +213,7 @@ export class ShopLevel implements Level {
     this.progress = 0.1;
     let n = 0;
     this.phase = 'fixture 0';
-    for (const _ of layout.build(kit, r, st, { doorX, name: desc.name, color: info.colors[0] })) {
+    for (const _ of layout.build(kit, r, st, { doorX, name: desc.name, color: info.colors[0], plan: RETAIL_PLANS[((desc.seed % 3) + 3) % 3] })) {
       // colliders as soon as each fixture exists
       if (kit.cols.length) {
         this.cols.push(...kit.cols);

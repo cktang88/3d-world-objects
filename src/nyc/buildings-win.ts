@@ -357,6 +357,7 @@ vec3 roomShade(out float lampGlow) {
   float seed = vInfo.x;
   float depth = vRoomI.x;
   bool shop = ${shop ? 'true' : 'false'};
+  bool officeLobby = shop && vRoomI.y > 15.5;
   // room extents around the opening
   float sideW = shop ? 0.3 : 1.2 + h11(seed + 3.0) * 1.5;
   vec3 lo = vec3(-sideW, shop ? -0.55 : -0.85, 0.0);
@@ -374,7 +375,31 @@ vec3 roomShade(out float lampGlow) {
   if (t == tf.z) {
     // back wall
     uvw = vec2((p.x - lo.x) / (hi.x - lo.x), (p.y - lo.y) / (hi.y - lo.y));
-    if (shop) c = atlas(uvw.x, uvw.y);
+    if (officeLobby) {
+      // Honed limestone wall, paired brushed-metal lift doors and a dark lift reveal.
+      // Dimensions stay in metres, so the double-height facade doesn't stretch furniture.
+      float x = p.x - vSz.x * 0.5;
+      c = vec3(0.72, 0.70, 0.65);
+      float joint = step(0.985, fract((p.y + 0.55) / 1.2));
+      c *= 1.0 - joint * 0.12;
+      if (abs(x) < 1.65 && p.y < 2.75) {
+        c = vec3(0.18, 0.19, 0.19);
+        if (abs(x) < 1.52 && p.y < 2.6) {
+          float grain = sin(p.y * 260.0) * 0.012;
+          c = vec3(0.43, 0.44, 0.43) + grain;
+          if (abs(x) < 0.09 || abs(abs(x) - 0.8) < 0.012) c *= 0.35;
+        }
+      }
+      // Recessed warm light above the lift bank.
+      if (abs(x) < 1.7 && abs(p.y - 2.9) < 0.035) c = vec3(1.6, 1.4, 1.05);
+      // Low stone reception counter with timber face, off the central circulation path.
+      float deskX = vSz.x * 0.34;
+      if (abs(x - deskX) < 0.8 && p.y < 1.05) {
+        c = p.y > 0.94 ? vec3(0.8, 0.78, 0.72) : vec3(0.28, 0.19, 0.12);
+        if (p.y < 0.1) c *= 0.5;
+      }
+    }
+    else if (shop) c = atlas(uvw.x, uvw.y);
     else {
       c = paint;
       // a sofa or a dresser against the wall, a picture above it
@@ -388,7 +413,12 @@ vec3 roomShade(out float lampGlow) {
   } else if (t == tf.y) {
     if (d.y < 0.0) {
       // floor: shop tile or wooden boards
-      if (shop) { vec2 q = floor(p.xz / 0.5); c = mix(vec3(0.75, 0.73, 0.68), vec3(0.55, 0.52, 0.48), mod(q.x + q.y, 2.0)); }
+      if (officeLobby) {
+        vec2 tile = fract(p.xz / 1.2);
+        float seam = max(step(0.99, tile.x), step(0.99, tile.y));
+        c = vec3(0.61, 0.60, 0.56) * (1.0 - seam * 0.16);
+      }
+      else if (shop) { vec2 q = floor(p.xz / 0.5); c = mix(vec3(0.75, 0.73, 0.68), vec3(0.55, 0.52, 0.48), mod(q.x + q.y, 2.0)); }
       else c = vec3(0.42, 0.28, 0.17) * (0.85 + 0.15 * sin(p.x * 40.0 + h11(floor(p.x * 6.0)) * 6.0));
     } else {
       // ceiling, with a lamp (or fluorescent strips in a shop)
@@ -400,7 +430,16 @@ vec3 roomShade(out float lampGlow) {
   } else {
     // side walls
     uvw = vec2(p.z / depth, (p.y - lo.y) / (hi.y - lo.y));
-    if (shop) c = atlas(0.15 + uvw.x * 0.7, uvw.y) * 0.8;
+    if (officeLobby) {
+      c = vec3(0.65, 0.63, 0.58);
+      // Large framed artwork at eye level on the stone side wall.
+      if (abs(p.z - depth * 0.5) < 1.3 && abs(p.y - 1.85) < 0.85) {
+        c = vec3(0.16, 0.18, 0.18);
+        if (abs(p.z - depth * 0.5) < 1.22 && abs(p.y - 1.85) < 0.77)
+          c = mix(vec3(0.25, 0.36, 0.38), vec3(0.65, 0.48, 0.27), step(1.8, p.y + sin(p.z * 2.0) * 0.3));
+      }
+    }
+    else if (shop) c = atlas(0.15 + uvw.x * 0.7, uvw.y) * 0.8;
     else c = paint * 0.8;
   }
   // soft shadowing into the room's corners and away from the window

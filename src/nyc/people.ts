@@ -1241,7 +1241,7 @@ export class Person {
   }
   /** entering / leaving the far crowd: carry the animation phase across */
   syncFromFar() {
-    const a = this.actions.get(this.activity === 'walk' ? this.walkClip : this.activity === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop');
+    const a = this.actions.get(this.activity === 'walk' && this.speed > 0.05 ? this.walkClip : this.activity === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop');
     if (a) a.time = this.vatPhase * a.getClip().duration;
   }
   syncToFar() {
@@ -1394,7 +1394,7 @@ export class Person {
     if (a === 'phone' && this.noPhone) a = 'idle';
     this.activity = a;
     if (a !== 'walk') this.speed = 0;
-    const clip = a === 'walk' ? this.walkClip : a === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop';
+    const clip = a === 'walk' && this.speed > 0.05 ? this.walkClip : a === 'talk' ? 'Idle_Talking_Loop' : 'Idle_Loop';
     for (const [n, act] of this.actions) {
       if (n === clip) {
         if (!act.isRunning()) {
@@ -1412,6 +1412,14 @@ export class Person {
    */
   setSpeed(v: number) {
     this.speed = this.activity === 'walk' ? v : 0;
+    if (this.activity === 'walk') {
+      const clip = this.speed > 0.05 ? this.walkClip : 'Idle_Loop';
+      for (const [name, action] of this.actions) {
+        if (name === clip) {
+          if (!action.isRunning()) action.reset().play();
+        } else action.stop();
+      }
+    }
     const w = this.actions.get(this.walkClip);
     if (w) w.timeScale = Math.max(0.5, v / (CLIP_SPEED[this.gender] * this.model().scale.x * (BODY[this.gender].height / 1.83)));
   }
@@ -1840,6 +1848,7 @@ export class Pedestrians {
         pd.dir = -pd.dir;
         pd.yaw = yawOf(pd.axis, pd.dir);
       }
+      const previousT = pd.t, previousLine = pd.line + pd.off;
       if (pd.state === 'stand') {
         pd.wait -= dt;
         if (pd.wait <= 0) {
@@ -1849,6 +1858,8 @@ export class Pedestrians {
         }
       } else this.walk(pd, dt, along, across);
       if (this.cars.length) this.clearOfCars(pd);
+      // Use displacement after blocking/avoidance, including early returns at cars and kerbs.
+      pd.p.setSpeed(dt > 0 ? Math.hypot(pd.t - previousT, pd.line + pd.off - previousLine) / dt : 0);
       const lineNow = pd.line + pd.off;
       pd.pos.set(pd.axis === 'x' ? pd.t : lineNow, this.groundAt(pd), pd.axis === 'x' ? lineNow : pd.t);
       pd.rot = pd.yaw;
@@ -2182,7 +2193,6 @@ export class Pedestrians {
     pd.off += THREE.MathUtils.clamp(target - pd.off, -1.1 * dt, 1.1 * dt);
     pd.t += pd.dir * v * dt;
     pd.v0 = v;
-    pd.p.setSpeed(Math.max(v, 0.3));
     const turn = THREE.MathUtils.clamp((target - pd.off) * 0.6, -0.4, 0.4) * (pd.axis === 'x' ? -1 : 1) * pd.dir;
     pd.yaw = yawOf(pd.axis, pd.dir) + turn;
   }

@@ -648,6 +648,7 @@ void main() {
 
 
 const WINDOW_VIEW = /* glsl */ `
+#ifdef USE_EMISSIVEMAP
 {
   vec2 vu = vEmissiveMapUv;
   vec3 e = totalEmissiveRadiance;
@@ -673,6 +674,7 @@ const WINDOW_VIEW = /* glsl */ `
   e += vec3(0.9) * wxView.z * (1.0 - smoothstep(0.04, 0.12, length(gf - c)));
   totalEmissiveRadiance = e;
 }
+#endif
 `;
 
 export class Weather {

@@ -6,6 +6,7 @@ import { Rng } from '../rng';
 import { Kit, lit, surfMat } from './kit';
 import { textTex, vctTile } from './tex';
 import * as F from './fixtures';
+import { retailBays, type RetailPlan } from './rows';
 
 /**
  * One layout per kind of shop, after the reference photos in docs/research/shops.md.
@@ -38,6 +39,7 @@ export interface Ctx {
   doorX: number;
   name: string;
   color: string;
+  plan?: RetailPlan;
 }
 export interface Layout {
   style(r: Rng): Style;
@@ -107,7 +109,7 @@ const deli: Layout = {
     };
   },
   door: (W) => -W / 2 + 1.3,
-  *build(k, r, st) {
+  *build(k, r, st, c) {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     // back: deli counter with the slicer and grill behind it, menu board above
@@ -149,9 +151,11 @@ const deli: Layout = {
     const gz0 = zb + 3.75, gz1 = zf - 4.1;
     for (let i = 0; i < nG; i++) {
       const x = nG === 1 ? (x0 + x1) / 2 : x0 + 0.47 + (i * (x1 - x0 - 0.94)) / (nG - 1);
-      k.at(x, (gz0 + gz1) / 2, Math.PI / 2);
-      F.gondola(k, gz1 - gz0, { height: 1.65, shelves: 5, color: r.pick(['#e8e8e4', '#2a2b2e']), strip: r.pick(['#c62828', '#f2c400']), messy: 0.45 });
-      yield;
+      for (const bay of retailBays(gz0, gz1, c.plan ?? 'aisles')) {
+        k.at(x, bay.center, Math.PI / 2);
+        F.gondola(k, bay.length, { height: c.plan === 'islands' ? 1.25 : 1.65, shelves: c.plan === 'islands' ? 3 : 5, color: r.pick(['#e8e8e4', '#2a2b2e']), strip: r.pick(['#c62828', '#f2c400']), messy: 0.45 });
+        yield;
+      }
       // no endcap where it would run into the counter's back bar
       if (x + 0.5 > xi - 1.45 - 0.45) continue;
       k.at(x, gz1 + 0.24);
@@ -244,9 +248,11 @@ const pharmacy: Layout = {
     const cats = ['VITAMINS\nPAIN RELIEF', 'COLD & FLU\nFIRST AID', 'HAIR CARE\nSKIN CARE', 'BABY\nHOUSEHOLD', 'SNACKS\nCANDY', 'PERSONAL\nCARE', 'SEASONAL\nTOYS'];
     for (let i = 0; i < nA; i++) {
       const x = -((nA - 1) * 2.25) / 2 + i * 2.25;
-      k.at(x, (gz0 + gz1) / 2, Math.PI / 2);
-      F.gondola(k, gz1 - gz0, { height: 1.7, shelves: 5, color: '#f0f0ee', strip: red, messy: 0.12 });
-      yield;
+      for (const bay of retailBays(gz0, gz1, c.plan ?? 'aisles')) {
+        k.at(x, bay.center, Math.PI / 2);
+        F.gondola(k, bay.length, { height: c.plan === 'islands' ? 1.25 : 1.7, shelves: c.plan === 'islands' ? 3 : 5, color: '#f0f0ee', strip: red, messy: 0.12 });
+        yield;
+      }
       k.at(x, gz1 + 0.23);
       F.endcap(k, 1.0, { height: 1.7, shelves: 4, color: red, strip: '#f2c400' });
       yield;
@@ -285,7 +291,7 @@ const hardware: Layout = {
       wall: paint(r.pick(['#e8e2d2', '#dfe6e0'])), env: { ...COOL, exposure: 0.9 },
     };
   },
-  *build(k, r, st) {
+  *build(k, r, st, c) {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     // left wall: low shelving with brown pegboard of hanging tools above
@@ -306,9 +312,12 @@ const hardware: Layout = {
     const gz0 = zb + 2.6, gz1 = zf - 4.4;
     for (let i = 0; i < nG; i++) {
       const x = nG === 1 ? -0.2 : -1.1 + i * 2.2;
-      k.at(x, (gz0 + gz1) / 2, Math.PI / 2);
-      F.gondola(k, gz1 - gz0, { height: 2.0, shelves: 5, peg: '#a87b4f', color: '#3a3d42', strip: '#f2c400', messy: 0.35, header: textTex(depts[(i * 2) % depts.length], '#b5401c', '#ffffff', { w: 512, h: 112 }) });
-      yield;
+      for (const bay of retailBays(gz0, gz1, c.plan ?? 'aisles')) {
+        k.at(x, bay.center, Math.PI / 2);
+        if (c.plan === 'islands') F.table(k, bay.length, 0.9, 0.85, { color: '#6a4a2a', lower: true, messy: 0.5, mode: 'shelf' });
+        else F.gondola(k, bay.length, { height: 2.0, shelves: 5, peg: '#a87b4f', color: '#3a3d42', strip: '#f2c400', messy: 0.35, header: textTex(depts[(i * 2) % depts.length], '#b5401c', '#ffffff', { w: 512, h: 112 }) });
+        yield;
+      }
       k.at(x, gz1 + 0.22);
       F.endcap(k, 0.95, { height: 1.4, shelves: 3, color: '#3a3d42', messy: 0.6 });
       yield;
@@ -498,7 +507,7 @@ const kitchen: Layout = {
       floor: pbrS('floor_concrete', { color: '#a8a8a4', rough: 0.55 }), wall: paint('#eef0ee'), env: COOL,
     };
   },
-  *build(k, r, st) {
+  *build(k, r, st, c) {
     const { W, D } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
     // left wall: slatwall of utensils over a low shelf
@@ -516,9 +525,11 @@ const kitchen: Layout = {
     for (let i = 0; i < nA; i++) {
       const x = -xi + 2.4 + i * 2.6;
       for (const s of [-1, 1]) {
-        k.at(x + s * 0.31, -1.2, (s * Math.PI) / 2);
-        F.wireRack(k, D - 7, { d: 0.6, h: 1.9 });
-        yield;
+        for (const bay of retailBays(-1.2 - (D - 7) / 2, -1.2 + (D - 7) / 2, c.plan ?? 'aisles')) {
+          k.at(x + s * 0.31, bay.center, (s * Math.PI) / 2);
+          F.wireRack(k, bay.length, { d: 0.6, h: c.plan === 'islands' ? 1.25 : 1.9 });
+          yield;
+        }
       }
     }
     // back: stacked cartons

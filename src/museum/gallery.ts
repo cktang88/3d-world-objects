@@ -14,17 +14,14 @@ import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smith
 
 const SI_PAGE = 16;
 import { roman, textPlane, SANS, SERIF } from './text';
+import { museumRoutes, type GalleryExit } from './routes';
 
 /** which objects a room was built with, so it comes back identical */
 const roomMembers = new Map<string, string[]>();
 
 const MEASURE_TIMEOUT = 45000;
 
-interface Exit {
-  label: string;
-  top: string;
-  target: LevelDesc;
-}
+type Exit = GalleryExit;
 
 export class GalleryLevel extends MuseumBase {
   name: string;
@@ -62,21 +59,20 @@ export class GalleryLevel extends MuseumBase {
     const exits: Exit[] = [];
     if (desc.page + 1 < pages) exits.push({ top: 'continue', label: `${t.name} ${roman(desc.page + 2)}`, target: { kind: 'gallery', theme: t.id, page: desc.page + 1, wing: desc.wing } });
     for (const n of t.neighbors) {
-      if (exits.length >= 3) break;
       const nt = m.themes[n];
       if (!nt) continue;
       exits.push({ top: nt.collection === t.collection ? 'similar' : `similar · ${nt.collection}`, label: nt.name, target: { kind: 'gallery', theme: n, page: 0, wing: desc.wing } });
     }
     const er = new Rng(hashN(desc.theme, desc.page, 7));
-    while (exits.length < 3) {
-      const n = er.int(0, m.themes.length - 1);
-      exits.push({ top: 'somewhere else', label: m.themes[n].name, target: { kind: 'gallery', theme: n, page: 0, wing: desc.wing } });
-    }
-    // now and then a doorway into the Smithsonian rooms that match this collection
+    // Offer the special collection first, then related themes, then a bounded fallback pool.
     const sk = SI_ROOMS.findIndex((x) => x.related === t.collection);
-    if (sk >= 0 && er.chance(0.5)) exits[exits.length - 1] = { top: 'Smithsonian · real museum scans', label: SI_ROOMS[sk].name, target: { kind: 'gallery', theme: SI_BASE + sk, page: 0, wing: desc.wing } };
-    er.shuffle(exits);
-    return exits;
+    if (sk >= 0 && er.chance(0.5)) exits.splice(2, 0, { top: 'Smithsonian · real museum scans', label: SI_ROOMS[sk].name, target: { kind: 'gallery', theme: SI_BASE + sk, page: 0, wing: desc.wing } });
+    const fallback = [...m.themes];
+    er.shuffle(fallback);
+    for (const nt of fallback) exits.push({ top: 'somewhere else', label: nt.name, target: { kind: 'gallery', theme: nt.id, page: 0, wing: desc.wing } });
+    const selected = museumRoutes.choose(desc, exits);
+    er.shuffle(selected);
+    return selected;
   }
 
   private setEnv(st: Style) {
@@ -115,13 +111,11 @@ export class GalleryLevel extends MuseumBase {
     const m = museum();
     const rel = m.themes.filter((x) => x.collection === room.related);
     const er = new Rng(hashN(d.theme, d.page, 7));
-    for (let i = 0; exits.length < 3 && i < 4; i++) {
-      const n = rel.length ? er.pick(rel) : m.themes[er.int(0, m.themes.length - 1)];
-      if (exits.some((x) => x.target.kind === 'gallery' && x.target.theme === n.id)) continue;
-      exits.push({ top: `sand3d · ${n.collection}`, label: n.name, target: { kind: 'gallery', theme: n.id, page: 0, wing: d.wing } });
-    }
-    er.shuffle(exits);
-    await this.build(items.map((e, i) => siMeasured(e, i === 0)), exits, pages);
+    const candidates = [...er.shuffle(rel), ...er.shuffle(m.themes.filter((x) => x.collection !== room.related))];
+    for (const n of candidates) exits.push({ top: `sand3d · ${n.collection}`, label: n.name, target: { kind: 'gallery', theme: n.id, page: 0, wing: d.wing } });
+    const selected = museumRoutes.choose(d, exits);
+    er.shuffle(selected);
+    await this.build(items.map((e, i) => siMeasured(e, i === 0)), selected, pages);
     await this.settle();
   }
 

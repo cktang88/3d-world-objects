@@ -65,6 +65,27 @@ function stance(p: InstanceType<Awaited<ReturnType<typeof importPeople>>['Person
 }
 const importPeople = () => import('../src/nyc/people');
 
+test('zero movement switches walking people to an idle pose and moving resumes walking', async () => {
+  for (const p of await people(2)) {
+    p.setActivity('walk');
+    p.setSpeed(1.3);
+    p.update(0.2);
+    expect(p.actions.get(p.walkClip)!.isRunning(), 'walk clip runs while moving');
+    p.setSpeed(0);
+    p.update(0.2);
+    expect(!p.actions.get(p.walkClip)!.isRunning(), 'walk clip stops when blocked');
+    expect(p.actions.get('Idle_Loop')!.isRunning(), 'standing pose is active');
+    p.syncToFar();
+    expect(p.vatClip === 1, 'far crowd also stands still');
+    p.setSpeed(1.3);
+    p.update(0.1);
+    expect(p.actions.get(p.walkClip)!.isRunning(), 'walking resumes');
+    p.setActivity('phone');
+    p.setSpeed(0);
+    expect(p.activity === 'phone' && !p.actions.get(p.walkClip)!.isRunning(), 'standing activities are preserved');
+  }
+});
+
 test('walking feet plant: a planted foot slides less than 5% of the walking speed (1.0-1.5 m/s)', async () => {
   const ps = await people(6);
   const bad: string[] = [];

@@ -156,6 +156,54 @@ function drawShopWall(g: CanvasRenderingContext2D, C: number, type: string, r: R
     }
     return;
   }
+  // The street view must communicate the store's trade too, rather than using the
+  // same supermarket shelf picture for every specialist retailer.
+  if (['music', 'sports', 'hardware', 'kitchen', 'machines', 'models', 'stationery', 'toys'].includes(type)) {
+    const wood = type === 'stationery' || type === 'music';
+    g.fillStyle = wood ? '#68503a' : '#d7d9d6';
+    g.fillRect(0, C * 0.12, C, C * 0.82);
+    if (type === 'music' || type === 'sports' || type === 'hardware' || type === 'kitchen') {
+      // Slatwall/pegboard display: hanging instruments, bats, tools or cookware.
+      g.strokeStyle = '#a6a39a';
+      g.lineWidth = 2;
+      for (let y = C * 0.16; y < C * 0.9; y += C * 0.07) { g.beginPath(); g.moveTo(0, y); g.lineTo(C, y); g.stroke(); }
+      for (let i = 0; i < 6; i++) {
+        const x = C * (i + 0.5) / 6, y = C * (0.42 + (i % 2) * 0.2);
+        g.fillStyle = type === 'music' ? r.pick(['#b37936', '#7b3923', '#ddd1ad']) : r.pick(['#343b40', '#8b9297', '#aa382a']);
+        if (type === 'music' || type === 'kitchen') {
+          g.beginPath(); g.ellipse(x, y + C * 0.12, C * 0.045, C * (type === 'music' ? 0.08 : 0.045), 0, 0, Math.PI * 2); g.fill();
+          g.fillRect(x - C * 0.009, y - C * 0.1, C * 0.018, C * 0.2);
+        } else {
+          g.fillRect(x - C * 0.012, y - C * 0.13, C * 0.024, C * 0.27);
+          g.fillRect(x - C * 0.04, y - C * 0.13, C * 0.08, C * 0.04);
+        }
+      }
+    } else if (type === 'machines') {
+      // Parts drawers and pigeonholes rather than grocery packaging.
+      for (let row = 0; row < 6; row++) for (let col = 0; col < 9; col++) {
+        const x = col * C / 9 + 3, y = C * 0.18 + row * C * 0.11;
+        g.fillStyle = '#355c76'; g.fillRect(x, y, C / 9 - 6, C * 0.095);
+        g.fillStyle = '#e7e4d7'; g.fillRect(x + 8, y + 10, C / 9 - 22, 9);
+      }
+    } else if (type === 'models') {
+      for (let i = 0; i < 4; i++) {
+        const x = i * C / 4;
+        g.fillStyle = '#283943'; g.fillRect(x + 4, C * 0.2, C / 4 - 8, C * 0.65);
+        g.fillStyle = '#aac6cb'; g.fillRect(x + 9, C * 0.23, C / 4 - 18, C * 0.58);
+        for (let j = 0; j < 3; j++) { g.fillStyle = '#e3ded2'; g.fillRect(x + 9, C * (0.4 + j * 0.2), C / 4 - 18, 5); g.fillStyle = '#54636a'; g.fillRect(x + 22, C * (0.35 + j * 0.2), C / 4 - 44, 13); }
+      }
+    } else {
+      // Book spines or toy cubbies: a different rhythm and density from grocery shelves.
+      for (let row = 0; row < 4; row++) {
+        for (let x = 6; x < C - 10; x += type === 'stationery' ? 13 : 80) {
+          g.fillStyle = r.pick(pal);
+          g.fillRect(x, C * (0.2 + row * 0.18), type === 'stationery' ? 10 : 65, C * (type === 'stationery' ? 0.14 : 0.12));
+        }
+        g.fillStyle = wood ? '#493524' : '#f2efdf'; g.fillRect(0, C * (0.35 + row * 0.18), C, 6);
+      }
+    }
+    return;
+  }
   // gondola shelving packed with goods
   for (let y = C * 0.18; y < C * 0.95; y += C * 0.16) {
     g.fillStyle = '#9a9a96';
