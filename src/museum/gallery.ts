@@ -15,9 +15,11 @@ import { isSi, siEntries, siMeasured, siTheme, SI_BASE, SI_ROOMS } from './smith
 const SI_PAGE = 16;
 import { roman, textPlane, SANS, SERIF } from './text';
 import { museumRoutes, type GalleryExit } from './routes';
+import { collectionExits } from './destinations';
+import { disposeModel } from '../remote';
 
-/** which objects a room was built with, so it comes back identical */
-const roomMembers = new Map<string, string[]>();
+/** Freeze page membership, not the subset whose models happened to load successfully. */
+const themePages = new Map<number, Awaited<ReturnType<typeof themeMembers>>[]>();
 
 const MEASURE_TIMEOUT = 45000;
 
@@ -54,25 +56,7 @@ export class GalleryLevel extends MuseumBase {
 
   /** doorways: the next room of this theme (if any), then the most similar themes */
   private exits(pages: number): Exit[] {
-    const m = museum();
-    const t = this.theme, desc = this.desc;
-    const exits: Exit[] = [];
-    if (desc.page + 1 < pages) exits.push({ top: 'continue', label: `${t.name} ${roman(desc.page + 2)}`, target: { kind: 'gallery', theme: t.id, page: desc.page + 1, wing: desc.wing } });
-    for (const n of t.neighbors) {
-      const nt = m.themes[n];
-      if (!nt) continue;
-      exits.push({ top: nt.collection === t.collection ? 'similar' : `similar · ${nt.collection}`, label: nt.name, target: { kind: 'gallery', theme: n, page: 0, wing: desc.wing } });
-    }
-    const er = new Rng(hashN(desc.theme, desc.page, 7));
-    // Offer the special collection first, then related themes, then a bounded fallback pool.
-    const sk = SI_ROOMS.findIndex((x) => x.related === t.collection);
-    if (sk >= 0 && er.chance(0.5)) exits.splice(2, 0, { top: 'Smithsonian · real museum scans', label: SI_ROOMS[sk].name, target: { kind: 'gallery', theme: SI_BASE + sk, page: 0, wing: desc.wing } });
-    const fallback = [...m.themes];
-    er.shuffle(fallback);
-    for (const nt of fallback) exits.push({ top: 'somewhere else', label: nt.name, target: { kind: 'gallery', theme: nt.id, page: 0, wing: desc.wing } });
-    const selected = museumRoutes.choose(desc, exits);
-    er.shuffle(selected);
-    return selected;
+    return collectionExits(this.desc, this.theme, museum().themes, pages);
   }
 
   private setEnv(st: Style) {
@@ -113,7 +97,13 @@ export class GalleryLevel extends MuseumBase {
     const er = new Rng(hashN(d.theme, d.page, 7));
     const candidates = [...er.shuffle(rel), ...er.shuffle(m.themes.filter((x) => x.collection !== room.related))];
     for (const n of candidates) exits.push({ top: `sand3d · ${n.collection}`, label: n.name, target: { kind: 'gallery', theme: n.id, page: 0, wing: d.wing } });
-    const selected = museumRoutes.choose(d, exits);
+    const relatedExits = exits.slice(d.page + 1 < pages ? 1 : 0);
+    const continuation = d.page + 1 < pages ? exits.slice(0, 1) : [];
+    const discovery = candidates.filter((t) => t.collection !== room.related).map((t) => ({
+      top: `discover · ${t.collection}`, label: t.name,
+      target: { kind: 'gallery' as const, theme: t.id, page: 0, wing: d.wing },
+    }));
+    const selected = museumRoutes.chooseDirections(d, [continuation.length ? [...continuation, ...relatedExits] : relatedExits, relatedExits, discovery]);
     er.shuffle(selected);
     await this.build(items.map((e, i) => siMeasured(e, i === 0)), selected, pages);
     await this.settle();
@@ -125,25 +115,26 @@ export class GalleryLevel extends MuseumBase {
     await loadThemeSizes(t.shard, t.id, all);
     if (!this.alive) return;
     // rooms are cut from the theme by what fits (size-capped halls, at most two colossal things each)
-    const rooms = partitionRooms(all, (e) => measuredFromCache(e)?.real ?? null, per);
+    let rooms = themePages.get(t.id);
+    if (!rooms) {
+      rooms = partitionRooms(all, (e) => measuredFromCache(e)?.real ?? null, per);
+      themePages.set(t.id, rooms);
+    }
     const pages = rooms.length;
     const exits = this.exits(pages);
     const items = rooms[this.desc.page] ?? [];
-    const key = `${t.id}:${this.desc.page}`;
-    const ids = roomMembers.get(key);
     let measured: Measured[] | null = null;
-    const pick = ids ? items.filter((e) => ids.includes(e.id)) : items;
+    const pick = items;
     const cached = pick.map(measuredFromCache);
     if (cached.every(Boolean)) measured = cached as Measured[];
     if (!measured) {
       this.antechamber(items.length, pages);
       measured = await this.measureAll(pick);
       if (!this.alive) {
-        for (const m of measured) if (m.model) m.model.object.clear();
+        for (const m of measured) if (m.model) disposeModel(m.model.object);
         return;
       }
     }
-    roomMembers.set(key, measured.map((m) => m.entry.id));
     await this.build(measured, exits, pages);
     // learn the sizes in the rooms behind the doors while you look around
     this.settle().then(() => {
@@ -167,15 +158,20 @@ export class GalleryLevel extends MuseumBase {
       const out: (Measured | null)[] = list.map(() => null);
       let done = 0;
       let finished = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const finish = () => {
         if (finished) return;
         finished = true;
+        if (timer) clearTimeout(timer);
         resolve(out.filter((m): m is Measured => !!m));
       };
       if (!list.length) finish();
       list.forEach((e, i) =>
         measure(e, i)
-          .then((m) => (out[i] = m))
+          .then((m) => {
+            if (finished || !this.alive) { if (m.model) disposeModel(m.model.object); }
+            else out[i] = m;
+          })
           .catch(() => {})
           .finally(() => {
             done++;
@@ -183,7 +179,7 @@ export class GalleryLevel extends MuseumBase {
             if (done >= list.length) finish();
           }),
       );
-      setTimeout(() => {
+      if (!finished) timer = setTimeout(() => {
         if (out.some(Boolean)) finish();
       }, MEASURE_TIMEOUT);
     });

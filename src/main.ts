@@ -23,6 +23,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { stabilizeGtao } from './ambient-occlusion';
 import { museumRoutes } from './museum/routes';
+import { installMuseumCatalog } from './museum/catalog';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
@@ -347,7 +348,7 @@ function renderCrumbs() {
   });
   if (mode === 'museum') {
     const t = currentDesc.kind === 'gallery' ? museum().themes[currentDesc.theme] : null;
-    hud.depth.innerHTML = `<b>${t ? t.collection : 'The sand3d Museum'}</b><span>${stack.length} room${stack.length === 1 ? '' : 's'} deep · ${roomsVisited} visited</span><span>${museum().total.toLocaleString()} objects · ${museum().themes.length.toLocaleString()} rooms</span>`;
+    hud.depth.innerHTML = `<b>${t ? t.collection : 'The sand3d Museum'}</b><span>${stack.length} room${stack.length === 1 ? '' : 's'} deep · ${roomsVisited} visited</span><span>${museum().total.toLocaleString()} catalogue objects · ${museum().themes.length.toLocaleString()} themes</span>`;
   } else {
     hud.depth.innerHTML = `<b>depth ${stack.length}</b><span>you are ${formatScale(scale)} your original size</span>`;
   }
@@ -442,7 +443,7 @@ async function enter(p: Portal) {
   setLevel(built);
   if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
   else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : target.shop ? `Welcome to ${target.name}` : target.name);
-  else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} wing — every doorway leads somewhere similar`);
+  else if (target.kind === 'gallery' && stack.length === 1) toast(`${target.wing ?? ''} — follow a theme or discover a different collection`);
   await precompile();
   await fadeTo(0, shrink ? 700 : quick ? 260 : 350);
   transitioning = false;
@@ -549,6 +550,16 @@ function autoPortal(): Portal | null {
 // ---------------------------------------------------------------- info panel
 
 let infoOpen = false;
+const museumCatalog = installMuseumCatalog({
+  open: () => {
+    if (!started || transitioning || infoOpen || mode !== 'museum') return false;
+    infoOpen = true;
+    player.keys.clear();
+    document.exitPointerLock();
+  },
+  close: () => { infoOpen = false; },
+  visit: (theme) => { void enter({ box: new THREE.Box3(), label: theme.name, target: { kind: 'gallery', theme: theme.id, page: 0, wing: theme.collection } }); },
+});
 function esc(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
@@ -622,6 +633,14 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 addEventListener('keydown', (e) => {
+  if (museumCatalog.opened) {
+    if (e.code === 'Escape') museumCatalog.close();
+    return;
+  }
+  if (e.code === 'KeyB' && mode === 'museum' && started && !transitioning && !infoOpen) {
+    museumCatalog.show();
+    return;
+  }
   if (infoOpen && (e.code === 'Escape' || e.code === 'KeyE')) {
     closeInfo();
     return;
@@ -838,7 +857,7 @@ async function startMode(m: Mode) {
   roomsVisited = 0;
   document.body.dataset.mode = m;
   hud.help.innerHTML = m === 'museum'
-    ? '<kbd>WASD</kbd> walk · walk through a doorway to go on · <kbd>E</kbd> inspect · <kbd>Q</kbd> previous room'
+    ? '<kbd>WASD</kbd> walk · <kbd>B</kbd> browse collections · <kbd>E</kbd> inspect · <kbd>Q</kbd> previous room'
     : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>T</kbd> time of day · <kbd>Y</kbd> weather · <kbd>C</kbd> credits';
   if (m === 'museum') currentDesc = { kind: 'atrium' };
   else {

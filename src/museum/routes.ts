@@ -14,6 +14,25 @@ export class MuseumRoutes {
     this.exits.clear();
   }
 
+  available(room: Gallery) { return !this.claimed.has(key(room)); }
+
+  /** Reserve a destination for each purpose (continue, similar, discover), not just the
+   * first three neighbours. A long list of similar themes must not crowd out discovery. */
+  chooseDirections(room: Gallery, directions: Iterable<GalleryExit>[]): GalleryExit[] {
+    const id = key(room), existing = this.exits.get(id);
+    if (existing) return [...existing];
+    this.claimed.add(id);
+    const selected: GalleryExit[] = [];
+    for (const candidates of directions) for (const exit of candidates) {
+      if (!this.available(exit.target)) continue;
+      this.claimed.add(key(exit.target));
+      selected.push(exit);
+      break;
+    }
+    this.exits.set(id, [...selected]);
+    return selected;
+  }
+
   choose(room: Gallery, candidates: Iterable<GalleryExit>, count = 3): GalleryExit[] {
     const id = key(room), existing = this.exits.get(id);
     if (existing) return [...existing];
