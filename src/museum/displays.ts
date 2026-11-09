@@ -57,8 +57,8 @@ export function makeMats(st: Style, r: Rng): Mats {
   };
 }
 
-const glassMat = new THREE.MeshStandardMaterial({ color: '#e6f4ff', roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.1, depthWrite: false, envMapIntensity: 1.6 });
-const shelfGlass = new THREE.MeshStandardMaterial({ color: '#cfe8e2', roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.35, depthWrite: false });
+const glassMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.02, metalness: 0, transparent: true, opacity: 0.055, depthWrite: false, envMapIntensity: 0.3 });
+const shelfGlass = new THREE.MeshStandardMaterial({ color: '#f5fffd', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.1, depthWrite: false, envMapIntensity: 0.3 });
 
 export interface Ctx {
   lv: MuseumBase;
@@ -90,6 +90,24 @@ export interface Unit {
 }
 
 // ---------------------------------------------------------------- helpers
+
+/** Small exhibits sit near the standing visitor's 1.65 m eye height. */
+function smallBase(height: number) { return THREE.MathUtils.clamp(1.5 - height / 2, 0.85, 1.45); }
+
+/** A narrow perimeter frame leaves the glass roof open to views from above. */
+function roofRim(c: Ctx, f: Frame, w: number, d: number, y: number) {
+  const edge = 0.018;
+  for (const s of [-1, 1]) {
+    c.lv.bx(c.m.frame, w, edge, edge, 0, y, s * (d - edge) / 2, f);
+    c.lv.bx(c.m.frame, edge, edge, d - edge * 2, s * (w - edge) / 2, y, 0, f);
+  }
+}
+
+/** Centre a partly filled cabinet around eye level rather than stacking tiny things at its foot. */
+function shelfStart(base: number, glassHeight: number, shelves: { h: number }[]) {
+  const height = shelves.reduce((sum, s) => sum + s.h, 0);
+  return Math.max(base + 0.03, Math.min(1.5 - height / 2, base + glassHeight - 0.08 - height));
+}
 
 /** footprint along a run: the longer side runs along x */
 export function along(m: Measured) {
@@ -241,7 +259,7 @@ export function plinth(m: Measured, hood: boolean, hero: boolean, spin = 0): Uni
   const a = along(m);
   const R = spin ? Math.hypot(a.w, a.d) : 0;
   const sw = (R || a.w) + (hood ? 0.22 : 0.3), sd = (R || a.d) + (hood ? 0.22 : 0.3);
-  const ph = hood ? THREE.MathUtils.clamp(1.15 - m.real.y / 2, 0.55, 1.05) : THREE.MathUtils.clamp(0.95 - m.real.y * 0.55, 0.12, 0.9);
+  const ph = hood || Math.max(m.real.x, m.real.y, m.real.z) <= 0.6 ? smallBase(m.real.y) : THREE.MathUtils.clamp(0.95 - m.real.y * 0.55, 0.12, 0.9);
   const hh = m.real.y + 0.12;
   const W = Math.max(sw, 0.45), D = Math.max(sd, 0.45);
   const top = ph + (hood ? hh + 0.03 : m.real.y);
@@ -254,7 +272,7 @@ export function plinth(m: Measured, hood: boolean, hero: boolean, spin = 0): Uni
       lv.bx(c.m.fixture, W - 0.02, 0.04, D - 0.02, 0, 0, 0, f); // shadow gap
       if (hood) {
         lv.bx(c.m.glass, W - 0.02, hh, D - 0.02, 0, ph, 0, f);
-        lv.bx(c.m.frame, W, 0.02, D, 0, ph + hh, 0, f);
+        roofRim(c, f, W, D, ph + hh);
       }
       lv.exhibit(m, f, 0, ph + 0.002, 0, a.rot, { prio: c.prio(), spin });
       lv.col(f, 0, 0, W + 0.12, D + 0.12);
@@ -272,7 +290,7 @@ export function cluster(items: Measured[], r: Rng, hood: boolean): Unit {
   const heights = r.shuffle([0.25, 0.55, 0.85, 1.05, 0.4, 0.7]);
   const parts = items.map((m, i) => {
     const a = along(m);
-    const top = hood ? THREE.MathUtils.clamp(1.1 - m.real.y / 2, 0.45, 1.0) : Math.min(heights[i % heights.length], Math.max(0.12, 1.5 - m.real.y));
+    const top = hood || Math.max(m.real.x, m.real.y, m.real.z) <= 0.6 ? smallBase(m.real.y) : Math.min(heights[i % heights.length], Math.max(0.12, 1.5 - m.real.y));
     return { m, a, W: Math.max(0.4, a.w + 0.28), D: Math.max(0.4, a.d + 0.28), ph: top, dz: (i % 2 ? -1 : 1) * 0.22 };
   });
   const gap = 0.12;
@@ -281,7 +299,7 @@ export function cluster(items: Measured[], r: Rng, hood: boolean): Unit {
   const h = Math.max(...parts.map((p) => p.ph + p.m.real.y + (hood ? 0.15 : 0)));
   return {
     type: 'cluster', place: 'floor', w: W + 0.6, d: D + 1.0, h, items,
-    focus: new THREE.Vector3(0, 1.0, -0.3), glow: W * 0.6 + 0.4,
+    focus: new THREE.Vector3(0, parts.reduce((sum, p) => sum + p.ph + p.m.real.y / 2, 0) / parts.length, -0.3), glow: W * 0.6 + 0.4,
     build(c, f) {
       const lv = c.lv;
       const o = f.sub(0, -0.3);
@@ -448,23 +466,23 @@ function groupTitle(items: Measured[]) {
 
 /** Tall free-standing glass tower with glass shelves, lit from the top (V&A Room 143). */
 export function vitrine(items: Measured[], inner: number): { unit: Unit; rest: Measured[] } {
-  const { shelves, rest } = packShelves(items, inner, 1.75, inner, 0.06);
+  const { shelves, rest } = packShelves(items, inner, 0.84, inner, 0.06);
   const used = shelves.flatMap((s) => s.items.map((i) => i.m));
-  const W = inner + 0.12, base = 0.42, gh = 1.95;
+  const W = inner + 0.12, base = 1.2, gh = 1.0;
   return {
     rest,
     unit: {
       type: 'vitrine', place: 'floor', w: W + 1.0, d: W + 1.0, h: base + gh + 0.12, items: used,
-      focus: new THREE.Vector3(0, 1.3, 0), glow: W * 0.9,
+      focus: new THREE.Vector3(0, 1.5, 0), glow: W * 0.9,
       build(c, f) {
         const lv = c.lv;
         lv.bx(c.m.caseBase, W, base, W, 0, 0, 0, f);
         lv.bx(c.m.glass, W, gh, W, 0, base, 0, f);
         for (const sx of [-1, 1]) for (const sz of [-1, 1]) lv.bx(c.m.frame, 0.025, gh, 0.025, (sx * W) / 2, base, (sz * W) / 2, f);
-        lv.bx(c.m.frame, W + 0.02, 0.12, W + 0.02, 0, base + gh, 0, f);
-        lv.bx(c.m.caseLight, W * 0.7, 0.01, W * 0.7, 0, base + gh - 0.012, 0, f);
+        roofRim(c, f, W, W, base + gh);
+        lv.bx(c.m.caseLight, W - 0.08, 0.008, 0.025, 0, base + gh - 0.012, -W / 2 + 0.03, f);
         // shelves bottom-up (the tallest objects at the bottom)
-        let y = base + 0.02;
+        let y = shelfStart(base, gh, shelves);
         for (const s of shelves) {
           if (y > base + 0.05) lv.bx(c.m.shelf, inner, 0.012, inner, 0, y - 0.012, 0, f);
           if (s.twoDeep) lv.bx(c.m.shelf, inner, 0.05, inner / 2, 0, y, -inner / 4, f);
@@ -510,11 +528,11 @@ export function tableCase(items: Measured[], maxLen: number): { unit: Unit; rest
   }
   const used = rows.flatMap((r) => r.items.map((i) => i.m));
   const L = Math.max(1.2, Math.min(maxLen, Math.max(...rows.map((r) => r.used), 0) + 0.1));
-  const base = 0.86;
+  const base = 1.4;
   return {
     rest,
     unit: {
-      type: 'table', place: 'floor', w: L + 1.2, d: depth + 0.12 + 1.6, h: base + hoodH, items: used,
+      type: 'table', place: 'floor', w: L + 1.2, d: depth + 0.12 + 1.6, h: base + hoodH + 0.018, items: used,
       focus: new THREE.Vector3(0, base, 0), glow: L * 0.55,
       build(c, f) {
         const lv = c.lv;
@@ -523,12 +541,12 @@ export function tableCase(items: Measured[], maxLen: number): { unit: Unit; rest
         lv.bx(c.m.fixture, W - 0.2, 0.1, D - 0.2, 0, 0, 0, f);
         lv.bx(c.m.plinthAlt, W, 0.025, D, 0, base - 0.02, 0, f); // 5 mm proud of the cabinet
         lv.bx(c.m.glass, W, hoodH, D, 0, base, 0, f);
-        lv.bx(c.m.frame, W + 0.01, 0.015, D + 0.01, 0, base + hoodH, 0, f);
+        roofRim(c, f, W, D, base + hoodH);
         let z = -depth / 2 + 0.03;
         for (const r of rows) {
           let x = -L / 2 + (L - r.used) / 2 + gapFor(r.items[0].w);
           for (const it of r.items) {
-            lv.exhibit(it.m, f, x + it.w / 2, base + 0.001, z + r.d / 2, it.rot, { prio: c.prio() });
+            lv.exhibit(it.m, f, x + it.w / 2, base + 0.006, z + r.d / 2, it.rot, { prio: c.prio() });
             x += it.w + gapFor(it.w);
           }
           z += r.d + gapFor(r.d);
@@ -568,7 +586,7 @@ function magnifier(c: Ctx, f: Frame, items: Measured[], top: number, L: number, 
  * pulled out under glass, full of tiny things; the rest closed, with brass pulls and label cards.
  */
 export function drawers(items: Measured[]): { unit: Unit; rest: Measured[] } {
-  const W = 1.3, D = 0.72, H = 1.0, trayW = 0.58, trayD = 0.6, pull = 0.42;
+  const W = 1.3, D = 0.72, H = 1.65, trayW = 0.58, trayD = 0.6, pull = 0.42;
   const trays: { m: Measured; x: number; z: number; rot: number }[][] = [[], []];
   const rest: Measured[] = [];
   const sorted = [...items].sort((a, b) => along(b).d - along(a).d);
@@ -736,8 +754,9 @@ export function bench(): Unit {
 /** Wall case: a cabinet base, glass front, glass shelves, light in the canopy (V&A ceramics). */
 export function wallCase(items: Measured[], len0: number, storage: boolean): { unit: Unit; rest: Measured[] } {
   const depth = storage ? 0.48 : 0.6;
-  const base = storage ? 0.35 : 0.65;
-  const gh = storage ? 2.25 : 1.75;
+  const small = items.every((m) => m.real.y <= 0.35 && Math.max(m.real.x, m.real.z) <= 0.6);
+  const base = small ? 1.2 : storage ? 0.35 : 0.65;
+  const gh = small ? 1.0 : storage ? 2.25 : 1.75;
   const { shelves, rest } = packShelves(items, len0 - 0.1, gh - 0.1, depth - 0.1, storage ? 0.05 : 0.1);
   // a case only as long as its fullest shelf needs (a few small things get a short case)
   const len = Math.min(len0, Math.max(0.9, ...shelves.map((s) => s.used + 0.15)));
@@ -758,9 +777,11 @@ export function wallCase(items: Measured[], len0: number, storage: boolean): { u
         lv.bx(c.m.caseBase, len, gh, 0.02, 0, base, 0.012, f);
         for (const s of [-1, 1]) lv.bx(c.m.frame, 0.035, gh - 0.005, depth - 0.008, (s * len) / 2, base + 0.005, zc, f);
         if (storage) for (let x = -len / 2 + 0.9; x < len / 2 - 0.3; x += 0.9) lv.bx(c.m.frame, 0.02, gh, 0.02, x, base, depth, f);
-        lv.bx(c.m.frame, len + 0.02, 0.15, depth + 0.02, 0, base + gh, zc, f);
-        lv.bx(c.m.caseLight, len - 0.1, 0.01, 0.12, 0, base + gh - 0.012, depth - 0.12, f);
-        let y = base + 0.03;
+        const roof = f.sub(0, zc);
+        lv.bx(c.m.glass, len, 0.008, depth, 0, base + gh, zc, f);
+        roofRim(c, roof, len, depth, base + gh);
+        lv.bx(c.m.caseLight, len - 0.1, 0.008, 0.025, 0, base + gh - 0.012, 0.04, f);
+        let y = shelfStart(base, gh, shelves);
         for (const s of shelves) {
           if (y > base + 0.06) {
             lv.bx(c.m.shelf, len - 0.08, 0.012, depth - 0.06, 0, y - 0.012, zc, f);

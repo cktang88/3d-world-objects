@@ -7,6 +7,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import './style.css';
 import { loadManifest, allModels } from './assets';
 import { Player } from './player';
+import { InspectionZoom } from './inspection-zoom';
 import { CityLevel } from './city';
 import { InteriorLevel } from './interior';
 import { NycLevel, SHOPS } from './nyc';
@@ -62,6 +63,7 @@ const scene = new THREE.Scene();
 // near 0.1 (was 0.05): depth precision at range scales with near (24-bit, far 900: ~6 mm at 100 m instead of
 // ~12 mm), the main cause of distant flicker; still well inside the player radius (0.32 m) [zfix]
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 900);
+const inspectionZoom = new InspectionZoom(camera);
 const pmrem = new THREE.PMREMGenerator(renderer);
 const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environment = roomEnv;
@@ -396,6 +398,7 @@ async function zoomInto(target: THREE.Vector3, ms: number) {
 
 async function enter(p: Portal) {
   if (transitioning) return;
+  inspectionZoom.reset();
   if (p.target === 'inspect') {
     if (p.inspect) openInfo(p.inspect);
     return;
@@ -465,6 +468,7 @@ async function precompile() {
 
 /** walked: you walked out through the door (keep moving as you were); otherwise Q / E: step out facing away */
 async function goBack(walked = false) {
+  inspectionZoom.reset();
   const f = stack.pop();
   if (!f) {
     toast(mode === 'museum' ? 'This is the atrium — pick a wing.' : 'This is the outermost world.');
@@ -781,6 +785,8 @@ function frame() {
   if (level && !transitioning) {
     const active = started || coarse;
     player.update(dt, seam.colliders(level.colliders(player.pos), player.pos), !active || infoOpen);
+    const movingInput = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].some((key) => player.keys.has(key)) || player.touchMove.lengthSq() > 0;
+    inspectionZoom.update(dt, active && !infoOpen && player.onGround && !movingInput && Math.hypot(player.vel.x, player.vel.z) < 0.15 && player.keys.has('KeyZ'));
     level.update(dt, player.pos, time);
     minimap.update(level, player.pos, player.yaw, time); // [minimap] 2D overlay, throttled, no WebGL
     const walked = seam.update(dt, level, player.pos); // seamless.ts: prebuild, previews, walking through doors
@@ -850,6 +856,7 @@ mark('modules loaded');
 const ready = timed('ready', Promise.all([timed('manifest', loadManifest()), timed('museum data', loadMuseum()), timed('pbr', loadPbr(renderer)), timed('rebuilt index', loadRebuiltIndex())]));
 
 async function startMode(m: Mode) {
+  inspectionZoom.reset();
   mode = m;
   await ready;
   stack.length = 0;
@@ -857,8 +864,8 @@ async function startMode(m: Mode) {
   roomsVisited = 0;
   document.body.dataset.mode = m;
   hud.help.innerHTML = m === 'museum'
-    ? '<kbd>WASD</kbd> walk · <kbd>B</kbd> browse collections · <kbd>E</kbd> inspect · <kbd>Q</kbd> previous room'
-    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back out · <kbd>T</kbd> time of day · <kbd>Y</kbd> weather · <kbd>C</kbd> credits';
+    ? '<kbd>WASD</kbd> walk · hold <kbd>Z</kbd> zoom while still · <kbd>B</kbd> collections · <kbd>E</kbd> inspect · <kbd>Q</kbd> back'
+    : '<kbd>WASD</kbd> move · <kbd>Shift</kbd> run · hold <kbd>Z</kbd> zoom while still · <kbd>E</kbd> enter / shrink in · <kbd>Q</kbd> back · <kbd>T</kbd> time · <kbd>Y</kbd> weather · <kbd>C</kbd> credits';
   if (m === 'museum') currentDesc = { kind: 'atrium' };
   else {
     const seed = params.has('seed') ? Number(params.get('seed')) || hashStr(params.get('seed')!) : 20261105;

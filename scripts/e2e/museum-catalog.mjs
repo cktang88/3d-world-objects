@@ -25,6 +25,16 @@ try {
   });
   await page.goto(`http://localhost:${port}/?mode=museum&quality=low&notex=1&post=0&shadows=0&seamless=0&precompile=0`);
   await page.waitForFunction(() => window.__world?.started, null, { timeout: 60000 });
+  const startPosition = await page.evaluate(() => window.__world.player.pos.toArray());
+  await page.keyboard.down('z');
+  await page.waitForFunction(() => window.__world.camera.fov < 35);
+  const zoomPosition = await page.evaluate(() => window.__world.player.pos.toArray());
+  if (startPosition.some((v, i) => Math.abs(v - zoomPosition[i]) > 0.01)) throw new Error('Inspection zoom moved the player');
+  await page.keyboard.down('w');
+  await page.waitForFunction(() => window.__world.camera.fov > 65);
+  await page.keyboard.up('w');
+  await page.keyboard.up('z');
+  await page.waitForFunction(() => window.__world.camera.fov > 69);
   const dialog = page.locator('#museum-catalog');
   // While mouse look holds pointer lock, use the advertised keyboard shortcut first.
   await page.keyboard.press('b');
