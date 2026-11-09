@@ -817,6 +817,14 @@ export class Lighting {
       u.mieDirectionalG.value = 0.82;
     }
     this.sky.visible = false;
+    // The atmosphere is a background, not a box anchored to the spawn block. Without
+    // following the camera, travelling beyond half its width exposes empty/black sky.
+    this.sky.frustumCulled = false;
+    this.sky.onBeforeRender = (_r, _s, cam) => {
+      this.sky.position.copy(cam.position);
+      this.sky.scale.setScalar((cam as THREE.PerspectiveCamera).far * 0.9);
+      this.sky.updateMatrixWorld();
+    };
     scene.add(this.sky);
     this.skyForEnv.scale.setScalar(1000);
     this.skyScene.add(this.skyForEnv);

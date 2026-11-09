@@ -2316,7 +2316,47 @@ export class InteriorLevel implements Level {
 
   // ------------------------------------------------------------------ generic rooms (shops, galleries, storage)
 
+  /** A tight residential/office room still needs furniture for its purpose, not warehouse stock. */
+  private compactRoom(c: RoomCtx) {
+    const r = c.r, k = this.kit, type = c.room.type;
+    const choices: { w: number; d: number; h: number; draw: () => void }[] = [];
+    if (type === 'living') {
+      choices.push({ w: 1.6, d: 0.92, h: 0.9, draw: () => { F.sofa(k, r, 1.6, this.pal.fabric, this.pal.wood, this.pal.accent); } });
+      choices.push({ w: 0.84, d: 0.86, h: 0.9, draw: () => { F.armchair(k, this.pal.fabric, this.pal.wood); } });
+    } else if (type === 'bedroom') {
+      choices.push({ w: 1.1, d: 2.24, h: 1.3, draw: () => { F.bed(k, r, 0.95, this.pal.wood, M.fabric('#f4f2ec'), this.pal.fabric, this.pal.accent[0], this.pal.wood); } });
+    } else if (type === 'kitchen' || type === 'pantry') {
+      choices.push({ w: 1.62, d: 0.66, h: 0.92, draw: () => { F.kitchenRun(k, r, { len: 1.6, cab: M.trim(), counter: this.pal.counter, splash: M.subway('#f4f2ec'), fridgeAt: 0, rangeAt: 0.3, sinkAt: 0.7, uppers: false, ceilingH: this.H }); } });
+    } else if (type === 'dining' || type === 'meeting') {
+      choices.push({ w: 1.2, d: 0.8, h: 0.76, draw: () => { F.diningTable(k, r, 1.2, 0.8, this.pal.wood); } });
+    } else {
+      choices.push({ w: 1.0, d: 0.7, h: 0.75, draw: () => { F.desk(k, r, 1.0, this.pal.wood, this.pal.metal); } });
+    }
+    for (const piece of choices) {
+      for (const sd of this.sidesByFreeLength(c, piece.w + 0.04)) {
+        const f = this.onWall(c, sd.sd, piece.w, piece.d, piece.h, 'center');
+        if (f) { this.draw(f, piece.draw); return; }
+      }
+      // Doorways and windows can consume every wall interval. Try a smaller freestanding
+      // piece in the remaining floor space, using the same collision and door-clearance rules.
+      const cx = (c.inner.minX + c.inner.maxX) / 2, cz = (c.inner.minZ + c.inner.maxZ) / 2;
+      const spots: [number, number][] = [];
+      for (let x = c.inner.minX + 0.45; x <= c.inner.maxX - 0.45; x += 0.3)
+        for (let z = c.inner.minZ + 0.45; z <= c.inner.maxZ - 0.45; z += 0.3) spots.push([x, z]);
+      spots.sort((a, b) => Math.hypot(a[0] - cx, a[1] - cz) - Math.hypot(b[0] - cx, b[1] - cz));
+      for (const [x, z] of spots) for (const rot of [0, Math.PI / 2]) {
+        const f = this.freeAt(c, piece.w, piece.d, x, z, rot);
+        if (f) {
+          this.placed.push({ x, z, rot, w: piece.w, d: piece.d, room: c.room });
+          this.draw(f, piece.draw);
+          return;
+        }
+      }
+    }
+  }
+
   private generic(c: RoomCtx) {
+    if (['living', 'bedroom', 'kitchen', 'pantry', 'study', 'office', 'reception', 'openplan', 'dining', 'meeting'].includes(c.room.type)) return this.compactRoom(c);
     const r = c.r;
     const spec = GENERIC[c.room.type] ?? GENERIC.storage;
     const { ix0, iz0, ix1, iz1 } = { ix0: c.inner.minX, iz0: c.inner.minZ, ix1: c.inner.maxX, iz1: c.inner.maxZ };

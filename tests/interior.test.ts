@@ -19,6 +19,18 @@ const tag = (d: Desc) => `${d.style}#${d.seed}/${d.floor}`;
 const H = (lv: InteriorLevel) => (lv as unknown as { H: number }).H;
 const outer = (lv: InteriorLevel): Rect => lv.rooms.reduce((a, r) => ({ minX: Math.min(a.minX, r.x0), minZ: Math.min(a.minZ, r.z0), maxX: Math.max(a.maxX, r.x1), maxZ: Math.max(a.maxZ, r.z1) }), { minX: 1e9, minZ: 1e9, maxX: -1e9, maxZ: -1e9 });
 
+test('tight living rooms keep seating instead of falling back to barrels and warehouse crates', () => {
+  const lv = new InteriorLevel(desc('apartment', 42));
+  const room = lv.rooms.find((r) => r.type === 'living');
+  expect(room, 'reproduction contains a living room');
+  expect(lv.placed.some((p) => p.room === room && p.w >= 0.82 && p.d >= 0.84), 'living room contains a seat');
+  for (const cell of lv.cells.filter((c) => c.room === room)) {
+    const warehouse = cell.group.children.filter((o) => o.position.y < 0.05 && ['storage', 'container', 'machine'].includes(o.userData.entry?.role));
+    expect(warehouse.length === 0, 'no warehouse furnishings in the living room');
+  }
+  lv.dispose();
+});
+
 test('doors are real size: 2.0-2.4 m tall, 0.8-1.2 m wide', () => {
   for (const d of CASES) {
     const lv = level(d);
