@@ -155,15 +155,20 @@ export function garmentRacks(ctx: BCtx) {
   const r = new Rng(hashN(ctx.seed, 4444));
   const chrome = mat('#b8bcc0', { rough: 0.3, metal: 0.85 });
   const cloth = ['#1f2a44', '#7a1f2a', '#2a2a2a', '#c8b89a', '#3f5a3a', '#d8d4cc', '#5a3a5a', '#a87a3a'].map((c) => mat(c, { rough: 0.95 }));
-  const fronts = ctx.hulls.filter((h) => h.side === 'N' || h.side === 'S');
+  const fronts = ctx.hulls.filter((h) => h.type !== 'tower');
   let placed = 0;
   for (const h of fronts) {
-    if (!r.chance(0.5) || placed > 8) continue;
-    const out = h.side === 'S' ? 1 : -1, line = h.side === 'S' ? h.rect.maxZ : h.rect.minZ;
+    if (!r.chance(0.5) || placed > 12) continue;
+    const alongX = h.side === 'N' || h.side === 'S';
+    const out = h.side === 'S' || h.side === 'E' ? 1 : -1;
+    const line = h.side === 'S' ? h.rect.maxZ : h.side === 'N' ? h.rect.minZ : h.side === 'E' ? h.rect.maxX : h.rect.minX;
+    const a0 = alongX ? h.rect.minX : h.rect.minZ, a1 = alongX ? h.rect.maxX : h.rect.maxZ;
     const n = r.int(1, 3);
-    let x = r.range(h.rect.minX + 1.5, Math.max(h.rect.minX + 1.6, h.rect.maxX - 1.5 - n * 1.7));
+    let x = r.range(a0 + 1.5, Math.max(a0 + 1.6, a1 - 1.5 - n * 1.7));
     for (let k = 0; k < n; k++, x += 1.7) {
-      const z = line + out * r.range(1.1, 1.6);
+      const off = line + out * r.range(1.1, 1.6);
+      const [px, pz] = alongX ? [x, off] : [off, x];
+      if (ctx.doors.some((d) => Math.hypot(d.x - px, d.z - pz) < 2.2) || ctx.portals.some((p) => p.box.distanceToPoint(new THREE.Vector3(px, 1, pz)) < 1.2)) continue; // keep doorways clear
       const g = new THREE.Group();
       // Z-rack: base with casters, two uprights, the hanging bar
       for (const s of [-1, 1]) {
@@ -179,10 +184,10 @@ export function garmentRacks(ctx: BCtx) {
         const gm = box(g, cloth[(c0 + (r.chance(0.7) ? 0 : r.int(1, 3))) % cloth.length], 0.06, len, 0.48, u, 1.72 - len, 0);
         gm.rotation.y = r.range(-0.15, 0.15);
       }
-      g.position.set(x, CURB, z);
-      g.rotation.y = r.range(-0.12, 0.12);
+      g.position.set(px, CURB, pz);
+      g.rotation.y = (alongX ? 0 : Math.PI / 2) + r.range(-0.12, 0.12);
       ctx.stat.add(g);
-      ctx.colliders.push(rect(x, z, 1.6, 0.7));
+      ctx.colliders.push(alongX ? rect(px, pz, 1.6, 0.7) : rect(px, pz, 0.7, 1.6));
       placed++;
     }
   }
