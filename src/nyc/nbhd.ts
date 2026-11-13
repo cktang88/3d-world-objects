@@ -193,6 +193,31 @@ export function garmentRacks(ctx: BCtx) {
   }
 }
 
+/**
+ * Music Row (W 48 St): vertical blade signs of the instrument shops hung off the facades near the avenue
+ * corners, readable down the street and from the avenue (GUITARS, DRUMS, PIANOS, AMPS…), letters lit at dusk.
+ */
+export function musicBlades(ctx: BCtx) {
+  const r = new Rng(hashN(ctx.seed, 4545));
+  const words = ['GUITARS', 'DRUMS', 'PIANOS', 'AMPS', 'MUSIC', 'BASS', 'VIOLINS', 'SAX', 'REPAIRS'];
+  const panelM = [mat('#1b1d22', { rough: 0.5, metal: 0.3 }), mat('#7a1418', { rough: 0.5 }), mat('#14304f', { rough: 0.5 })];
+  for (const h of ctx.hulls) {
+    if ((h.side !== 'N' && h.side !== 'S') || !r.chance(0.55)) continue;
+    const out = h.side === 'S' ? 1 : -1, line = h.side === 'S' ? h.rect.maxZ : h.rect.minZ;
+    const word = r.pick(words), H = Math.max(2.4, word.length * 0.5 + 0.4), y0 = 4.6;
+    const x = r.chance(0.5) ? h.rect.minX + 0.6 : h.rect.maxX - 0.6, z = line + out * 0.75;
+    box(ctx.stat, r.pick(panelM), 0.12, H, 1.0, x, y0, z);
+    // brackets to the wall
+    for (const yy of [y0 + 0.2, y0 + H - 0.3]) box(ctx.stat, mat('#2a2a2a', { metal: 0.6, rough: 0.5 }), 0.05, 0.05, 0.3, x, yy, line + out * 0.15);
+    // the letters, one under another, on both faces
+    for (const s of [-1, 1]) {
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(x + s * 0.065, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s * Math.PI / 2), new THREE.Vector3(1, 1, 1));
+      const col = r.pick(['#ffd34a', '#ff5a3c', '#7fe0ff', '#ffffff']);
+      [...word].forEach((ch, i) => ctx.text.add(m, ch, 0, y0 + H - 0.55 - i * 0.5, 0, 0.42, 0.8, col, 1, 'neon'));
+    }
+  }
+}
+
 /** the extras for one built block */
 export function neighbourhoodExtras(ctx: BCtx, d: District) {
   if (d.kind === 'industrial') {
@@ -200,6 +225,7 @@ export function neighbourhoodExtras(ctx: BCtx, d: District) {
     if (ctx.cz >= 0) meatCanopies(ctx);
   }
   if (d.kind === 'garment') garmentRacks(ctx);
+  if (d.kind === 'music') musicBlades(ctx);
 }
 void LX; void LZ; void SW;
 export type { Rect };
