@@ -391,6 +391,14 @@ export class Seamless {
     this.evict();
   }
 
+  /** drop one cached level now (not the active one): windowview.ts lets the street go once captured */
+  forget(desc: LevelDesc) {
+    const s = this.slots.get(descKey(desc));
+    if (!s || s === this.active) return false;
+    this.drop(s);
+    return true;
+  }
+
   /** forget everything (a new game mode) */
   clear(except?: Level) {
     this.settled = false;

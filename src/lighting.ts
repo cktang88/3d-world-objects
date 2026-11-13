@@ -1016,19 +1016,72 @@ export class Lighting {
   private outdoor: {
     env: THREE.Texture | null; envI: number; dome: boolean; sky: boolean; fog: THREE.Color; fogD: number;
     sun: THREE.Color; sunI: number; sunDir: THREE.Vector3; exposure: number; night: number; lit: number; wet: number; key: string;
+    /** the time of day / weather it shows (wantKey) */
+    want: string;
+    grade: { gain: THREE.Vector3; lift: THREE.Vector3; sat: number; contrast: number };
   } | null = null;
+  private wantKey() {
+    // coarse on purpose: the weather drifts every few seconds; a window view changes on a real change
+    const q = (v: number | undefined) => Math.round((Number(v) || 0) * 4);
+    return `${tod}|${q(weather.overcast)}|${q(weather.wet)}`;
+  }
   private snapOutdoor() {
     const f = this.fog(), l = this.csm?.lights[0];
     this.outdoor = {
       env: this.scene.environment, envI: this.scene.environmentIntensity, dome: this.dome.visible, sky: this.sky.visible,
       fog: f.color.clone(), fogD: f.density, sun: l ? l.color.clone() : new THREE.Color(), sunI: l?.intensity ?? 0, sunDir: this.sunDir.clone(),
       exposure: this.renderer.toneMappingExposure, night: U.night.value, lit: U.lit.value, wet: U.wet.value,
-      key: `${this.envKey}|${U.night.value.toFixed(2)}|${U.wet.value.toFixed(2)}`,
+      key: `${this.envKey}|${U.night.value.toFixed(2)}|${U.wet.value.toFixed(2)}|${this.wantKey()}`,
+      want: this.wantKey(),
+      grade: (() => {
+        const u = this.grade.uniforms;
+        return { gain: u.uGain.value.clone(), lift: u.uLift.value.clone(), sat: u.uSat.value, contrast: u.uContrast.value };
+      })(),
     };
   }
   /** identifies the outdoor light a window view was captured in (time of day, weather); null before any outdoors */
   get outdoorKey() {
     return this.outdoor?.key ?? null;
+  }
+  /** the street's colour grade (a window view applies it: the screen's is the room's) */
+  get outdoorGrade() {
+    return this.outdoor?.grade ?? null;
+  }
+  /** the time of day or weather changed since the outdoor light was taken (you are indoors) */
+  get outdoorStale() {
+    return this.place !== 'outdoor' && !!this.outdoor && this.outdoor.want !== this.wantKey();
+  }
+  private refreshing: Promise<boolean> | null = null;
+  /**
+   * Work out the outdoor light for the current time of day / weather while indoors (the street
+   * level is not shown, so nothing retargets it): load the preset's sky (cached), apply it, take
+   * the snapshot, and put the room's light back. Resolves true when the snapshot is fresh.
+   */
+  refreshOutdoor() {
+    if (this.place === 'outdoor' || !this.env) return Promise.resolve(false);
+    return (this.refreshing ??= (async () => {
+      try {
+        const p = PRESETS[tod];
+        const src = await this.source(p);
+        if (weather.overcast > 0 && !this.srcC && !NO_HDRI) this.srcC = await this.source(OVERCAST);
+        if (this.place === 'outdoor' || !this.env) return false;
+        const env = this.env, place = this.place;
+        this.from = this.to = p;
+        this.srcA = null;
+        this.srcB = src;
+        this.sunTo.copy(src ? src.sun : dirOf(p.sunAz, p.sunElev));
+        this.sunFrom.copy(this.sunTo);
+        this.t = 1;
+        this.dur = 0;
+        this.place = 'outdoor';
+        if (!src) this.physicalSky(this.sunTo);
+        this.applyCurrent();
+        this.apply(env, place); // snapshots the outdoor light on the way back in
+        return true;
+      } finally {
+        this.refreshing = null;
+      }
+    })());
   }
   /** the outdoor exposure (a capture is linear: scale it by outdoor / indoor exposure) */
   get outdoorExposure() {
@@ -1039,7 +1092,7 @@ export class Lighting {
    * light, sun, fog, night windows. Light counts stay as they are (no shader recompiles); restored
    * afterwards. Returns false if there is no outdoor light to use yet.
    */
-  asOutdoor(fn: () => void) {
+  asOutdoor(fn: () => void, fogMul = 1) {
     const o = this.outdoor;
     if (!o) return false;
     const sc = this.scene, f = this.fog();
@@ -1054,7 +1107,7 @@ export class Lighting {
     this.dome.visible = o.dome;
     this.sky.visible = o.sky;
     f.color.copy(o.fog);
-    f.density = o.fogD;
+    f.density = o.fogD * fogMul;
     U.night.value = o.night;
     U.lit.value = o.lit;
     U.wet.value = o.wet;

@@ -59,7 +59,7 @@ test('the window view is captured where the window is in the city, at its floor 
   void floor;
 });
 
-test('the window cubemap renders one face a frame, is reused, and is freed when you leave the building', () => {
+test('the window cubemap: one face a frame, reused, recaptured when the time changes, freed when you leave', () => {
   const { floor, apt, wApt, w3 } = chain();
   const win = windowCentre(windowMeshes(apt.group))!.applyMatrix4(wApt);
   const hulls: Hullish[] = [{ rect: { minX: win.x - 7, maxX: win.x + 3, minZ: win.z - 12, maxZ: win.z + 8 }, top: 20 }];
@@ -72,33 +72,44 @@ test('the window cubemap renders one face a frame, is reused, and is freed when 
   const cityGroup = new THREE.Group();
   const lamp = new THREE.PointLight();
   cityGroup.add(lamp);
-  let outdoor = 0;
-  const views = new WindowViews({ renderer, scene, asOutdoor: (fn) => (outdoor++, fn(), true), outdoorKey: () => 'day', gain: () => 1.2 });
-  const city = { group: cityGroup, hulls };
-  views.setLevel(apt, wApt, city);
-  expect(views.cache.map.size === 1, 'one capture started');
-  const rt = [...views.cache.map.values()][0].rt;
-  let disposed = 0;
-  const d0 = rt.dispose.bind(rt);
-  rt.dispose = () => (disposed++, d0());
-  for (let i = 0; i < 6; i++) views.update();
+  let streamed = 0;
+  const city = { group: cityGroup, hulls, level: { update: () => void streamed++ } };
+  let outdoor = 0, fog = 0, released = 0, asked = 0, refreshed = 0;
+  let tod = 'day', stale = false;
+  const views = new WindowViews({
+    renderer, scene, asOutdoor: (fn, f) => (outdoor++, (fog = f), fn(), true), outdoorKey: () => tod, gain: () => 1.2,
+    stale: () => stale, refresh: () => (refreshed++, (stale = false), (tod = 'dusk'), Promise.resolve(true)),
+    release: () => void released++, needCity: () => void asked++,
+  });
+  views.setLevel(apt, wApt);
+  for (let i = 0; i < 6; i++) views.update(city);
   expect(renders === 6 && outdoor === 6, `one face a frame with the outdoor light (renders ${renders})`);
+  between(fog, 0.2, 0.5, 'capture fog (x the street fog)');
   expect(!cityGroup.parent && lamp.visible && apt.group.position.y === 0, 'the city and the room are put back after each face');
-  const left = windowMeshes(apt.group).length; // painted backdrops left
   let real = 0;
   apt.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && ((o as THREE.Mesh).material as THREE.Material).userData?.realView) real++; });
-  expect(real > 0 && !left, 'the window planes show the capture');
-  views.update();
-  expect(renders === 6, 'nothing more per frame once captured');
-  // out to the hall and back in: reused, not re-rendered
-  views.setLevel(floor as Level, w3, city);
+  expect(real > 0 && !windowMeshes(apt.group).length, 'the window planes show the capture');
+  expect(released === 1, 'the street level may go once captured');
+  views.update(null);
+  expect(renders === 6 && asked === 0, 'nothing more per frame once captured, and no city needed');
+  // out to the hall and back in, the city gone: the capture is reused
+  views.setLevel(floor as Level, w3);
+  views.update(null);
   const apt2 = chain().apt;
-  views.setLevel(apt2, wApt, city);
-  for (let i = 0; i < 6; i++) views.update();
-  expect(views.stats.hits === 1 && renders === 6, `same building, floor and light: cached (hits ${views.stats.hits}, renders ${renders})`);
+  views.setLevel(apt2, wApt);
+  views.update(null);
+  expect(views.stats.hits === 1 && renders === 6 && asked === 0, `same building, floor and light: cached (hits ${views.stats.hits}, renders ${renders})`);
+  // the time of day changes indoors: the outdoor light is recomputed, the city rebuilt and streamed at the building, then recaptured
+  stale = true;
+  views.update(null);
+  expect(refreshed === 1, 'outdoor light recomputed');
+  views.update(null);
+  expect(asked === 1, 'the city is asked for (rebuilt lazily)');
+  for (let i = 0; i < 60; i++) views.update(city);
+  expect(streamed === 30 && renders === 12 && released === 2, `streamed ${streamed} frames, then 6 more faces (renders ${renders}), released again`);
   // back on the street: freed
-  views.setLevel({ group: cityGroup } as unknown as Level, new THREE.Matrix4(), city);
-  expect(views.cache.map.size === 0 && disposed === 1, `freed on leaving the building (disposed ${disposed})`);
+  views.setLevel({ group: cityGroup } as unknown as Level, new THREE.Matrix4(), true);
+  expect(views.cache.map.size === 0 && views.stats.freed === 2, `freed on leaving the building (${views.stats.freed})`);
 });
 
 test('the window view cache keeps a few captures and disposes the oldest', () => {

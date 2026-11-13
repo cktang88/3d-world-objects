@@ -159,7 +159,26 @@ sun.shadow.normalBias = 0.04;
 scene.add(hemi, ambient, sun, sun.target);
 const lighting = new Lighting(renderer, scene, camera, pmrem, sun, hemi, ambient, roomEnv);
 // ?wv=0: the painted window backdrops (before / after comparisons)
-const views = new WindowViews({ enabled: params0.get('wv') !== '0',  renderer, scene, asOutdoor: (fn) => lighting.asOutdoor(fn), outdoorKey: () => lighting.outdoorKey, gain: () => lighting.outdoorExposure / Math.max(0.05, renderer.toneMappingExposure) });
+const views = new WindowViews({
+  enabled: params0.get('wv') !== '0', renderer, scene,
+  asOutdoor: (fn, fog) => lighting.asOutdoor(fn, fog), outdoorKey: () => lighting.outdoorKey, grade: () => lighting.outdoorGrade,
+  gain: () => lighting.outdoorExposure / Math.max(0.05, renderer.toneMappingExposure),
+  stale: () => lighting.outdoorStale, refresh: () => lighting.refreshOutdoor(),
+  // memory: once captured, the street level goes (rebuilt when you walk out, or for a recapture
+  // when the time of day / weather changes); not from a room right off the street (brownstones)
+  release: () => {
+    const c = cityDescIn();
+    if (c && stack.length >= 3 && params0.get('wvkeep') !== '1') seam.forget(c);
+  },
+  needCity: () => {
+    const c = cityDescIn();
+    if (c) seam.take(c);
+  },
+});
+/** the city level this building stands in (the bottom of the stack), if any */
+function cityDescIn() {
+  return stack[0]?.desc.kind === 'nyc' ? stack[0].desc : null;
+}
 lighting.bloom = bloom;
 composer.addPass(lighting.grade);
 if (params0.get('tod') && (TIMES as string[]).includes(params0.get('tod')!)) lighting.setTime(params0.get('tod') as TimeOfDay);
@@ -831,11 +850,11 @@ function frame() {
     // ---- end vertical hook
     // ---- windowview.ts: the real city in the windows of the room you are in
     {
-      const cityDesc = stack[0]?.desc.kind === 'nyc' ? stack[0].desc : currentDesc.kind === 'nyc' ? currentDesc : null;
-      const city = cityDesc ? seam.slots.get(descKey(cityDesc))?.level : undefined;
+      const cityDesc = cityDescIn();
+      const city = cityDesc && seam.ready(cityDesc) ? seam.slots.get(descKey(cityDesc))?.level : undefined;
       const hulls = city && 'hulls' in city ? [...(city as unknown as { hulls(): Map<string, Hullish[]> }).hulls().values()].flat() : null;
-      views.setLevel(level, toWorld, city && hulls ? { group: city.group, hulls } : null);
-      views.update();
+      views.setLevel(level, toWorld, currentDesc.kind === 'nyc');
+      views.update(city && hulls ? { group: city.group, hulls, level: city } : null);
     }
     const auto = active ? autoPortal() : null;
     if (auto) enter(auto);

@@ -19,13 +19,31 @@
   await W.enter(ap[0]);
   for (let i = 0; i < 300 && W.transitioning; i++) await sl(100);
   const wv = !/[?&]wv=0/.test(location.search);
+  const mem = () => {
+    if (window.gc) window.gc();
+    const m = window.__mem();
+    const city = [...W.seam.slots.values()].some((x) => x.desc.kind === 'nyc') ? 'city alive' : 'city dropped';
+    return `${city}: geometries ${m.gpu.geometries}, textures ${m.gpu.textures}, programs ${m.gpu.programs}, heap ${m.heapMB} MB`;
+  };
+  let memAlive = '';
+  for (let i = 0; i < 600 && wv && W.views.stats.faces < 5; i++) await sl(50);
+  if (wv) memAlive = mem();
   for (let i = 0; i < 600 && wv && !W.views.stats.applied; i++) await sl(100);
+  await sl(500);
+  const mem1 = mem();
+  const tod = (/[?&]wvtod=(\w+)/.exec(location.search) || [])[1];
+  let mem2 = '';
+  if (tod && wv) {
+    W.lighting.setTime(tod, true);
+    for (let i = 0; i < 4000 && W.views.stats.applied < 2; i++) await sl(100);
+    mem2 = ` | after ${tod} recapture: ${mem()} (rebuilds ${W.views.stats.rebuilds}, refreshes ${W.views.stats.refreshes})`;
+  }
   let mesh = null;
   W.level.group.traverse((o) => {
     const m = o.material;
     if (!mesh && o.isMesh && m && (m.userData.realView || (m.userData.windowView && m.emissiveMap))) mesh = o;
   });
-  if (!mesh) return 'no window in ' + W.level.name;
+  if (!mesh) { const mats = new Set(); W.level.group.traverse((o) => o.isMesh && o.material && mats.add((o.material.name || o.material.type) + (o.material.userData.windowView ? '*' : ''))); return 'no window in ' + W.level.name + ' stats ' + JSON.stringify(W.views.stats) + ' mats ' + [...mats].slice(0, 30).join(','); }
   mesh.updateWorldMatrix(true, false);
   const pos = mesh.geometry.attributes.position;
   const v = [0, 1, 2].map((i) => new V().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld));
@@ -38,5 +56,5 @@
   await sl(1500);
   const s = W.views.stats;
   const tw = W.toWorld ? new V().setFromMatrixPosition(W.toWorld) : null;
-  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'}`;
+  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
 })();

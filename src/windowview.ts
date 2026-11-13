@@ -161,8 +161,8 @@ void main() {
 const FRAG = /* glsl */ `
 uniform samplerCube uCube;
 uniform mat4 uWorld;
-uniform vec3 uCap, uBoxMin, uBoxMax;
-uniform float uGain;
+uniform vec3 uCap, uBoxMin, uBoxMax, uGradeGain, uGradeLift;
+uniform float uGain, uSat, uContrast;
 varying vec3 vPos;
 void main() {
   // the view ray, in the city's frame
@@ -177,11 +177,24 @@ void main() {
   vec3 dir = o2 + d * t - uCap;
   gl_FragColor = vec4(textureCube(uCube, dir).rgb * uGain, 1.0);
   #include <tonemapping_fragment>
+  // the street's colour grade (gain / lift, saturation, contrast), as the screen shows it outdoors
+  vec3 col = clamp(gl_FragColor.rgb, 0.0, 1.0);
+  col = col * uGradeGain + uGradeLift * (1.0 - col);
+  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(vec3(l), col, uSat);
+  gl_FragColor.rgb = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0);
   #include <colorspace_fragment>
 }`;
 
+export interface Grade {
+  gain: THREE.Vector3;
+  lift: THREE.Vector3;
+  sat: number;
+  contrast: number;
+}
+
 /** the window-plane material for one capture (one per level; the level's dispose frees it) */
-export function viewMaterial(e: ViewEntry, world: THREE.Matrix4, gain: number) {
+export function viewMaterial(e: ViewEntry, world: THREE.Matrix4, gain: number, grade: Grade | null) {
   const m = new THREE.ShaderMaterial({
     uniforms: {
       uCube: { value: e.rt.texture },
@@ -190,6 +203,10 @@ export function viewMaterial(e: ViewEntry, world: THREE.Matrix4, gain: number) {
       uBoxMin: { value: e.spot.boxMin.clone() },
       uBoxMax: { value: e.spot.boxMax.clone() },
       uGain: { value: gain },
+      uGradeGain: { value: grade?.gain.clone() ?? new THREE.Vector3(1, 1, 1) },
+      uGradeLift: { value: grade?.lift.clone() ?? new THREE.Vector3() },
+      uSat: { value: grade?.sat ?? 1 },
+      uContrast: { value: grade?.contrast ?? 1 },
     },
     vertexShader: VERT,
     fragmentShader: FRAG,
@@ -205,71 +222,147 @@ export interface WindowViewOpts {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   /** run renders with the outdoor light (lighting.asOutdoor); false: no outdoor light yet */
-  asOutdoor: (fn: () => void) => boolean;
+  asOutdoor: (fn: () => void, fogMul: number) => boolean;
   outdoorKey: () => string | null;
   /** outdoor exposure / the current (indoor) exposure */
   gain: () => number;
+  /** the street's colour grade */
+  grade?: () => Grade | null;
+  /** the time of day / weather changed while indoors, and the outdoor light to recompute it */
+  stale?: () => boolean;
+  refresh?: () => Promise<boolean>;
+  /** a capture needs the city level and it is gone: build it (it arrives in a later update) */
+  needCity?: () => void;
+  /** a capture is done: the city level may go (memory) */
+  release?: () => void;
   size?: number;
   /** false: keep the painted backdrops */
   enabled?: boolean;
 }
-interface City {
+export interface City {
   group: THREE.Object3D;
   hulls: Hullish[];
+  /** streamed at the building after a rebuild (Level.update) */
+  level?: Pick<Level, 'update'>;
 }
+/** fog for the near range of a capture: the street across reads crisp; far towers still fade */
+export const CAPTURE_FOG = 0.35;
+/** frames the city streams at the building after it was rebuilt for a recapture */
+const WARM = 30;
+/** at most one outdoor-light refresh (and recapture) this often */
+const REFRESH_MS = 20000;
 
 export class WindowViews {
   cache = new ViewCache(3);
-  stats = { captures: 0, faces: 0, hits: 0, applied: 0, freed: 0, maxFaceMs: 0, lastSpot: null as THREE.Vector3 | null, lastWindow: null as THREE.Vector3 | null };
+  stats = { captures: 0, faces: 0, hits: 0, applied: 0, freed: 0, maxFaceMs: 0, refreshes: 0, rebuilds: 0, releases: 0, lastSpot: null as THREE.Vector3 | null, lastWindow: null as THREE.Vector3 | null };
   private level: Level | null = null;
   private world: THREE.Matrix4 | null = null;
-  private city: City | null = null;
+  private meshes: THREE.Mesh[] = [];
+  private local: THREE.Vector3 | null = null;
+  private hulls: Hullish[] | null = null;
+  private applied: string | null = null;
   private pending: ViewEntry | null = null;
+  private warm = 0;
+  private asked = false;
+  private refreshing = false;
+  private lastRefresh = -1e9;
   private cam: THREE.CubeCamera | null = null;
   constructor(private o: WindowViewOpts) {}
 
-  /** the active level and its place in the city (null: not in the city's frame, e.g. a museum) */
-  setLevel(level: Level, world: THREE.Matrix4 | null, city: City | null) {
+  /** the active level and its place in the city (null: not in the city's frame); street: on the city level itself */
+  setLevel(level: Level, world: THREE.Matrix4 | null, street = false) {
     if (level === this.level || this.o.enabled === false) return;
     this.level = level;
     this.world = world;
-    this.city = city;
     this.pending = null;
-    // on the street (or anywhere not in a building): the building's captures go
-    if (!world || !city || level.group === city.group) {
+    this.applied = null;
+    this.asked = false;
+    this.meshes = [];
+    this.local = null;
+    // on the street (or anywhere not in the city): the building's captures go
+    if (!world || street) {
       if (this.cache.map.size) this.stats.freed += this.cache.map.size;
       this.cache.clear();
+      if (street) this.hulls = null;
       return;
     }
-    const meshes = windowMeshes(level.group);
-    const c = windowCentre(meshes);
+    this.meshes = windowMeshes(level.group);
+    this.local = windowCentre(this.meshes);
+  }
+
+  /** the capture this room wants now (null: no windows, or nothing known yet) */
+  private memo: { okey: string; hulls: Hullish[]; level: Level; w: { key: string; spot: Spot; win: THREE.Vector3 } } | null = null;
+  private want() {
     const okey = this.o.outdoorKey();
-    if (!c || !okey) return;
-    const win = c.applyMatrix4(world);
-    const spot = captureSpot(win, city.hulls);
-    this.stats.lastWindow = win.clone();
-    this.stats.lastSpot = spot.pos.clone();
+    if (!this.local || !this.world || !okey || !this.hulls) return null;
+    const m = this.memo;
+    if (m && m.okey === okey && m.hulls === this.hulls && m.level === this.level) return m.w;
+    const w = this.want0(okey);
+    this.memo = { okey, hulls: this.hulls, level: this.level!, w };
+    return w;
+  }
+  private want0(okey: string) {
+    const win = this.local!.clone().applyMatrix4(this.world!);
+    const spot = captureSpot(win, this.hulls!);
     const r = spot.hull?.rect;
     const key = `${r ? `${r.minX.toFixed(1)},${r.minZ.toFixed(1)}` : `${win.x.toFixed(0)},${win.z.toFixed(0)}`}|${win.y.toFixed(1)}|${okey}`;
-    const hit = this.cache.get(key);
+    return { key, spot, win };
+  }
+  /** once a frame (city: the live city level, or null when it is not built) */
+  update(city: City | null = null) {
+    if (!this.level || !this.world || !this.local || this.o.enabled === false) return;
+    if (city) this.hulls = city.hulls;
+    // time of day / weather changed while indoors: recompute the outdoor light first
+    if (this.o.stale?.()) {
+      if (!this.refreshing && this.o.refresh && performance.now() - this.lastRefresh > REFRESH_MS) {
+        this.lastRefresh = performance.now();
+        this.refreshing = true;
+        this.stats.refreshes++;
+        this.o.refresh().finally(() => (this.refreshing = false));
+      }
+      return;
+    }
+    if (!this.hulls && !city) return this.ask();
+    const w = this.want();
+    if (!w || w.key === this.applied) return;
+    const hit = this.cache.get(w.key);
     if (hit && hit.faces === 6) {
       this.stats.hits++;
       this.apply(hit);
       return;
     }
-    const size = this.o.size ?? 256;
-    const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
-    const e: ViewEntry = { key, rt, spot, faces: 0 };
-    this.cache.add(e);
-    this.pending = e;
-    this.stats.captures++;
+    if (!this.pending || this.pending.key !== w.key || !this.cache.map.has(w.key)) {
+      if (this.pending && this.cache.map.has(this.pending.key) && this.pending.faces < 6) {
+        this.cache.map.get(this.pending.key)!.rt.dispose();
+        this.cache.map.delete(this.pending.key);
+      }
+      const size = this.o.size ?? 256;
+      const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+      this.pending = { key: w.key, rt, spot: w.spot, faces: 0 };
+      this.cache.add(this.pending);
+      this.stats.captures++;
+      this.stats.lastWindow = w.win.clone();
+      this.stats.lastSpot = w.spot.pos.clone();
+    }
+    if (!city) return this.ask();
+    if (this.warm > 0) {
+      // a rebuilt city streams the blocks around the building before it is captured
+      this.warm--;
+      city.level?.update(1 / 30, _p.copy(this.pending.spot.pos).setY(0), performance.now() / 1000);
+      return;
+    }
+    this.face(this.pending, city, this.level);
   }
 
-  /** once a frame: render one face of a pending capture; the last one puts it on the windows */
-  update() {
-    const e = this.pending, city = this.city, level = this.level;
-    if (!e || !city || !level) return;
-    if (!this.cache.map.has(e.key)) return void (this.pending = null);
+  private ask() {
+    if (this.asked || !this.o.needCity) return;
+    this.asked = true;
+    this.warm = WARM;
+    this.stats.rebuilds++;
+    this.o.needCity();
+  }
+
+  private face(e: ViewEntry, city: City, level: Level) {
     const rt = e.rt as THREE.WebGLCubeRenderTarget;
     if (!this.cam) this.cam = new THREE.CubeCamera(0.1, 900, rt);
     const cam = this.cam;
@@ -312,21 +405,29 @@ export class WindowViews {
         for (const l of lights) l.visible = true;
         if (added) sc.remove(city.group);
       }
-    });
-    if (!ok) return void (this.pending = null);
+    }, CAPTURE_FOG);
+    if (!ok) return;
     e.faces++;
     this.stats.maxFaceMs = Math.max(this.stats.maxFaceMs, performance.now() - t0);
     this.stats.faces++;
     if (e.faces === 6) {
       this.pending = null;
       this.apply(e);
+      this.asked = false;
+      this.stats.releases++;
+      this.o.release?.();
     }
   }
 
   private apply(e: ViewEntry) {
     if (!this.level || !this.world) return;
-    const m = viewMaterial(e, this.world, this.o.gain());
-    for (const mesh of windowMeshes(this.level.group)) mesh.material = m;
+    const m = viewMaterial(e, this.world, this.o.gain(), this.o.grade?.() ?? null);
+    for (const mesh of this.meshes) {
+      const old = mesh.material as THREE.Material;
+      if (old.userData.realView) old.dispose(); // an earlier capture of this room (time of day changed)
+      mesh.material = m;
+    }
+    this.applied = e.key;
     this.stats.applied++;
   }
 
@@ -335,3 +436,4 @@ export class WindowViews {
     this.pending = null;
   }
 }
+const _p = new THREE.Vector3();
