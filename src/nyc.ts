@@ -25,6 +25,7 @@ import { BIOMES } from './biomes';
 import { districtAt, SPAWN, spawnView } from './nyc/districts';
 import { nycMinimapSource } from './nyc/minimap-nyc'; // [minimap]
 import { registerMinimapSource } from './minimap';
+import { brownRun, BROWN_FLOORS, type BrownRun } from './nyc/brownstone'; // [nbhd] brownstone rows
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
 
 // ---------------------------------------------------------------- static geometry baking
@@ -262,7 +263,7 @@ export class NycLevel implements Level {
         cuts.push(LZ);
         for (let i = 0; i < n; i++) {
           const type = aveType(D, rng); // [districts]
-          const floors = floorsFor(D, type === 'prewar' ? rng.int(9, 18) : type === 'midrise' ? rng.int(6, 12) : type === 'brownstone' ? rng.int(3, 5) : rng.int(5, 6));
+          const floors = floorsFor(D, type === 'prewar' ? rng.int(9, 18) : type === 'midrise' ? rng.int(6, 12) : type === 'brownstone' ? rng.int(...BROWN_FLOORS) : rng.int(5, 6)); // [nbhd]
           building(ctx, { minX: x0, maxX: x1, minZ: cuts[i], maxZ: cuts[i + 1] }, side, type, floors, true, [i === 0, i === n - 1], districtStyle(D, rng, cx, cz)); yield; // [vis]
         }
       }
@@ -272,15 +273,19 @@ export class NycLevel implements Level {
       if (!plan.rows[row < 0 ? 0 : 1]) continue; // [districts]
       const side: Side = row < 0 ? 'N' : 'S';
       let x = -LX + 20;
+      let run: BrownRun | null = null; // [nbhd] a developer's run of identical brownstones
       while (x < LX - 20 - 3) {
         const type = rowType(D, rng); // [districts]
-        let w = type === 'brownstone' ? rng.range(5.5, 7) : type === 'castiron' ? rng.range(9, 14) : rng.range(7, 10);
+        run = type === 'brownstone' ? brownRun(rng, run) : null; // [nbhd]
+        let w = run ? run.w : type === 'castiron' ? rng.range(9, 14) : rng.range(7, 10);
         if (x + w > LX - 20 - 3) w = LX - 20 - x;
         const depth = rng.range(14, 19);
         const r: Rect = row < 0 ? { minX: x, maxX: x + w, minZ: -LZ, maxZ: -LZ + depth } : { minX: x, maxX: x + w, minZ: LZ - depth, maxZ: LZ };
-        const floors = floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));
+        const floors = run ? run.floors : floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));
         const store = type !== 'brownstone' && rng.chance(Math.min(1, (type === 'tenement' ? 0.6 : 0.75) * D.stores));
-        building(ctx, r, side, type, floors, store, [false, false], districtStyle(D, rng, cx, cz)); yield; // [vis]
+        const bstyle = districtStyle(D, rng, cx, cz);
+        if (run) Object.assign(bstyle, { wall: run.wall, parlor: run.parlor, cornicePaint: run.cornicePaint }); // [nbhd]
+        building(ctx, r, side, type, floors, store, [false, false], bstyle); yield; // [vis]
         x += w;
       }
     }

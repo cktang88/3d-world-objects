@@ -44,6 +44,7 @@ const AREAS = {
   shop: ['shop', 'shopaudit'], shops: ['shop', 'shopaudit'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
   zfight: ['zfight'], flicker: ['zfight'], offices: ['offices'], office: ['offices'], memory: ['memory', 'memory-city', 'memory-rooms'], mem: ['memory', 'memory-city', 'memory-rooms'], leaks: ['memory', 'memory-city', 'memory-rooms'],
+  nbhd: ['neighborhoods'], neighborhoods: ['neighborhoods'], waterfront: ['neighborhoods'],
   meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],
   museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
@@ -60,6 +61,7 @@ const SRC_MAP = [
   [/^src\/zfix\.ts$/, ['zfight']],
   [/^src\/(meshlod|meshlod-core)\.ts$|^src\/vendor\/meshopt|^scripts\/(build_vehicles\.mjs|lib\/simplify-doc\.mjs)$|^public\/assets\/vehicles\//, ['meshlod', 'vehicles']],
   [/^src\/(minimap|nyc\/minimap-nyc)\.ts$/, ['minimap']],
+  [/^src\/nyc\/(brownstone|waterfront)\.ts$/, ['neighborhoods', 'nyc']],
   [/^src\/nyc\/district/, ['districts']],
   [/^src\/nyc\/common\.ts$/, ['nyc', 'people', 'vehicles', 'districts']],
   [/^src\/nyc\/buildings-shop\.ts$/, ['nyc', 'buildings', 'shop']],

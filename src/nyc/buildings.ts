@@ -11,6 +11,7 @@ import { ShopGlass, TextBatch, storefront } from './buildings-shop';
 import { SW } from './common';
 import { buildingDesc } from '../rooms/vertical';
 import { districtAt } from './districts';
+import { brownstoneMat, brownTint, BROWN_WALLS, stoopDressing, doorHood, areawayGarden } from './brownstone'; // [nbhd]
 
 export { setNight } from './buildings-win';
 export { SHOPS } from './buildings-shop';
@@ -195,7 +196,7 @@ function facadeMat(style: FacadeStyle, seed: number) {
   return m;
 }
 const stoneMat = () => surface('nyc_limestone', TILE, { vertexColors: true, roughness: 1, normalScale: 1.2, envMapIntensity: 0.4 });
-const brownMat = () => surface('nyc_castiron', TILE, { vertexColors: true, roughness: 1, normalScale: 1.4, envMapIntensity: 0.4 });
+const brownMat = () => brownstoneMat(); // [nbhd] smooth brownstone ashlar (was painted plaster, read as brick)
 
 function shade(hex: string, f: number) {
   return `#${new THREE.Color(hex).multiplyScalar(f).getHexString()}`;
@@ -771,8 +772,8 @@ function doorway(F: Face, uc: number, y: number, w: number, h: number, frameColo
     const sm = brownMat();
     for (const s of [-1, 1]) {
       PB(F.g, sm, 0.26, h, 0.12, uc + s * (w / 2 + 0.13), y, 0.06, tint);
-      PB(F.f, sm, 0.2, 0.55, 0.3, uc + s * (w / 2 + 0.16), y + h - 0.2, 0.15, tint, false);
     }
+    doorHood(F, uc, y, w, h, tint ?? '#7a5040', F.ctx.rng); // [nbhd] tall scrolled consoles + pediment
     PB(F.g, sm, w + 0.8, 0.3, 0.16, uc, y + h, 0.08, tint);
     PB(F.g, sm, w + 1.0, 0.12, 0.38, uc, y + h + 0.3, 0.19, tint);
   } else if (surround === 'stone') {
@@ -814,6 +815,8 @@ const CORNICE_PAINT = ['#d8d2c4', '#8a8a84', '#3a3a38', '#b8ad94', '#5a6a5c', '#
 export interface BuildingStyle {
   /** facade colour (brick/stone/paint), tinting the photo texture */
   wall?: string;
+  /** [nbhd] brownstone parlour-floor height over the pavement (a row shares it, so its cornice line is continuous) */
+  parlor?: number;
   /** facade material family */
   material?: 'brick' | 'brownstone' | 'limestone' | 'castiron' | 'panel' | 'glass';
   /** window lintels/sills */
@@ -855,7 +858,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
   const style: FacadeStyle = opts.material ? matStyle[opts.material] : ({ brownstone: 'brownstone', tenement: 'brick', prewar: 'prewar', midrise: rng.pick(['brick', 'brick', 'panel'] as const), tower: rng.pick(['glass', 'glass', 'panel'] as const), castiron: 'castiron' }[type] as FacadeStyle);
   ctx.style = opts;
   let wall = {
-    brownstone: rng.pick(['#6e4632', '#7a5038', '#5e3c2c', '#83604a']),
+    brownstone: rng.pick(BROWN_WALLS), // [nbhd]
     tenement: rng.pick(['#8c3b2a', '#9a5a3c', '#a3683f', '#7a3a2e', '#b58a5a', '#6b4a3a', '#c9b08a']),
     prewar: rng.pick(['#b89d78', '#a8896a', '#9a5a3c', '#c9a982', '#8c4a34']),
     midrise: rng.pick(['#9a8c7c', '#b8b0a2', '#7d6b5a', '#a35a3c']),
@@ -864,10 +867,10 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
   }[type];
   if (opts.wall) wall = opts.wall;
   const fseed = rng.int(0, 2);
-  const fm = facadeMat(style, fseed);
+  const fm = type === 'brownstone' ? brownMat() : facadeMat(style, fseed); // [nbhd] brownstone fronts: ashlar
   const pk = FACADE_PBR[style];
   // [districts] brick/pre-war: tint by the photo's mean colour (brickTint) so the wall palette reads
-  const tint = pk ? (type !== 'castiron' && type !== 'brownstone' && (style === 'brick' || style === 'prewar') ? brickTint(wall, pk[fseed % pk.length]) : softTint(wall, type === 'castiron' ? 0.7 : type === 'brownstone' ? 0.8 : 0.35)) : wall;
+  const tint = type === 'brownstone' ? brownTint(wall) /* [nbhd] */ : pk ? (type !== 'castiron' && (style === 'brick' || style === 'prewar') ? brickTint(wall, pk[fseed % pk.length]) : softTint(wall, type === 'castiron' ? 0.7 : 0.35)) : wall;
   const plain = mat(shade(wall, 0.82), { rough: 0.95 });
   const sides: Side[] = ['N', 'S', 'E', 'W'];
   const exposed = (s: Side) => s === front || (front === 'E' || front === 'W' ? (s === 'N' && cornerSides[0]) || (s === 'S' && cornerSides[1]) : false);
@@ -878,7 +881,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
   if (type === 'tower') return tower(ctx, r, front, floors, fm, tint, addr);
 
   // ---- vertical layout
-  const parlor = type === 'brownstone' ? rng.range(1.4, 1.7) : 0;
+  const parlor = type === 'brownstone' ? (opts.parlor ?? rng.range(1.4, 1.7)) : 0; // [nbhd] rows share it
   const ground = type === 'brownstone' ? parlor : store ? (type === 'castiron' ? 4.6 : 4.3) : type === 'prewar' ? 4.4 : 3.5;
   const fh = type === 'castiron' ? 4.0 : type === 'brownstone' ? 3.3 : type === 'tenement' ? 3.05 : 3.15;
   // floor levels above the ground floor (brownstone: parlour floor is taller)
@@ -1016,6 +1019,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       B(F.g, mat('#1e1a16', { rough: 0.6 }), 0.9, Math.min(1.9, parlor) - 0.15, 0.05, du, 0, -0.3, false);
       doorway(F, du, parlor, 1.35, 2.7, rng.pick(['#3b2414', '#2a1a10', '#1d1d1d', '#4a2c1a']), 'hood', tint, addr.split(' ')[0]);
       stoop(F, du, parlor, brownMat(), tint, M.iron());
+      { const st = stoopSteps(parlor); stoopDressing(F, du, parlor, 1.9, st.land, st.n * st.tread, tint, 1); } // [nbhd] newels, sunbursts, garden door
       colliders.push(F.rectOf(du - 1.2, du + 1.2, 0, stoopSteps(parlor).length + 0.3));
       // areaway railing in front of the basement
       const ar = 1.6, au0 = du + 1.3, au1 = L / 2 - 0.05;
@@ -1025,6 +1029,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
         B(F.g, mat('#5a5650', { rough: 0.9 }), au1 - au0, 0.155, 0.2, (au0 + au1) / 2, 0, ar); // [zfix] 5 mm over the sidewalk plane
         for (let u = au0; u < au1; u += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, u, 0.1, ar, false);
         for (let z = 0.1; z < ar; z += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, au1, 0.1, z, false);
+        areawayGarden(F, au0 + 0.25, au1 - 0.05, ar, rng); // [nbhd] planted front yard
         colliders.push(F.rectOf(au0, au1, 0, ar + 0.1));
       }
       portalDoor(ctx, F, du, stoopSteps(parlor).length + 0.5, alongX, addr, floors, 'brownstone', 'house');

@@ -1,3 +1,4 @@
+import { brownRun, BROWN_FLOORS, type BrownRun } from '../nyc/brownstone';
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
 import { bake, M } from '../nyc/common';
@@ -25,7 +26,7 @@ const scene: LabScene = {
     const stat = new THREE.Group();
     const ctx = makeCtx(rng, blockG, stat, 0, 0, seed);
     const widths: Record<BType, [number, number]> = { brownstone: [5.6, 6.8], tenement: [7.4, 8.2], prewar: [14, 20], midrise: [9, 12], castiron: [9, 13], tower: [24, 30] };
-    const floorsOf: Record<BType, [number, number]> = { brownstone: [3, 5], tenement: [5, 6], prewar: [10, 14], midrise: [7, 10], castiron: [5, 7], tower: [20, 30] };
+    const floorsOf: Record<BType, [number, number]> = { brownstone: BROWN_FLOORS, tenement: [5, 6], prewar: [10, 14], midrise: [7, 10], castiron: [5, 7], tower: [20, 30] };
     const ws = Array.from({ length: n }, () => rng.range(...widths[type]));
     let x = -ws.reduce((a, b) => a + b, 0) / 2;
     // corner=1: one avenue-corner building (front E, south side exposed) with its corner at the origin
@@ -33,10 +34,12 @@ const scene: LabScene = {
       building(ctx, { minX: -16, maxX: 0, minZ: -14, maxZ: 0 }, 'E', type, rng.int(...floorsOf[type]), true, [false, true]);
       ws.length = 0;
     }
-    for (const w of ws) {
+    let run: BrownRun | null = null; // [nbhd] brownstones come in runs of identical houses
+    for (let w of ws) {
+      if (type === 'brownstone') { run = brownRun(rng, run); w = run.w; }
       const store = params.has('store') ? params.get('store') === '1' : type !== 'brownstone' && rng.chance(0.7);
-      const floors = params.has('floors') ? Math.max(1, Number(params.get('floors')) || 1) : rng.int(...floorsOf[type]);
-      building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, floors, store, [false, false]);
+      const floors = params.has('floors') ? Math.max(1, Number(params.get('floors')) || 1) : run ? run.floors : rng.int(...floorsOf[type]);
+      building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, floors, store, [false, false], run ? { wall: run.wall, parlor: run.parlor, cornicePaint: run.cornicePaint } : {});
       x += w;
     }
     // sidewalk and street
