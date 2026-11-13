@@ -42,3 +42,17 @@ Minor items:
 
 - Customer aisles in every shop type are now >= 0.9 m between facing fixtures (deli case queue 0.48 -> 1.23 m, pharmacy counter queue 0.86 -> 1.25 m, electronics demo tables 0.55 -> >= 1 m, sports plinths/bins 0.65-0.8 -> 1.0 m).
 - KNOWN (soft): staff-side gaps under 0.9 m remain in deli (0.68-0.76 m behind the deli case, 0.63 m behind the counter), pharmacy (0.48 m between the checkout counter and its back gondola), lighting (0.75-0.86 m between lamp vignettes) and furniture (0.45 m at one vignette).
+
+## Headless-only: the LaGuardia-edge page crash (not a game bug)
+
+- At (-291, -119) facing west, world shots and e2e journeys sometimes died with "Target crashed". This happened at
+  `r=0` and `r=1`, with drawing on or off. Chrome's stderr (`DEBUG=pw:browser`, `--enable-logging=stderr`) shows a
+  **SIGSEGV at address 0 (SEGV_MAPERR) in `chrome-headless-shell`**, inside the glib message loop. The crash came
+  while `page.screenshot` was waiting, not from out-of-memory or a SwiftShader assert. The JS heap stayed flat
+  (139–177 MB), and the counts of geometries, textures and programs stayed flat.
+- It is intermittent. One 90 s run at the same pose (`scripts/e2e/crashlog.mjs`) stayed alive at about 1M tris and
+  350–515 calls. So this is a headless-shell bug made more likely by heavy pages on a loaded machine. It is not
+  reproducible as a game bug, so this note stops here.
+- Seen in the same log: `THREE.GLTFLoader: setMeshoptDecoder must be called before loading compressed files` for
+  `vehicle/*.glb` and `streetprop/*.glb`. These street models fail to load (the load is a real bug for the
+  vehicles / street props owners).
