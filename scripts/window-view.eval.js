@@ -68,7 +68,23 @@
   // &wvdiag=1: the real-view material drawn black: is the pane in the shot ours?
   if (/[?&]wvdiag=1/.test(location.search)) W.level.group.traverse((o) => { if (o.isMesh && o.material && o.material.userData.realView) o.material.uniforms.uGain.value = 0; });
   await sl(1500);
+  // what the camera sees at the pane's screen pixels, and the window-view program's state
+  const T3 = await import(performance.getEntriesByType('resource').map((e) => e.name).find((n) => /deps\/three\.js/.test(n)));
+  const ray = new T3.Raycaster();
+  ray.camera = W.camera;
+  W.camera.updateMatrixWorld();
+  const px = [];
+  for (const [x, y] of [[0.5, 0.45], [0.5, -0.1], [0.65, 0.2]]) {
+    ray.setFromCamera({ x, y }, W.camera);
+    const hits = ray.intersectObject(W.level.group, true).slice(0, 4).map((h) => {
+      const m = h.object.material;
+      return `${h.distance.toFixed(2)} ${m.name || m.type}${m.userData.realView ? '[real]' : m.userData.windowView ? '[painted]' : ''}${m.transparent ? ' op' + m.opacity : ''}${m.color ? ' #' + m.color.getHexString() : ''}`;
+    });
+    px.push(`(${x},${y}) ${hits.join(' > ')}`);
+  }
+  const progs = (W.renderer.info.programs || []).filter((p) => /window-view|ShaderMaterial/.test(p.name)).map((p) => `${p.name} usedTimes ${p.usedTimes} runnable ${p.diagnostics ? p.diagnostics.runnable : 'ok'}`);
+  const pick = `pixels: ${px.join(' ; ')} | programs: ${progs.join(', ') || 'none named'}`;
   const s = W.views.stats;
   const tw = W.toWorld ? new V().setFromMatrixPosition(W.toWorld) : null;
-  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | ${diag} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
+  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | ${diag} | ${pick} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
 })();
