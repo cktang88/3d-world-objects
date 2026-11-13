@@ -199,8 +199,23 @@ const brownMat = () => surface('nyc_castiron', TILE, { vertexColors: true, rough
 function shade(hex: string, f: number) {
   return `#${new THREE.Color(hex).multiplyScalar(f).getHexString()}`;
 }
+/**
+ * [districts] street audit: brick and pre-war walls over a brick photo. softTint() (lightness-normalised,
+ * 35%) left every red, brown and buff tenement the same pale tan of the photo; this tints by the ratio of
+ * the wall colour to the photo's mean colour (so the product lands near the wall colour), brightest
+ * channel 1 so the photo keeps its light, mixed 70% (tests/districts-blocks.test.ts measures the spread).
+ */
+export const PHOTO_MEAN: Record<string, string> = { nyc_brick: '#a28f76', nyc_brick2: '#534739' }; // 1x1 box means of the 1k diffuse maps
+export function brickTint(wall: string, photo: string, k = 0.7) {
+  const m = PHOTO_MEAN[photo];
+  if (!m) return softTint(wall);
+  const c = new THREE.Color(wall), p = new THREE.Color(m);
+  c.setRGB(c.r / Math.max(p.r, 0.01), c.g / Math.max(p.g, 0.01), c.b / Math.max(p.b, 0.01));
+  c.multiplyScalar(1 / Math.max(c.r, c.g, c.b, 1e-3));
+  return `#${new THREE.Color(1, 1, 1).lerp(c, k).getHexString()}`;
+}
 /** a soft version of the wall colour, to tint photo textures without drowning them */
-function softTint(hex: string, k = 0.35) {
+export function softTint(hex: string, k = 0.35) {
   const c = new THREE.Color(hex);
   const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
   c.multiplyScalar(0.55 / Math.max(l, 0.05));
@@ -847,8 +862,11 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
     castiron: rng.pick(['#e2ddd0', '#c9cec9', '#d8ccb0', '#bfbfb8', '#a9b2a8']),
   }[type];
   if (opts.wall) wall = opts.wall;
-  const fm = facadeMat(style, rng.int(0, 2));
-  const tint = FACADE_PBR[style] ? softTint(wall, type === 'castiron' ? 0.7 : type === 'brownstone' ? 0.8 : 0.35) : wall;
+  const fseed = rng.int(0, 2);
+  const fm = facadeMat(style, fseed);
+  const pk = FACADE_PBR[style];
+  // [districts] brick/pre-war: tint by the photo's mean colour (brickTint) so the wall palette reads
+  const tint = pk ? (type !== 'castiron' && type !== 'brownstone' && (style === 'brick' || style === 'prewar') ? brickTint(wall, pk[fseed % pk.length]) : softTint(wall, type === 'castiron' ? 0.7 : type === 'brownstone' ? 0.8 : 0.35)) : wall;
   const plain = mat(shade(wall, 0.82), { rough: 0.95 });
   const sides: Side[] = ['N', 'S', 'E', 'W'];
   const exposed = (s: Side) => s === front || (front === 'E' || front === 'W' ? (s === 'N' && cornerSides[0]) || (s === 'S' && cornerSides[1]) : false);

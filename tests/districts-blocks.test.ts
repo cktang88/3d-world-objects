@@ -127,3 +127,18 @@ test("street trees follow the district's tree share: Midtown's tall blocks keep 
   expect(n >= 3, `${n} side-street trees on the spawn block (want >= 3 at a ${D.trees} share)`);
   expect(n <= 20, `${n} side-street trees on the spawn block: more than every slot`);
 });
+
+test('brick facades: the wall palette survives the photo tint (reds, browns and buffs, not one tan)', async () => {
+  // street audit: at a 0.35 tint every tenement over the tan brick photo (mean #a28f76, brick_wall_02) was the same pale tan
+  const { brickTint, PHOTO_MEAN } = await import('../src/nyc/buildings');
+  const THREE = await import('three');
+  const PHOTO = new THREE.Color(PHOTO_MEAN.nyc_brick);
+  const eff = (wall: string) => new THREE.Color(brickTint(wall, 'nyc_brick')).multiply(PHOTO);
+  const sat = (c: InstanceType<typeof THREE.Color>) => { const s = c.clone(); const hsl = { h: 0, s: 0, l: 0 }; s.getHSL(hsl); return hsl.s; };
+  const walls = ['#8c3b2a', '#9a5a3c', '#a3683f', '#7a3a2e', '#b58a5a', '#6b4a3a', '#c9b08a'];
+  const cs = walls.map(eff);
+  let spread = 0;
+  for (const a of cs) for (const b of cs) spread = Math.max(spread, Math.hypot(...a.getStyle().match(/\d+/g)!.slice(0, 3).map((v, i) => +v - +b.getStyle().match(/\d+/g)![i])));
+  expect(spread >= 40, `tenement colours span only ${fmt(spread)} sRGB units over the brick photo (want >= 40)`);
+  expect(sat(eff('#8c3b2a')) >= 0.4, `the red brick tenement reads ${eff('#8c3b2a').getHexString()}: saturation ${fmt(sat(eff('#8c3b2a')))} (want >= 0.4)`);
+});
