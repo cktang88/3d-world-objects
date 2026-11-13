@@ -56,7 +56,9 @@ test('markings: real dimensions, never on the sidewalk', () => {
     expect(lines.length > 4, `chunk ${cx},${cz}: ${lines.length} lane-line dashes`);
     for (const r of lines) {
       between(Math.min(r.x1 - r.x0, r.z1 - r.z0), 0.1, 0.15, 'lane line width (m)');
-      expect(Math.max(r.x1 - r.x0, r.z1 - r.z0) <= 3.0 + 1e-6, 'lane dash longer than 10 ft');
+      // dashes are 10 ft; the only long lines are the solid edges of a red bus lane
+      const busEdge = m.some((b) => b.kind === 'busred' && Math.min(Math.abs(b.x0 - (r.x0 + r.x1) / 2), Math.abs(b.x1 - (r.x0 + r.x1) / 2)) < 0.1);
+      expect(busEdge || Math.max(r.x1 - r.x0, r.z1 - r.z0) <= 3.0 + 1e-6, 'lane dash longer than 10 ft');
     }
     for (const r of m) {
       const inSw = r.x1 > -BX + 0.01 && r.x0 < BX - 0.01 && r.z1 > -BZ + 0.01 && r.z0 < BZ - 0.01;
@@ -111,4 +113,37 @@ test('ground is at most 3 draw calls per block', () => {
     });
     expect(n >= 2 && n <= 3, `chunk ${cx},${cz}: ${n} ground draw calls (want 2-3: road, sidewalk+curb, paint+hardware)`);
   }
+});
+
+test('bus lanes: next to the kerb or the parking lane, bounded by solid lines, no red in crosswalks or intersections', async () => {
+  const { busAve } = await import('../src/nyc/ground');
+  const { AVE } = await import('../src/nyc/common');
+  const { XW_IN } = GROUND;
+  const bad: string[] = [];
+  let seen = 0;
+  for (let cx = -6; cx <= 6; cx++) for (const cz of [-1, 0, 1]) {
+    const m = markingsPlan(cx, cz);
+    const avx = AX / 2; // the west half of avenue k=cx is drawn by this chunk (x > 0)
+    const red = m.filter((r) => r.kind === 'busred');
+    if (busAve(cx) !== red.length > 0) bad.push(`${cx},${cz}: bus avenue ${busAve(cx)} but ${red.length} red quads`);
+    for (const r of red) {
+      seen++;
+      const inner = avx - r.x1, outer = avx - r.x0; // distances from the centre line
+      const toKerb = AVE / 2 - outer;
+      // a kerb lane (red to the kerb) or an offset lane with a 2.2–2.8 m parking lane beside it
+      const ok = toKerb < 0.2 || (toKerb >= 2.2 && toKerb <= 2.8);
+      if (!ok) bad.push(`${cx},${cz}: red ${fmt(inner)}..${fmt(outer)} m from centre leaves ${fmt(toKerb)} m to the kerb`);
+      between(outer - inner, 3, 3.7, 'bus lane width');
+      // no red in the crosswalk bands (kerb - XW_IN .. intersection) or the intersection itself
+      if (Math.max(Math.abs(r.z0), Math.abs(r.z1)) > BZ - XW_IN) bad.push(`${cx},${cz}: red reaches z ${fmt(r.z0)}..${fmt(r.z1)} (crosswalk from ${fmt(BZ - XW_IN)})`);
+      if (r.x0 < BX) bad.push(`${cx},${cz}: red on the block / sidewalk at x ${fmt(r.x0)}`);
+      // solid white lines along both edges of the lane
+      for (const e of [r.x0, r.x1]) {
+        const line = m.find((l) => l.kind === 'solid' && l.x0 <= e + 0.1 && l.x1 >= e - 0.1 && l.x1 - l.x0 < 0.3 && l.z0 <= r.z0 + 0.01 && l.z1 >= r.z1 - 0.01);
+        if (!line) bad.push(`${cx},${cz}: no solid line along the bus lane edge x ${fmt(e)}`);
+      }
+    }
+  }
+  expect(seen > 0, 'some bus lanes checked');
+  none(bad, 'bus lane placement');
 });

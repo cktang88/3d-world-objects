@@ -508,7 +508,7 @@ float gWear() {
 
 class QuadBuf {
   /** every quad's footprint and atlas rect, kept for tests */
-  rects: { x0: number; z0: number; x1: number; z1: number; r: readonly number[] }[] = [];
+  rects: { x0: number; z0: number; x1: number; z1: number; r: readonly number[]; c?: THREE.Color }[] = [];
   pos: number[] = [];
   nor: number[] = [];
   uv: number[] = [];
@@ -520,7 +520,7 @@ class QuadBuf {
    */
   quad(x0: number, z0: number, x1: number, z1: number, y: number, r: readonly number[], W: number, H: number, up: 'x' | '-x' | 'z' | '-z' = '-z', c?: THREE.Color, yFn?: (x: number, z: number) => number) {
     const u0 = r[0] / W, u1 = (r[0] + r[2]) / W, vTop = 1 - r[1] / H, vBot = 1 - (r[1] + r[3]) / H;
-    this.rects.push({ x0, z0, x1, z1, r });
+    this.rects.push({ x0, z0, x1, z1, r, c });
     const corners: [number, number][] = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
     const b = this.pos.length / 3;
     for (const [x, z] of corners) {
@@ -604,15 +604,23 @@ function markings(q: QuadBuf, cx: number, cz: number) {
     // broken lane lines (3 m dash, 9 m gap) at 1.8 m and 5.4 m from the centre line, phased in world z
     const zA = -(BZ - XW_IN - STOP_GAP - STOP_W - 1), zB = -zA;
     const oz = cz * SZ;
+    const bus = sx > 0 && busAve(k);
     for (const off of [1.8, 5.4]) {
       const lx = avx - sx * off;
+      // a bus lane is bounded by solid lines (on its traffic side and its parking side)
+      if (bus) {
+        q.quad(lx - LANE_W / 2, zA, lx + LANE_W / 2, zB, Y, S, W, H, '-z', WHITE);
+        continue;
+      }
       for (let wz = Math.ceil((oz + zA) / 12) * 12; wz < oz + zB; wz += 12) {
         const a = Math.max(wz - oz, zA), b = Math.min(wz - oz + 3, zB);
         if (b > a) q.quad(lx - LANE_W / 2, a, lx + LANE_W / 2, b, Y, S, W, H, '-z', WHITE); // [districts] ~6 in lines (were 4.7 in, lost past 25 m)
       }
     }
-    // a red offset bus lane (1.8–5.4 m from the centre line) on the west side of some avenues
-    if (sx > 0 && busAve(k)) {
+    // a red offset bus lane (1.8–5.4 m from the centre line) on the west side of some avenues: NYC's
+    // offset lane, the travel lane next to the kerbside parking / loading lane (5.4 m to the kerb).
+    // The red stops short of the stop bar and the crosswalks (zA..zB), never in the intersection
+    if (bus) {
       const l0 = avx - 5.34, l1 = avx - 1.86;
       q.quad(l0, zA, l1, zB, Y - 0.0005, S, W, H, '-z', BUSRED);
       // BUS / ONLY legends read in the direction of travel, near the far end of the block
@@ -646,7 +654,7 @@ export function markingsPlan(cx: number, cz: number) {
   const q = new QuadBuf();
   markings(q, cx, cz);
   const name = (r: readonly number[]) => (Object.keys(MK) as (keyof typeof MK)[]).find((k) => MK[k] === r) ?? 'other';
-  return q.rects.map((t) => ({ kind: name(t.r), x0: Math.min(t.x0, t.x1), x1: Math.max(t.x0, t.x1), z0: Math.min(t.z0, t.z1), z1: Math.max(t.z0, t.z1) }));
+  return q.rects.map((t) => ({ kind: t.c === BUSRED ? 'busred' : name(t.r), x0: Math.min(t.x0, t.x1), x1: Math.max(t.x0, t.x1), z0: Math.min(t.z0, t.z1), z1: Math.max(t.z0, t.z1) }));
 }
 
 /** the curb profile as built (positions), for qa tests */
