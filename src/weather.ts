@@ -54,7 +54,7 @@ interface Params {
 }
 
 // clear: no procedural deck (the sky HDRI has its own clouds; a thin deck broke up into small grey
-// flecks that read as debris flying in the sky)
+// flecks that read as debris flying in the sky; cdens() fades the deck in with cover)
 const P: Record<WeatherState, Params> = {
   clear: { cloud: 0, dark: 0, rain: 0, snow: 0, ground: 0, haze: 1, base: 1200, inCloud: 0, fogSky: 0, wind: 2 },
   partly: { cloud: 0.48, dark: 0.1, rain: 0, snow: 0, ground: 0, haze: 1.1, base: 1200, inCloud: 0, fogSky: 0, wind: 3 },
@@ -379,7 +379,8 @@ float cfbm(vec2 p) {
 }
 float cdens(float n, float cov) {
   float th = mix(0.74, 0.2, cov);
-  return max(smoothstep(th, th + 0.16, n), smoothstep(0.8, 1.0, cov) * 0.9);
+  // (x cover: at low cover only the noise's highest peaks would pass, small grey flecks like debris)
+  return max(smoothstep(th, th + 0.16, n), smoothstep(0.8, 1.0, cov) * 0.9) * smoothstep(0.0, 0.3, cov);
 }
 // cloud radiance (not premultiplied) + coverage for a view direction (world space); hz = how much
 // of the result is haze (uHaze), mixed in by the caller like three's fog (after tone mapping on screen)
@@ -1013,7 +1014,7 @@ export class Weather {
       const t = s((x - a) / (b - a));
       return t * t * (3 - 2 * t);
     };
-    const d = Math.max(sm(th, th + 0.16, n), sm(0.8, 1, c.cloud) * 0.9);
+    const d = Math.max(sm(th, th + 0.16, n), sm(0.8, 1, c.cloud) * 0.9) * sm(0, 0.3, c.cloud);
     const thick = s((n - th) * 3);
     const occ = Math.min(1, d * (0.55 + 0.45 * thick) + sm(0.8, 1, c.cloud) * 0.6 + c.dark * 0.3 + c.ground * 20);
     this.sunOcc += (Math.min(0.985, occ) - this.sunOcc) * (this.snap ? 1 : Math.min(1, dt * 1.5));
