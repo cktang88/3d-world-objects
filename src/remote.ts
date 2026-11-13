@@ -312,6 +312,11 @@ export function reprioritize(id: string, prio: number) {
   if (q) q.job.prio = prio;
   for (const w of glbWait) if (w.id === id) w.prio = prio;
 }
+/** [museum] every id loadRemote was asked for (qa: "asked for before entering", whatever became of it) */
+const asked = new Set<string>();
+export function isRequested(id: string) {
+  return asked.has(id);
+}
 /** [museum] the priority of a queued load (qa), undefined if not queued */
 export function queuedPrio(id: string): number | undefined {
   return queuedJob.get(id)?.job.prio ?? glbWait.find((w) => w.id === id)?.prio;
@@ -347,6 +352,7 @@ function loadRebuilt(e: RemoteEntry, prio = 0) {
 /** opts.signal: abort when the caller (a level) is gone: its continuation is dropped and a queued parse only it wanted is cancelled */
 export function loadRemote(e: RemoteEntry, opts: { prio?: number; shadows?: boolean; signal?: AbortSignal } = {}): Promise<RemoteModel> {
   if (opts.signal?.aborted) return Promise.reject(aborted());
+  if (asked.size < 20000) asked.add(e.id);
   // prefer the UV-mapped rebuild (static objects only: joints come from the USD)
   if (rebuilt.has(e.id) && !e.joints && gltf()) {
     const p = loadRebuilt(e, opts.prio ?? 0);

@@ -461,7 +461,7 @@ test('exhibit sides: a closed box is front-sided, an open sheet stays double-sid
 
 test('exhibit loads: a room built ahead (doorway prebuild) has its loads queued before you enter, behind the current room, nearest the door first; walking in moves them to the front', async () => {
   await loadMuseum();
-  const { queuedPrio } = await import('../src/remote');
+  const { queuedPrio, isRequested } = await import('../src/remote');
   // no workers in Node: a silent stand-in keeps the parses queued, so their order can be read
   const g0 = globalThis as unknown as { Worker?: unknown };
   const had = g0.Worker;
@@ -474,7 +474,10 @@ test('exhibit loads: a room built ahead (doorway prebuild) has its loads queued 
   const before = slots.map((x) => ({ d: Math.hypot(x.at.x, x.at.z), p: queuedPrio(x.m.entry.id) }));
   const queued = before.filter((x) => x.p !== undefined);
   expect(slots.length > 0, 'no exhibits');
-  expect(queued.length === slots.length, `${slots.length - queued.length} of ${slots.length} exhibit loads not queued before entering`);
+  // (a load already under way, or one that failed at once in Node - a rebuilt GLB with no loader here -
+  // was asked for all the same: only loads never asked for are missing)
+  const missing = slots.filter((x) => queuedPrio(x.m.entry.id) === undefined && !isRequested(x.m.entry.id));
+  expect(missing.length === 0, `${missing.length} of ${slots.length} exhibit loads never asked for before entering`);
   expect(queued.every((x) => x.p! >= 1000), 'a room built ahead must queue behind the current room');
   const byPrio = [...queued].sort((a, b) => a.p! - b.p!);
   expect(byPrio.every((x, i) => i === 0 || x.d >= byPrio[i - 1].d - 1e-6), 'loads are not nearest-to-the-door first');
