@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FLAGS } from './flags';
 
 /**
  * CC0 PBR textures from Poly Haven and ambientCG (catalogue: public/pbr.json, built by
@@ -144,7 +145,7 @@ function meanColor(t: THREE.Texture): THREE.Color {
 
 /** A texture set by key: a sand3d material kind ("oak") or a surface ("nyc_brick"). */
 export function pbr(key: string, resolution = res): PbrMaps | null {
-  if (!catalogue) return null;
+  if (!catalogue || FLAGS.notex) return null; // [districts] ?notex=1: no photo texture downloads (they went on at 2k)
   const slug = catalogue.kinds[key] ?? key;
   const info = catalogue.sets[slug];
   if (!info) return null;

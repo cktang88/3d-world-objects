@@ -94,6 +94,20 @@ function poolsReady(s: Slot) {
 export const SHOWCASE = { tris: 3_000_000, loads: 4, radius: 110, cap: Infinity };
 let shownTris = 0;
 let loading = 0;
+/**
+ * [districts] heavy programs (USDA source over HEAVY_BYTES, no small rebuilt GLB) build one at a time: the
+ * aircraft and car pools are mostly 4-8 MB programs of 0.3-1M triangles, and a dozen LaGuardia stands
+ * (slot radius 260 m) building them at once pushed a headless page past its memory and crashed it.
+ */
+export const HEAVY_BYTES = 2.5e6;
+let heavy: Promise<void> = Promise.resolve();
+/** the last showcase loads, for e2e / debugging (window.__showcaseLog) */
+export const showcaseLog: { kind: string; id: string; mb: number; tris: number; ms: number; ok: boolean; why?: string }[] = [];
+(globalThis as unknown as { __showcaseLog: typeof showcaseLog }).__showcaseLog = showcaseLog;
+function note(r: (typeof showcaseLog)[number]) {
+  showcaseLog.push(r);
+  if (showcaseLog.length > 200) showcaseLog.shift();
+}
 /** how often each object is on show: prefer ones nobody nearby has */
 const used = new Map<string, number>();
 
@@ -234,9 +248,24 @@ async function load(s: Slot) {
     s.tries++;
     if (!e) break;
     let m;
+    const kind0 = String(Array.isArray(spec.kind) ? spec.kind[0] : spec.kind);
+    const t0 = performance.now();
+    let done = () => {};
     try {
+      if ((e.bytes ?? 0) > HEAVY_BYTES && !isRebuilt(e.id)) {
+        const prev = heavy;
+        heavy = new Promise<void>((r) => (done = r));
+        if ((await Promise.race([prev.then(() => 1), aborted])) === null) {
+          done();
+          s.tries = 0;
+          if (!s.holder.userData.disposed) s.state = 'idle';
+          return;
+        }
+      }
       const req = loadRemote(e, { prio: s.dist, shadows: true });
+      req.finally(() => done()).catch(() => {});
       m = await Promise.race([req, aborted]);
+      if (m) note({ kind: kind0, id: e.id, mb: +((e.bytes ?? 0) / 1e6).toFixed(1), tris: m.tris, ms: Math.round(performance.now() - t0), ok: m.tris <= (spec.maxTris ?? 200_000) });
       if (!m) {
         // the late model is dropped when it arrives
         req.then((late) => disposeModel(late.object)).catch(() => {});
@@ -245,6 +274,8 @@ async function load(s: Slot) {
         return;
       }
     } catch {
+      done();
+      note({ kind: kind0, id: e.id, mb: +((e.bytes ?? 0) / 1e6).toFixed(1), tris: 0, ms: Math.round(performance.now() - t0), ok: false, why: 'error' });
       continue;
     }
     if (s.holder.userData.disposed) {

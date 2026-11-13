@@ -37,6 +37,67 @@ export function originalUrl(id: string, og: number) {
 }
 
 const MAX_BYTES = 40e6;
+/**
+ * [districts] decoded texture budget per original (pixels, all images): GLTFLoader decodes every image at full size
+ * before shrinkTextures() runs, outside the JS heap (an 8k map is 256 MB of bitmap). Several at once near the
+ * LaGuardia aircraft crashed headless pages; models over this are skipped (the sand3d version stays).
+ */
+export const MAX_DECODE_PX = 24e6;
+/** loads above this (bytes or decoded pixels) run one at a time */
+const HEAVY_BYTES = 8e6, HEAVY_PX = 8e6;
+let heavyBusy: Promise<void> = Promise.resolve();
+/** texture size cap for originals swapped in for showcase / street objects */
+export const ORIGINAL_TEX_MAX = 1024;
+
+/** width x height of a PNG / JPEG / WebP from its header (0 when unknown, e.g. KTX2: GPU-compressed) */
+export function imageDims(b: Uint8Array): [number, number] {
+  const u16 = (i: number) => (b[i] << 8) | b[i + 1];
+  if (b[0] === 0x89 && b[1] === 0x50) return [(b[16] << 24 | b[17] << 16 | b[18] << 8 | b[19]) >>> 0, (b[20] << 24 | b[21] << 16 | b[22] << 8 | b[23]) >>> 0];
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    for (let i = 2; i + 9 < b.length; ) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const mk = b[i + 1];
+      if (mk >= 0xc0 && mk <= 0xcf && mk !== 0xc4 && mk !== 0xc8 && mk !== 0xcc) return [u16(i + 7), u16(i + 5)];
+      if (mk === 0xd8 || mk === 0x01 || (mk >= 0xd0 && mk <= 0xd7)) { i += 2; continue; }
+      i += 2 + u16(i + 2);
+    }
+    return [0, 0];
+  }
+  if (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57) {
+    const tag = String.fromCharCode(b[12], b[13], b[14], b[15]);
+    if (tag === 'VP8 ') return [(b[26] | b[27] << 8) & 0x3fff, (b[28] | b[29] << 8) & 0x3fff];
+    if (tag === 'VP8L') { const v = b[21] | b[22] << 8 | b[23] << 16 | b[24] << 24; return [(v & 0x3fff) + 1, ((v >> 14) & 0x3fff) + 1]; }
+    if (tag === 'VP8X') return [1 + (b[24] | b[25] << 8 | b[26] << 16), 1 + (b[27] | b[28] << 8 | b[29] << 16)];
+  }
+  return [0, 0];
+}
+
+/** total decoded pixels of a GLB's embedded images (from their headers, nothing decoded) */
+export function glbImagePixels(buf: ArrayBuffer): { px: number; max: number; images: number } {
+  const dv = new DataView(buf);
+  const out = { px: 0, max: 0, images: 0 };
+  if (buf.byteLength < 20 || dv.getUint32(0, true) !== 0x46546c67) return out; // 'glTF'
+  const jsonLen = dv.getUint32(12, true);
+  let json: { images?: { bufferView?: number }[]; bufferViews?: { byteOffset?: number; byteLength: number }[] };
+  try {
+    json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)));
+  } catch {
+    return out;
+  }
+  const binStart = 20 + jsonLen + 8;
+  for (const im of json.images ?? []) {
+    const bv = im.bufferView !== undefined ? json.bufferViews?.[im.bufferView] : undefined;
+    if (!bv) continue;
+    const off = binStart + (bv.byteOffset ?? 0);
+    if (off + 32 > buf.byteLength) continue;
+    const [w, h] = imageDims(new Uint8Array(buf, off, Math.min(bv.byteLength, 65536)));
+    out.images++;
+    out.px += w * h;
+    out.max = Math.max(out.max, w, h);
+  }
+  return out;
+}
+
 const MAX_TRIS_EACH = 1_500_000;
 /** total triangles of originals shown at once (proximity manager) */
 const MAX_TRIS_TOTAL = 9_000_000;
@@ -116,12 +177,28 @@ async function fetchOriginal(id: string, og: number, prio: number, texMax: numbe
       return null;
     }
     const buf = await res.arrayBuffer();
-    const gltf = await loader!.parseAsync(buf, '');
+    // [districts] no content-length (chunked): check the size we got; then the decode budget
+    if (buf.byteLength > MAX_BYTES) return null;
+    const img = glbImagePixels(buf);
+    if (img.px > MAX_DECODE_PX) return null;
+    // heavy ones decode one at a time (their transient bitmaps are the memory spike)
+    let done = () => {};
+    if (buf.byteLength > HEAVY_BYTES || img.px > HEAVY_PX) {
+      const prev = heavyBusy;
+      heavyBusy = new Promise<void>((r) => (done = r));
+      await prev;
+    }
+    let gltf;
+    try {
+      gltf = await loader!.parseAsync(buf, '');
+      await shrinkTextures(gltf.scene, texMax);
+    } finally {
+      done();
+    }
     const scene = gltf.scene;
     scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(scene);
     if (box.isEmpty()) return null;
-    await shrinkTextures(scene, texMax);
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
@@ -266,7 +343,7 @@ export function updateDetail(player: THREE.Vector3, radius: number) {
   near.sort((a, b) => a.d - b.d);
   for (const { t, d } of near.slice(0, 6)) {
     t.state = 'loading';
-    loadOriginal(t.id, t.og, t.fit, { prio: d, texMax: 2048 }).then((g) => {
+    loadOriginal(t.id, t.og, t.fit, { prio: d, texMax: ORIGINAL_TEX_MAX }).then((g) => {
       if (!g || t.holder.userData.disposed) {
         t.state = g ? 'idle' : 'none';
         if (g) releaseOriginal(g);
