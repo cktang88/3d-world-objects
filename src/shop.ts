@@ -20,6 +20,86 @@ import { RETAIL_PLANS } from './shopkit/rows';
 import { Filler, KINDS, SHOP_KINDS, COOLER_KINDS, type Kind } from './shopkit/filler';
 import { DRINK } from './shopkit/fixtures';
 import { searchLibrary, loadLibraryModel, type LibraryEntry, type LibraryQuery } from './libraries';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { simplifierReady, simplifyMesh } from './meshlod-core';
+
+// [lod] coarse versions of shelf products (mesh-simplification skill): ~6 % of the triangles at a 6 % size
+// error, uv seams kept so labels still fit. Instances farther than PRODUCT_NEAR from the player use them.
+export const PRODUCT_NEAR = 4;
+/** inside this, full detail; PRODUCT_NEAR..: coarse; between: a 20 % version */
+export const PRODUCT_FULL = 1.5;
+/** switch for comparisons (lab &plod=0) */
+export const PRODUCT_LOD = { on: true };
+let simplifierOk = false;
+simplifierReady.then(() => (simplifierOk = true)).catch(() => {});
+/** vertex -> first vertex at the same position */
+function positionRemap(P: Float32Array) {
+  const n = P.length / 3, out = new Uint32Array(n), seen = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    const k = `${P[i * 3].toFixed(5)},${P[i * 3 + 1].toFixed(5)},${P[i * 3 + 2].toFixed(5)}`;
+    const j = seen.get(k);
+    if (j === undefined) seen.set(k, (out[i] = i));
+    else out[i] = j;
+  }
+  return out;
+}
+const coarseCaches = new Map<number, WeakMap<THREE.BufferGeometry, THREE.BufferGeometry | null>>();
+function coarseOf(geo: THREE.BufferGeometry, ratio = 0.06, err = 0.06): THREE.BufferGeometry | null {
+  if (!simplifierOk) return null;
+  let coarseCache = coarseCaches.get(ratio);
+  if (!coarseCache) coarseCaches.set(ratio, (coarseCache = new WeakMap()));
+  let c = coarseCache.get(geo);
+  if (c !== undefined) return c;
+  c = null;
+  try {
+    const pos = geo.getAttribute('position');
+    const tris = (geo.index ? geo.index.count : pos.count) / 3;
+    // multi-material geometry (groups) keeps its own index ranges: not simplified here
+    if (tris >= 32 && !geo.groups.length) {
+      // weld unindexed exports first (by position, normal, uv) so edges can collapse
+      const g = geo.index ? geo : mergeVertices(geo);
+      const P = g.getAttribute('position') as THREE.BufferAttribute, N = g.getAttribute('normal') as THREE.BufferAttribute | undefined, U = g.getAttribute('uv') as THREE.BufferAttribute | undefined;
+      const fl = (a: THREE.BufferAttribute | undefined, n: number) => {
+        if (!a) return null;
+        if (a.array instanceof Float32Array && a.itemSize === n && !a.normalized) return a.array;
+        const out = new Float32Array(a.count * n);
+        for (let i = 0; i < a.count; i++) for (let k = 0; k < n; k++) out[i * n + k] = a.getComponent(i, k);
+        return out;
+      };
+      const index = g.index!.array instanceof Uint32Array ? (g.index!.array as Uint32Array) : new Uint32Array(g.index!.array as ArrayLike<number>);
+      // the far tier (>= 4 m) may slide labels a little: no uv-seam protection there, or seams pin it at ~60 %
+      const r = simplifyMesh({ index, position: fl(P, 3)!, normal: fl(N, 3), uv: ratio < 0.1 ? null : fl(U, 2) }, { targetTris: Math.max(12, tris * ratio), error: err, permissive: true });
+      let idx: Uint32Array | null = r.index.length / 3 < tris * 0.6 ? r.index : null;
+      let smooth = false;
+      if (!idx && ratio < 0.1) {
+        // seams (lathe/cylinder kits duplicate their seam and pole vertices) pin it: weld by position alone,
+        // simplify the surface, then give it its own smooth normals (fine at >= 4 m)
+        const Pf = fl(P, 3)!;
+        const remap = positionRemap(Pf);
+        const wi = new Uint32Array(index.length);
+        for (let i = 0; i < index.length; i++) wi[i] = remap[index[i]];
+        const r2 = simplifyMesh({ index: wi, position: Pf }, { targetTris: Math.max(12, tris * ratio), error: err, permissive: true });
+        if (r2.index.length / 3 < tris * 0.6) {
+          idx = r2.index;
+          smooth = true;
+        }
+      }
+      if (idx) {
+        c = new THREE.BufferGeometry();
+        for (const [k, a] of Object.entries(g.attributes)) if (!(smooth && k === 'normal')) c.setAttribute(k, a);
+        c.setIndex(new THREE.BufferAttribute(idx, 1));
+        if (smooth) c.computeVertexNormals();
+        c.boundingSphere = geo.boundingSphere;
+        c.boundingBox = geo.boundingBox;
+      }
+    }
+  } catch {
+    c = null;
+  }
+  coarseCache.set(geo, c);
+  return c;
+}
+
 
 /**
  * A shop interior, laid out per kind of shop after real NYC stores (docs/research/shops.md):
@@ -455,7 +535,7 @@ export class ShopLevel implements Level {
     const filler = new Filler();
     const kinds = this.shopKinds.length ? this.shopKinds : [KINDS.carton6, KINDS.smallbox];
     for (const s of k.segs) this.fill(filler, { ...s, messy: 0.3 }, kinds, r);
-    filler.build(g);
+    for (const im of filler.build(g)) this.addLod(im, g);
     out.add(g);
     this.cols.push(...k.cols);
     return out;
@@ -548,7 +628,7 @@ export class ShopLevel implements Level {
     const rest: Seg[] = [...(set.get('filler') ?? [])];
     for (const [p, list] of set) if (p !== 'filler') rest.push(...this.place(p, list, r, this.prio++, into, filler));
     for (const sg of rest) this.fill(filler, sg, kinds, r);
-    filler.build(into);
+    for (const im of filler.build(into)) this.addLod(im, into);
     this.stats.filler += filler.count;
     this.stats.tris += filler.tris();
   }
@@ -911,8 +991,71 @@ export class ShopLevel implements Level {
       im.receiveShadow = true;
       into.add(im);
       out.push(im);
+      this.addLod(im, into);
     }
     return out;
+  }
+  /** [lod] per-InstancedMesh tiers: full detail near, a 20 % version to PRODUCT_NEAR, a ~6 % one beyond */
+  private plods: { tiers: THREE.InstancedMesh[]; mats: Float32Array; cols: Float32Array | null; pos: Float32Array }[] = [];
+  private plodAt = new THREE.Vector3(1e9, 0, 0);
+  private plodN = -1;
+  /** give an InstancedMesh (products, filler packaging) its lower tiers; update() splits instances by distance */
+  private addLod(im: THREE.InstancedMesh, into: THREE.Object3D) {
+    if (!PRODUCT_LOD.on) return;
+    // the simplifier's wasm may still be loading while the first fixtures fill: add the tiers once it is
+    if (!simplifierOk) {
+      simplifierReady.then(() => this.alive && this.addLod(im, into)).catch(() => {});
+      return;
+    }
+    const mid = coarseOf(im.geometry, 0.2, 0.02), far = coarseOf(im.geometry, 0.06, 0.06);
+    if (!far) return;
+    const tiers = [im];
+    for (const g of [mid ?? far, far]) {
+      const t = new THREE.InstancedMesh(g, im.material, im.count);
+      t.count = 0;
+      t.receiveShadow = im.receiveShadow;
+      t.castShadow = im.castShadow;
+      t.userData.owned = true;
+      t.userData.lodTier = true;
+      if (im.instanceColor) t.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(im.instanceColor.array.length), 3);
+      into.add(t);
+      tiers.push(t);
+    }
+    const n = im.count;
+    const mats = new Float32Array(im.instanceMatrix.array as Float32Array);
+    const pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) pos.set([mats[i * 16 + 12], mats[i * 16 + 13], mats[i * 16 + 14]], i * 3);
+    this.plods.push({ tiers, mats, cols: im.instanceColor ? new Float32Array(im.instanceColor.array as Float32Array) : null, pos });
+  }
+  /** split every product's instances into the tiers around the player */
+  private partitionProducts(player: THREE.Vector3, force = false) {
+    // new products since the last split (they stream in) or a move of 25 cm: split again
+    if (!force && this.plods.length === this.plodN && player.distanceToSquared(this.plodAt) < 0.25 * 0.25) {
+      for (const l of this.plods) for (let k = 1; k < 3; k++) l.tiers[k].visible = l.tiers[0].visible;
+      return;
+    }
+    this.plodAt.copy(player);
+    this.plodN = this.plods.length;
+    const f2 = PRODUCT_FULL * PRODUCT_FULL, n2 = PRODUCT_NEAR * PRODUCT_NEAR;
+    for (const l of this.plods) {
+      const n = l.pos.length / 3;
+      const cnt = [0, 0, 0];
+      for (let i = 0; i < n; i++) {
+        const dx = l.pos[i * 3] - player.x, dy = l.pos[i * 3 + 1] - player.y, dz = l.pos[i * 3 + 2] - player.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const k = d2 < f2 ? 0 : d2 < n2 ? 1 : 2;
+        const t = l.tiers[k], j = cnt[k]++;
+        (t.instanceMatrix.array as Float32Array).set(l.mats.subarray(i * 16, i * 16 + 16), j * 16);
+        if (l.cols && t.instanceColor) (t.instanceColor.array as Float32Array).set(l.cols.subarray(i * 3, i * 3 + 3), j * 3);
+      }
+      l.tiers.forEach((t, k) => {
+        if (k) t.visible = l.tiers[0].visible;
+        t.count = cnt[k];
+        t.instanceMatrix.needsUpdate = true;
+        if (t.instanceColor) t.instanceColor.needsUpdate = true;
+        t.computeBoundingSphere();
+      });
+    }
   }
 
   colliders() {
@@ -928,6 +1071,7 @@ export class ShopLevel implements Level {
   private lodTick = 0;
   update(_dt: number, player: THREE.Vector3) {
     if (this.lodTick++ % 10) return;
+    this.partitionProducts(player);
     for (const l of this.lods) {
       const near = l.c.distanceTo(player) - l.r < 9;
       if (near === l.isNear) continue;

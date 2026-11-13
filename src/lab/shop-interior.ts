@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { LabScene } from '../lab';
-import { ShopLevel, SHOP_BUDGET } from '../shop';
+import { ShopLevel, SHOP_BUDGET, PRODUCT_LOD } from '../shop';
 import { SHOPS } from '../nyc';
 
 /**
@@ -8,6 +8,7 @@ import { SHOPS } from '../nyc';
  * &view=back|front|counter|side              preset camera (or &cam=&look= as usual)
  * &containers=closed|open                     leave containers empty / also open the opaque ones (stockroom, drawers)
  * &budget=<tris>                               product triangle budget (lower renders faster in software)
+ * &plod=0                                     no product LOD tiers (before/after comparisons)
  * The shop's own lighting replaces the lab's: hemisphere, ambient and exposure come from ShopLevel.env.
  */
 const scene: LabScene = {
@@ -22,9 +23,11 @@ const scene: LabScene = {
     const seed = Number(params.get('seed') ?? 7);
     const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
     if (params.get('budget')) SHOP_BUDGET.tris = Number(params.get('budget'));
+    PRODUCT_LOD.on = params.get('plod') !== '0'; // &plod=0: no product LODs (comparison)
     const lv = new ShopLevel({ kind: 'interior', seed, name: `${info.names[0]}`, style: 'shop', floor: 0, floors: 1, biome: 'temperate', shop: type });
     group.add(lv.group);
     (window as unknown as { __shop: ShopLevel }).__shop = lv;
+    labShop = { lv, cam: camera }; // [lod] update() runs the shop's per-frame work (product LODs)
     // use the shop's own light set-up, not the lab's
     const sc = group.parent as THREE.Scene;
     sc?.traverse((o) => {
@@ -48,5 +51,9 @@ const scene: LabScene = {
     if (params.get('containers') !== 'closed') lv.generateAll(params.get('containers') === 'open');
     await new Promise((r) => setTimeout(r, Number(params.get('stockWait') ?? 4000)));
   },
+  update(dt) {
+    if (labShop) labShop.lv.update(dt, labShop.cam.position);
+  },
 };
+let labShop: { lv: ShopLevel; cam: THREE.Camera } | null = null;
 export default scene;
