@@ -78,7 +78,8 @@
     ray.setFromCamera({ x, y }, W.camera);
     const hits = ray.intersectObject(W.level.group, true).slice(0, 4).map((h) => {
       const m = h.object.material;
-      return `${h.distance.toFixed(2)} ${m.name || m.type}${m.userData.realView ? '[real]' : m.userData.windowView ? '[painted]' : ''}${m.transparent ? ' op' + m.opacity : ''}${m.color ? ' #' + m.color.getHexString() : ''}`;
+      let anc = h.object; const chain = []; while (anc && anc !== W.level.group && chain.length < 4) { chain.push(anc.name || anc.type); anc = anc.parent; }
+      return `${h.distance.toFixed(2)} ${m.name || m.type} {${chain.join('<')}}${m.userData.realView ? '[real]' : m.userData.windowView ? '[painted]' : ''}${m.transparent ? ' op' + m.opacity : ''}${m.color ? ' #' + m.color.getHexString() : ''}`;
     });
     px.push(`(${x},${y}) ${hits.join(' > ')}`);
   }
@@ -88,7 +89,8 @@
   const marker = 'bounded dark navy';
   const which = `port ${location.port}; served source has night code ${served.includes(marker)}; drawn shader has it ${!!(mesh.material.fragmentShader && mesh.material.fragmentShader.includes(marker))}`;
   const pick = `${which} | pixels: ${px.join(' ; ')} | programs: ${progs.join(', ') || 'none named'}`;
+  const post = `post grade lift ${(() => { try { const g = W.lighting.grade?.uniforms; return g ? [g.uLift.value.toArray(), g.uGain.value.toArray(), g.uSat.value].map(String).join(' ') : 'n/a'; } catch (e) { return 'err'; } })()}`;
   const s = W.views.stats;
   const tw = W.toWorld ? new V().setFromMatrixPosition(W.toWorld) : null;
-  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | ${diag} | ${pick} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
+  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | ${diag} | ${pick} | ${post} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
 })();
