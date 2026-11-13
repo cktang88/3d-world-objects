@@ -31,6 +31,31 @@ export function initDetail(renderer: THREE.WebGLRenderer) {
 }
 let maxAniso = 8;
 
+/**
+ * [districts] transmissive glass (sand3d glass becomes MeshPhysicalMaterial transmission: 1) makes three render
+ * the whole opaque scene a second time into its transmission target: at Music Row the auto row showroom
+ * cars' windows took the main pass from ~750 to 1532 draw calls. Showcase models and originals get plain see-through glass.
+ */
+const plainGlass = new Map<string, THREE.MeshStandardMaterial>();
+export function noTransmission(root: THREE.Object3D) {
+  let n = 0;
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const swap = (m: THREE.Material) => {
+      const pm = m as THREE.MeshPhysicalMaterial;
+      if (!pm.isMeshPhysicalMaterial || !(pm.transmission > 0)) return m;
+      n++;
+      const key = pm.color.getHexString();
+      let g = plainGlass.get(key);
+      if (!g) plainGlass.set(key, (g = new THREE.MeshStandardMaterial({ name: 'showcase-glass', color: pm.color, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.2 })));
+      return g;
+    };
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+  });
+  return n;
+}
+
 export function originalUrl(id: string, og: number) {
   const uid = id.replace(/^objaverse-/, '');
   return `https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-${String(og).padStart(3, '0')}/${uid}.glb`;
@@ -196,6 +221,7 @@ async function fetchOriginal(id: string, og: number, prio: number, texMax: numbe
       done();
     }
     const scene = gltf.scene;
+    noTransmission(scene); // [districts] KHR_materials_transmission doubled the frame's draw calls
     scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(scene);
     if (box.isEmpty()) return null;

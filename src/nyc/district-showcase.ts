@@ -3,6 +3,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Portal } from '../level';
 import { Rng, hashN } from '../rng';
 import { realScale } from '../realscale';
+import { noTransmission } from '../detail';
+export { noTransmission };
 import { loadRemote, disposeModel, isRebuilt, DATASET_LABEL, type RemoteEntry } from '../remote';
 import { toEntry } from '../museumData';
 import { trackForDetail } from '../detail';
@@ -100,6 +102,8 @@ let loading = 0;
  * (slot radius 260 m) building them at once pushed a headless page past its memory and crashed it.
  */
 export const HEAVY_BYTES = 2.5e6;
+/** showcase objects smaller than this (largest side, m) cast no shadow */
+export const SHADOW_MIN = 1.5;
 let heavy: Promise<void> = Promise.resolve();
 /** the last showcase loads, for e2e / debugging (window.__showcaseLog) */
 export const showcaseLog: { kind: string; id: string; mb: number; tris: number; ms: number; ok: boolean; why?: string }[] = [];
@@ -194,6 +198,7 @@ const tmpV = new THREE.Vector3();
 
 /** merge a static model's meshes by material: a few draw calls instead of dozens */
 function flatten(root: THREE.Object3D): THREE.Group {
+  noTransmission(root);
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const buckets = new Map<string, { m: THREE.Material; geos: THREE.BufferGeometry[] }>();
@@ -309,6 +314,9 @@ async function load(s: Slot) {
     const c = tmpBox.getCenter(tmpV);
     const inner = new THREE.Group();
     const flat = flatten(obj);
+    // [districts] small pieces (tools on a table, stock on a stall) cast no cascade shadow: at Hudson Yards
+    // the shadow pass was 626 of 1602 draw calls
+    if (Math.max(dim.x, dim.y, dim.z) < SHADOW_MIN) flat.traverse((o) => void (o.castShadow = false));
     flat.position.set(-c.x, -tmpBox.min.y, -c.z);
     inner.add(flat);
     inner.scale.setScalar(k);

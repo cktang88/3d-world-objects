@@ -44,3 +44,19 @@ test('a GLB with an 8k texture is over the decode budget; a 2k one is not', () =
   expect(ORIGINAL_TEX_MAX <= 1024, `originals shrink to ${ORIGINAL_TEX_MAX} px`);
   expect(HEAVY_BYTES <= 3e6, `heavy showcase programs from ${HEAVY_BYTES} bytes`);
 });
+
+test('showcase models carry no transmissive glass (it re-renders the whole scene: ~2x draw calls)', async () => {
+  const THREE = await import('three');
+  const { glassFrom } = await import('../src/materials');
+  const { noTransmission } = await import('../src/nyc/district-showcase');
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(), glassFrom(new THREE.MeshStandardMaterial({ color: '#557788' }))));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
+  expect(noTransmission(g) === 1, 'the glass was not swapped');
+  let tx = 0;
+  g.traverse((o) => {
+    const m = (o as InstanceType<typeof THREE.Mesh>).material as InstanceType<typeof THREE.MeshPhysicalMaterial> | undefined;
+    if (m && m.transmission > 0) tx++;
+  });
+  expect(tx === 0, `${tx} transmissive materials left`);
+});
