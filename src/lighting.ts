@@ -838,7 +838,7 @@ export class Lighting {
     this.dome.visible = false;
     this.dome.name = 'sky-dome';
     this.dome.onBeforeRender = (_r, _s, cam) => {
-      this.dome.position.copy(cam.position);
+      this.dome.position.setFromMatrixPosition(cam.matrixWorld); // (a cube camera's faces are children)
       this.dome.scale.setScalar((cam as THREE.PerspectiveCamera).far * 0.5);
       this.dome.updateMatrixWorld();
     };
@@ -937,6 +937,7 @@ export class Lighting {
   /** a new level (or lab scene) */
   apply(env: Env, place: Place) {
     const wasOutdoor = this.place === 'outdoor';
+    if (wasOutdoor && place !== 'outdoor') this.snapOutdoor();
     this.env = env;
     this.place = place;
     if (place === 'outdoor') {
@@ -959,6 +960,82 @@ export class Lighting {
     this.setNight(0, 0, 0);
     this.applyBasic(env);
     if (place !== 'studio') this.loadIndoor(place);
+  }
+
+  // ------------------------------------------------------------ the outdoor light, from indoors
+  /** the outdoor sky / sun / fog / night as they were when you last went in (windowview.ts) */
+  private outdoor: {
+    env: THREE.Texture | null; envI: number; dome: boolean; sky: boolean; fog: THREE.Color; fogD: number;
+    sun: THREE.Color; sunI: number; sunDir: THREE.Vector3; exposure: number; night: number; lit: number; wet: number; key: string;
+  } | null = null;
+  private snapOutdoor() {
+    const f = this.fog(), l = this.csm?.lights[0];
+    this.outdoor = {
+      env: this.scene.environment, envI: this.scene.environmentIntensity, dome: this.dome.visible, sky: this.sky.visible,
+      fog: f.color.clone(), fogD: f.density, sun: l ? l.color.clone() : new THREE.Color(), sunI: l?.intensity ?? 0, sunDir: this.sunDir.clone(),
+      exposure: this.renderer.toneMappingExposure, night: U.night.value, lit: U.lit.value, wet: U.wet.value,
+      key: `${this.envKey}|${U.night.value.toFixed(2)}|${U.wet.value.toFixed(2)}`,
+    };
+  }
+  /** identifies the outdoor light a window view was captured in (time of day, weather); null before any outdoors */
+  get outdoorKey() {
+    return this.outdoor?.key ?? null;
+  }
+  /** the outdoor exposure (a capture is linear: scale it by outdoor / indoor exposure) */
+  get outdoorExposure() {
+    return this.outdoor?.exposure ?? this.renderer.toneMappingExposure;
+  }
+  /**
+   * Run fn (renders of the city from indoors) with the scene lit as it was outdoors: sky, image
+   * light, sun, fog, night windows. Light counts stay as they are (no shader recompiles); restored
+   * afterwards. Returns false if there is no outdoor light to use yet.
+   */
+  asOutdoor(fn: () => void) {
+    const o = this.outdoor;
+    if (!o) return false;
+    const sc = this.scene, f = this.fog();
+    const was = {
+      env: sc.environment, envI: sc.environmentIntensity, bg: sc.background, dome: this.dome.visible, sky: this.sky.visible,
+      fog: f.color.clone(), fogD: f.density, night: U.night.value, lit: U.lit.value, wet: U.wet.value,
+      lights: (this.csm?.lights ?? []).map((l) => ({ c: l.color.clone(), i: l.intensity, p: l.position.clone() })),
+    };
+    sc.environment = o.env;
+    sc.environmentIntensity = o.envI;
+    sc.background = null;
+    this.dome.visible = o.dome;
+    this.sky.visible = o.sky;
+    f.color.copy(o.fog);
+    f.density = o.fogD;
+    U.night.value = o.night;
+    U.lit.value = o.lit;
+    U.wet.value = o.wet;
+    for (const l of this.csm?.lights ?? []) {
+      l.color.copy(o.sun);
+      l.intensity = o.sunI;
+      l.position.copy(l.target.position).addScaledVector(o.sunDir, 200);
+      l.updateMatrixWorld();
+    }
+    try {
+      fn();
+    } finally {
+      sc.environment = was.env;
+      sc.environmentIntensity = was.envI;
+      sc.background = was.bg;
+      this.dome.visible = was.dome;
+      this.sky.visible = was.sky;
+      f.color.copy(was.fog);
+      f.density = was.fogD;
+      U.night.value = was.night;
+      U.lit.value = was.lit;
+      U.wet.value = was.wet;
+      (this.csm?.lights ?? []).forEach((l, i) => {
+        l.color.copy(was.lights[i].c);
+        l.intensity = was.lights[i].i;
+        l.position.copy(was.lights[i].p);
+        l.updateMatrixWorld();
+      });
+    }
+    return true;
   }
 
   /** call once per frame before rendering, with the point the player/orbit camera is at */

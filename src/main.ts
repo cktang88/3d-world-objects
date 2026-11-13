@@ -31,7 +31,8 @@ import { Lighting, TIMES, type Place, type TimeOfDay } from './lighting';
 import { Weather } from './weather';
 import { loadPbr, setPbrResolution } from './pbr';
 import { initDetail, updateDetail, applyOriginals, originalsEnabled } from './detail';
-import { Seamless, descKey, doorOf, floorStackStep, type Slot } from './seamless';
+import { Seamless, descKey, doorOf, entryOf, floorStackStep, type Slot } from './seamless';
+import { WindowViews, enterWorld, floorWorld, type Hullish } from './windowview';
 import { Lazy, type LazyContainer } from './lazy';
 import { warmUp } from './lazy-furniture';
 import { probePedCar } from './probe';
@@ -156,6 +157,8 @@ sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.04;
 scene.add(hemi, ambient, sun, sun.target);
 const lighting = new Lighting(renderer, scene, camera, pmrem, sun, hemi, ambient, roomEnv);
+// ?wv=0: the painted window backdrops (before / after comparisons)
+const views = new WindowViews({ enabled: params0.get('wv') !== '0',  renderer, scene, asOutdoor: (fn) => lighting.asOutdoor(fn), outdoorKey: () => lighting.outdoorKey, gain: () => lighting.outdoorExposure / Math.max(0.05, renderer.toneMappingExposure) });
 lighting.bloom = bloom;
 composer.addPass(lighting.grade);
 if (params0.get('tod') && (TIMES as string[]).includes(params0.get('tod')!)) lighting.setTime(params0.get('tod') as TimeOfDay);
@@ -212,8 +215,16 @@ interface Frame {
   yaw: number;
   exact: boolean;
   scale: number;
+  /** that level's frame -> the city's (windowview.ts), null when not in the city */
+  world?: THREE.Matrix4 | null;
 }
 const stack: Frame[] = [];
+/** the active level's frame -> the city's: identity on the street, door placements and floor moves inside */
+let toWorld: THREE.Matrix4 | null = null;
+/** the place in the city of a level entered through portal p */
+function childWorld(p: Portal, lv: Level) {
+  return enterWorld(toWorld, doorOf(p), entryOf(lv) ?? null);
+}
 let level: Level;
 let currentDesc: LevelDesc;
 let scale = 1;
@@ -289,7 +300,7 @@ function seamFloorStack(from: LevelDesc, to: LevelDesc) {
   const step = floorStackStep(stack[stack.length - 1]?.desc, from, to);
   if (step === 'pop') stack.pop();
   // back in the lobby at its spawn by the street door: where you left it is mid-stair, which would climb again
-  else if (step === 'push') stack.push({ desc: from, pos: level.spawn.pos.clone(), yaw: level.spawn.yaw, exact: true, scale });
+  else if (step === 'push') stack.push({ desc: from, pos: level.spawn.pos.clone(), yaw: level.spawn.yaw, exact: true, scale, world: toWorld });
 }
 // ---- end seamless
 
@@ -331,7 +342,9 @@ function setLevel(next: Slot, pos?: THREE.Vector3, yaw?: number) {
   // the previous level stays alive in seamless.ts' cache (disposed when evicted)
   if (level) scene.remove(level.group);
   level = next.level;
-  seam.setActive(next, stack.slice(-2).map((f) => descKey(f.desc)));
+  // windowview.ts: the city stays alive while you are in one of its buildings (its windows show it)
+  const root = stack[0]?.desc.kind === 'nyc' ? [descKey(stack[0].desc)] : [];
+  seam.setActive(next, [...root, ...stack.slice(-2).map((f) => descKey(f.desc))]);
   scene.add(level.group);
   applyEnv(level.env, placeOf(currentDesc));
   player.place(pos ?? level.spawn.pos, yaw ?? level.spawn.yaw);
@@ -417,7 +430,8 @@ async function enter(p: Portal) {
     // seamless: already built (and maybe on show behind this door): no fade, no rebuild
     const s = seam.take(target);
     const carried = doorOf(p) && seam.placeAt(s, p) ? seam.carry(s, 'in', player.pos, player.yaw) : null;
-    stack.push({ desc: currentDesc, pos: (p.returnPos ?? player.pos).clone(), yaw: p.returnYaw ?? player.yaw, exact: !!p.returnPos, scale });
+    stack.push({ desc: currentDesc, pos: (p.returnPos ?? player.pos).clone(), yaw: p.returnYaw ?? player.yaw, exact: !!p.returnPos, scale, world: toWorld });
+    toWorld = childWorld(p, s.level);
     currentDesc = target;
     roomsVisited++;
     seamSwitch(s, carried?.pos, carried?.yaw);
@@ -434,7 +448,7 @@ async function enter(p: Portal) {
     await new Promise((r) => setTimeout(r, 450));
     await Promise.all([zoom, fadeTo(1, 450)]);
   } else await fadeTo(1, quick ? 220 : 300);
-  stack.push({ desc: currentDesc, pos: (p.returnPos ?? player.pos).clone(), yaw: p.returnYaw ?? player.yaw, exact: !!p.returnPos, scale });
+  stack.push({ desc: currentDesc, pos: (p.returnPos ?? player.pos).clone(), yaw: p.returnYaw ?? player.yaw, exact: !!p.returnPos, scale, world: toWorld });
   currentDesc = target;
   if (shrink && p.shrink) scale *= p.shrink / 1000;
   roomsVisited++;
@@ -443,6 +457,7 @@ async function enter(p: Portal) {
   const built = await seam.buildNow(target, (n) => seamHint(n));
   clearTimeout(hintAt);
   seamHint(-1);
+  toWorld = shrink ? null : childWorld(p, built.level);
   setLevel(built);
   if (shrink) toast(`You shrink into ${target.name.replace('Inside ', '')}…  Press Q to climb back out.`);
   else if (target.kind === 'interior') toast(target.floor > 0 ? `Floor ${target.floor + 1}` : target.shop ? `Welcome to ${target.name}` : target.name);
@@ -475,6 +490,7 @@ async function goBack(walked = false) {
     return;
   }
   const wasCity = currentDesc.kind === 'city' || currentDesc.kind === 'macro';
+  toWorld = f.world ?? null;
   const parent = seam.slots.get(descKey(f.desc));
   if (seam.enabled && !wasCity && parent?.ready) {
     // seamless: the level you came from is still alive; walk back out where you went in
@@ -800,6 +816,7 @@ function frame() {
     if (vsw) {
       const t0 = performance.now();
       const vel = player.vel.clone(), onGround = player.onGround;
+      toWorld = floorWorld(toWorld, currentDesc, vsw.desc);
       seamFloorStack(currentDesc, vsw.desc);
       currentDesc = vsw.desc;
       seamSwitch(seam.take(vsw.desc), vsw.pos, vsw.yaw);
@@ -811,6 +828,14 @@ function frame() {
       if (vsw.why === 'lift' || (currentDesc.kind === 'floor' && currentDesc.floor >= currentDesc.floors)) toast(descName(currentDesc));
     }
     // ---- end vertical hook
+    // ---- windowview.ts: the real city in the windows of the room you are in
+    {
+      const cityDesc = stack[0]?.desc.kind === 'nyc' ? stack[0].desc : currentDesc.kind === 'nyc' ? currentDesc : null;
+      const city = cityDesc ? seam.slots.get(descKey(cityDesc))?.level : undefined;
+      const hulls = city && 'hulls' in city ? [...(city as unknown as { hulls(): Map<string, Hullish[]> }).hulls().values()].flat() : null;
+      views.setLevel(level, toWorld, city && hulls ? { group: city.group, hulls } : null);
+      views.update();
+    }
     const auto = active ? autoPortal() : null;
     if (auto) enter(auto);
     aimed = active && !infoOpen ? target() : null;
@@ -874,6 +899,7 @@ async function startMode(m: Mode) {
     if (params.get('building')) currentDesc = testBuilding(params);
   }
   if (level) scene.remove(level.group);
+  toWorld = currentDesc.kind === 'nyc' ? new THREE.Matrix4() : null;
   seam.clear();
   museumRoutes.reset(museum().wings.map((w) => ({ kind: 'gallery', theme: w.theme, page: 0 })));
   mark('level build start');
@@ -971,7 +997,17 @@ minimap.onTeleport = (x, z, yaw) => player.place(new THREE.Vector3(x, 0, z), yaw
 Object.assign(window, {
   __world: { seam, vert, renderer, lighting, weather, scene, camera, gtao, bloom, player, enter, goBack, get level() { return level; }, get aimed() { return aimed; }, startMode,
     // scripts/e2e: read-only views of the journey state
-    lazy, get stack() { return stack; }, get desc() { return currentDesc; }, get started() { return started; }, get transitioning() { return transitioning; }, get aimedBox() { return aimedBox; }, get infoOpen() { return infoOpen; }, get mode() { return mode; } },
+    lazy, views, get toWorld() { return toWorld; }, get stack() { return stack; },
+    /** e2e: the stair / lift floor switch (vertical hook below) to floor n of the building you are in */
+    goFloor(n: number) {
+      if (currentDesc.kind !== 'floor') return false;
+      const to: LevelDesc = { ...currentDesc, floor: n };
+      toWorld = floorWorld(toWorld, currentDesc, to);
+      seamFloorStack(currentDesc, to);
+      currentDesc = to;
+      seamSwitch(seam.take(to), undefined, undefined);
+      return true;
+    }, get desc() { return currentDesc; }, get started() { return started; }, get transitioning() { return transitioning; }, get aimedBox() { return aimedBox; }, get infoOpen() { return infoOpen; }, get mode() { return mode; } },
 });
 
 // ---- WP1 perf hook (src/perf.ts): whole-frame/per-pass counts, window.__world.perf(), ?perf=1 overlay ----
