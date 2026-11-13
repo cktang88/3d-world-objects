@@ -1448,7 +1448,10 @@ export class FloorLevel implements Level, VCore {
       fk.box(M.black(), door, 0.06, 0.06, 0, 2.44, 0);
       for (const sx of [-1, 1]) fk.box(M.black(), 0.06, 2.5, 0.06, sx * (door / 2 - 0.03), 0, 0);
       fk.box(M.black(), 0.04, 2.44, 0.05, 0, 0, 0);
-      fk.box(M.glass(), door - 0.1, 2.3, 0.01, 0, 0.1, 0);
+      fk.box(M.windowGlass(), door - 0.1, 2.3, 0.01, 0, 0.1, 0);
+      // [windowview] the street behind the door glass (the real city once captured); in the street
+      // wall's group, so it hides with it when the lobby is seen from the street
+      fk.box(M.viewPlane(), door + 2.4, 3.2, 0.02, 0, 0, -1.6); // (this frame is turned: -z is outside)
       fk.box(M.brass(), 0.03, 0.3, 0.03, -0.12, 1.0, -0.04);
       fk.box(M.brass(), 0.03, 0.3, 0.03, 0.12, 1.0, -0.04);
     });

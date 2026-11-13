@@ -99,6 +99,19 @@ export const M = {
   terracotta: () => mat('#b5643f', { rough: 0.85 }),
   glass: () =>
     memo('glass', () => new THREE.MeshStandardMaterial({ color: '#dfeef2', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide })),
+  // [windowview] window panes: the room does not light them (black base), so the real view behind
+  // stays clear; only a faint reflection of the environment (was M.glass: a 16 % pale haze)
+  windowGlass: () =>
+    memo('windowGlass', () => new THREE.MeshStandardMaterial({ color: '#000000', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.06, depthWrite: false, side: THREE.DoubleSide })),
+  // [windowview] the outside behind a window with no painted backdrop: plain daylight until
+  // windowview.ts puts the real city (its capture) on it
+  viewPlane: () =>
+    memo('viewPlane', () => {
+      const m = new THREE.MeshStandardMaterial({ color: '#cfe0ee', emissive: '#b8d0e8', emissiveIntensity: 0.9, roughness: 0.1 });
+      m.userData.windowView = true;
+      m.userData.viewPlane = true;
+      return m;
+    }),
   frosted: () => memo('frosted', () => new THREE.MeshStandardMaterial({ color: '#f4f7f8', roughness: 0.6, transparent: true, opacity: 0.55, depthWrite: false })),
   subway: (color = '#f4f2ec') => tiled(`subway${color}`, subwayTex(color), 0.3, { rough: 0.12 }),
   hex: () => tiled('hex', hexTex(), 0.3, { rough: 0.35 }),

@@ -124,3 +124,23 @@ test('the window view cache keeps a few captures and disposes the oldest', () =>
   c.clear();
   expect(gone.length === 3, 'clear frees the rest');
 });
+
+test('office suites and lobbies have window-view planes too, and window panes are clear glass', async () => {
+  const { OfficeLevel, OFFICE_TYPES } = await import('../src/rooms/office');
+  const { M } = await import('../src/rooms/mats');
+  const t = (OFFICE_TYPES as unknown as string[])[0];
+  const office = new OfficeLevel({ kind: 'interior', seed: 5, name: 'Suite', style: 'office', floor: 3, floors: 8, biome: 'town', office: t } as unknown as Extract<LevelDesc, { kind: 'interior' }>);
+  const lobby = new FloorLevel(lobbyDesc);
+  const n = { office: windowMeshes(office.group).length, lobby: windowMeshes(lobby.group).length };
+  expect(n.office > 0 && n.lobby > 0, `window-view planes: office ${n.office}, lobby ${n.lobby}`);
+  // the lobby's plane is outside its street door (beyond the door, away from the room)
+  const c = windowCentre(windowMeshes(lobby.group))!;
+  const door = entryOf(lobby)!.pos;
+  expect(c.z > door.z, `lobby view plane outside the street door (z ${fmt(c.z)} vs door ${fmt(door.z)})`);
+  const g = M.windowGlass();
+  expect(g.color.getHex() === 0 && g.opacity <= 0.08, 'window glass: unlit base, faint');
+  const { apt } = chain();
+  let panes = 0;
+  apt.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === g) panes++; });
+  expect(panes > 0, 'apartment windows use the clear window glass');
+});

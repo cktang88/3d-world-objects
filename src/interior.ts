@@ -812,7 +812,7 @@ export class InteriorLevel implements Level {
     k.at(fx, 0, fz, rot, () => {
       // in this frame: local x along the wall, local z = across (sign: +z toward the room if inward>0 on z sides)
       const dir = sd.axis === 'z' ? sd.inward : -sd.inward; // local z toward the room
-      const glassM = sd.room.type === 'bathroom' ? M.frosted() : M.glass();
+      const glassM = sd.room.type === 'bathroom' ? M.frosted() : M.windowGlass(); // [windowview] clear panes
       if (office) {
         // steel loft window: fixed panes with a transom
         k.box(frame, o.w, 0.05, 0.06, 0, o.y0, 0);

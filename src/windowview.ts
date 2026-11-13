@@ -100,7 +100,7 @@ export function windowMeshes(root: THREE.Object3D) {
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     const mt = m.material as THREE.MeshStandardMaterial | undefined;
-    if (m.isMesh && mt && !Array.isArray(mt) && mt.userData.windowView && mt.emissiveMap) out.push(m);
+    if (m.isMesh && mt && !Array.isArray(mt) && mt.userData.windowView && (mt.emissiveMap || mt.userData.viewPlane)) out.push(m);
   });
   return out;
 }

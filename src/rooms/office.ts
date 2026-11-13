@@ -244,7 +244,7 @@ export class OfficeLevel implements Level {
     k.box(look.wall, W, 0.4, T, 0, H - 0.4, z0 - T / 2);
     this.col(x0, x1, z0 - T, z0);
     // the window band: bright glass between mullions (the city beyond reads as daylight)
-    const view = mat('#cfe0ee', { rough: 0.1, emissive: '#b8d0e8', ei: 0.9 });
+    const view = M.viewPlane(); // [windowview] the real city goes on it (src/windowview.ts)
     k.unshadowed(() => {
       k.box(view, W, H - 1.15, 0.02, 0, 0.75, z0 - 0.12);
       for (let x = x0; x <= x1 + 0.01; x += 1.5) k.box(M.iron(), 0.06, H - 1.15, 0.08, x, 0.75, z0 - 0.08);
