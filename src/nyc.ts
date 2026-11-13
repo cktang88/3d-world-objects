@@ -27,7 +27,7 @@ import { nycMinimapSource } from './nyc/minimap-nyc'; // [minimap]
 import { registerMinimapSource } from './minimap';
 import { brownRun, BROWN_FLOORS, type BrownRun } from './nyc/brownstone'; // [nbhd] brownstone rows
 import { Waterfront } from './nyc/waterfront'; // [nbhd] open rivers + far shores
-import { highLine } from './nyc/nbhd'; // [nbhd]
+import { highLine, landmarkFrontage } from './nyc/nbhd'; // [nbhd]
 const eyeV = new THREE.Vector3();
 const eyeOf = (p: THREE.Vector3) => eyeV.set(p.x, p.y + 1.6, p.z); // [nbhd]
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
@@ -258,6 +258,7 @@ export class NycLevel implements Level {
     // avenue frontage: both ends of the block
     for (const end of [-1, 1]) {
       if (!plan.ave[end < 0 ? 0 : 1]) continue; // [districts]
+      if (landmarkFrontage(ctx, end, end < 0 ? -LX : LX - 20, end < 0 ? -LX + 20 : LX)) { yield; continue; } // [nbhd] TKTS steps, Hudson Yards supertalls
       const x0 = end < 0 ? -LX : LX - 20;
       const x1 = end < 0 ? -LX + 20 : LX;
       const side: Side = end < 0 ? 'W' : 'E';

@@ -56,6 +56,15 @@ Even a three-car lab takes minutes to render here under load. Full-city counts a
 
 ## 2. Look: lab scenes, small and stripped
 
+### Render only the changed block (instead of a world shot)
+
+A street-level check of a city change does not need `?mode=world&r=1` (minutes, ~2 GB, often "Target crashed"). Render only the chunk you changed, by the real generator, at its world position, with the camera at the world pose:
+
+- `?lab=block&pose=x,y,z,yaw[,pitch]` — builds chunk (round(x/120), round(z/64)) (or `&cx=&cz=`) exactly as `NycLevel.block` does, camera at the eye (y ≈ 1.7, yaw as `player.yaw`: 0 looks north/-z, π/2 looks -x).
+- `&ring=1` adds the 8 neighbours as HLOD proxies (cheap to draw; still built on the CPU), `&ring=2` as real blocks; `&water=0` drops the rivers and far shores; `&wait=` seconds for showcase objects (default 8).
+- No world lock needed. Example: `node scripts/shot.mjs --port <port> --url "/?lab=block&pose=592,1.7,89.5,1.57,0.15&people=0" --w 768 --h 432 --out <scratchpad>/x.png` (~30–60 s, ~130 draws).
+- If you do need the full game: `r=0` and teleport, and poll `__world.level` (`pending` empty, chunks built) instead of a fixed wait. Shoot from a frozen copy of `src/` on its own vite port if you keep editing: the live dev server reloads the page on every file change.
+
 - Never iterate in the full world. Build only your thing in `src/lab/<name>.ts` (see `src/lab.ts`; files there are auto-registered; `?lab=index` lists them).
 - Screenshot:
   `node scripts/shot.mjs --port <port> --url "/?lab=<name>&cam=x,y,z&look=x,y,z" --out <scratchpad>/x.png --fast`

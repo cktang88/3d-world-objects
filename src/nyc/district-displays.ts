@@ -1,3 +1,4 @@
+import { tktsAt } from './nbhd'; // [nbhd]
 import * as THREE from 'three';
 import { rect } from '../level';
 import { Rng, hashN } from '../rng';
@@ -91,6 +92,7 @@ function billboards(ctx: BCtx, r: Rng) {
     ctx.stat.add(f);
   };
   for (const s of [-1, 1]) {
+    if (tktsAt(ctx.cx, ctx.cz, s)) continue; // [nbhd] Duffy Square: the plaza, no facade to hang screens on
     // facing the avenue: the facade at x = s * LX, normal +s x
     const ry = s > 0 ? Math.PI / 2 : -Math.PI / 2;
     const x = s * (LX + 0.45);

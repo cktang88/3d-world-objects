@@ -1,3 +1,4 @@
+import { graniteBox } from './waterfront'; // [nbhd]
 import * as THREE from 'three';
 import { mat } from '../build';
 import { Rng } from '../rng';
@@ -98,12 +99,9 @@ export function stoneWall(parent: THREE.Object3D, x0: number, z0: number, x1: nu
   const g = new THREE.Group();
   g.position.set((x0 + x1) / 2, y, (z0 + z1) / 2);
   g.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
-  const wall = new THREE.Mesh(new THREE.BoxGeometry(len, h, 0.55), flat('#8a8173', 0.95));
-  wall.position.y = h / 2;
-  wall.userData.owned = true;
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(len + 0.1, 0.12, 0.7), flat('#a39b8c', 0.9));
-  cap.position.y = h + 0.06;
-  cap.userData.owned = true;
+  // [nbhd] grey Manhattan schist / granite ashlar with a lighter coping (was flat brown)
+  const wall = graniteBox(len, h, 0.55, 0, h / 2, 0, '#8f8e88');
+  const cap = graniteBox(len + 0.1, 0.12, 0.7, 0, h + 0.06, 0, '#c2bfb6');
   wall.castShadow = cap.castShadow = true;
   g.add(wall, cap);
   parent.add(g);

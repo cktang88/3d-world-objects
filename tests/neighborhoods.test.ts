@@ -8,6 +8,7 @@ import { districtAt } from '../src/nyc/districts';
 import { BROWN_FLOORS } from '../src/nyc/brownstone';
 import type { Hull } from '../src/nyc/buildings';
 import * as THREE from 'three';
+import { LX, LZ } from '../src/nyc/common';
 import { Waterfront, HUDSON_X, riverCovered, PIER_CX } from '../src/nyc/waterfront';
 import { CityVis } from '../src/nyc/occlusion';
 import { highLine } from '../src/nyc/nbhd';
@@ -168,6 +169,21 @@ test('Meatpacking: steel loading-dock canopies over the sidewalks', () => {
     }
   const hulls = (meat as unknown as { hulls: Hull[] }).hulls;
   expect(canopies >= 6, `${canopies} sidewalk points under a canopy in Meatpacking (${hulls.length} buildings: ${hulls.map((h) => `${h.side}${fmt(h.h)}`).join(' ')})`);
+});
+
+test('landmarks: TKTS steps in Duffy Square, Hudson Yards supertalls (HLOD hulls)', () => {
+  const ts = nycChunk(1, 2, -3) as unknown as { hulls: Hull[] };
+  expect(ts.hulls.some((h) => h.rect.minX >= LX - 20.5 && h.h > 4 && h.h < 7), 'TKTS steps hull on the Times Square avenue end');
+  const hy = nycChunk(1, 4, -2) as unknown as { hulls: Hull[] };
+  const tall = Math.max(...hy.hulls.map((h) => h.h));
+  expect(tall > 280 && tall < 400, `30 Hudson Yards ${fmt(tall)} m`);
+});
+
+test('Midtown sidewalks are furnished: kerb-zone pieces on the spawn block', () => {
+  const c = nycChunk(1, 0, 0);
+  // small colliders (< 3.5 m) in the sidewalks: planters, baskets, racks, newsstands, docks, hydrants, lamps…
+  const side = c.colliders.filter((r) => r.maxX - r.minX < 3.5 && r.maxZ - r.minZ < 3.5 && (Math.abs((r.minX + r.maxX) / 2) > LX || Math.abs((r.minZ + r.maxZ) / 2) > LZ));
+  expect(side.length >= 36, `${side.length} sidewalk pieces (25 before the [nbhd] streetscape)`);
 });
 
 test('no HLOD proxy within 150 m of the eye', () => {
