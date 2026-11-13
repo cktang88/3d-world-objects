@@ -166,9 +166,9 @@ export function garmentRacks(ctx: BCtx) {
     const n = r.int(1, 3);
     let x = r.range(a0 + 1.5, Math.max(a0 + 1.6, a1 - 1.5 - n * 1.7));
     for (let k = 0; k < n; k++, x += 1.7) {
-      const off = line + out * r.range(1.1, 1.6);
+      const off = line + out * r.range(2.45, 2.7);
       const [px, pz] = alongX ? [x, off] : [off, x];
-      if (ctx.doors.some((d) => Math.hypot(d.x - px, d.z - pz) < 2.2) || ctx.portals.some((p) => p.box.distanceToPoint(new THREE.Vector3(px, 1, pz)) < 1.2)) continue; // keep doorways clear
+      if (ctx.doors.some((d) => Math.hypot(d.x - px, d.z - pz) < 2.2) || ctx.portals.some((p) => p.box.distanceToPoint(new THREE.Vector3(px, 1, pz)) < 0.2)) continue; // keep doorways clear
       const g = new THREE.Group();
       // Z-rack: base with casters, two uprights, the hanging bar
       for (const s of [-1, 1]) {
