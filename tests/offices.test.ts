@@ -2,9 +2,8 @@
 import * as THREE from 'three';
 import { test, expect, Grid } from './qa';
 import './env';
-import { OfficeLevel, officeTypeFor, OFFICE_TYPES, type OfficeType } from '../src/rooms/office';
+import { OfficeLevel, officeTypeFor, OFFICE_TYPES, OFFICE_LIB, type OfficeType } from '../src/rooms/office';
 import { FloorLevel, toWorld } from '../src/rooms/vertical';
-import { LIB } from '../src/rooms/lib';
 import { cycles, refsOf } from './memlib';
 import { memTrack } from '../src/dispose';
 import type { LevelDesc } from '../src/level';
@@ -79,7 +78,7 @@ test('offices: desk clutter is real-size and sits on its desk', () => {
       const d = l.desks[c.desk];
       expect(Math.abs(c.y - d.top) < 0.02, `${t}: ${c.kind} at y ${c.y.toFixed(2)}, desk top ${d.top}`);
       expect(c.x - c.w / 2 >= d.x0 - 0.02 && c.x + c.w / 2 <= d.x1 + 0.02 && c.z - c.d / 2 >= d.z0 - 0.02 && c.z + c.d / 2 <= d.z1 + 0.02, `${t}: ${c.kind} hangs off its desk`);
-      const lib = LIB[c.kind];
+      const lib = OFFICE_LIB[c.kind];
       if (lib) expect(Math.abs(c.h - lib[1]) < 1e-6, `${t}: library ${c.kind} not at its real size`);
       else {
         const [lo, hi] = real[c.kind] ?? [0, 99];
@@ -93,7 +92,7 @@ test('offices: desk clutter is real-size and sits on its desk', () => {
 test('offices: lifts and stairs stay reachable on office and loft floors (suite doors do not block them)', () => {
   for (const type of ['office', 'loft']) {
     const lv = new FloorLevel({ kind: 'floor', seed: 99, name: 'QA', type, floor: 3, floors: 10, district: 'midtown' });
-    const cols = lv.colliders(new THREE.Vector3());
+    const cols = lv.colliders();
     const b = new THREE.Box3().setFromObject(lv.group);
     const g = new Grid({ minX: b.min.x, maxX: b.max.x, minZ: b.min.z, maxZ: b.max.z }, cols, 0.1, 0.3);
     const reach = g.flood(0, lv.d.Ld + 0.5); // the stair landing (as tests/vertical.test.ts walks from)

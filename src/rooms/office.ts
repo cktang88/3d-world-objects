@@ -4,7 +4,9 @@ import { disposeTree, finishBuilding } from '../level';
 import { Kit } from './kit';
 import { M } from './mats';
 import * as F from './furniture';
-import { LIB, fillHolder } from './lib';
+import { LIB, libEnabled } from './lib';
+import { loadCatalog, loadLibraryModel, type LibraryEntry } from '../libraries';
+import { ABORTED } from '../dispose';
 import { Rng, hashN } from '../rng';
 import { mat } from '../build';
 import { surface } from '../pbr';
@@ -43,6 +45,27 @@ const COMPANY: Record<OfficeType, string[]> = {
   gym: ['IRON & OAK', 'PULSE FITNESS', 'REP STUDIO'],
   cowork: ['THE COMMONS', 'HIVE WORKSPACE', 'DESK & CO'],
 };
+
+// ------------------------------------------------------------------ library models used here
+
+/** real sizes (m, w x h x d) of the library models a suite uses: Poly Haven decor and frames, GSO mugs */
+export const OFFICE_LIB: Record<string, [number, number, number]> = {
+  ...LIB,
+  hanging_picture_frame_01: [0.594, 0.841, 0.016],
+  hanging_picture_frame_02: [0.752, 0.5, 0.033],
+  hanging_picture_frame_03: [0.385, 0.502, 0.032],
+  fancy_picture_frame_01: [0.603, 0.464, 0.02],
+  fancy_picture_frame_02: [0.661, 0.771, 0.089],
+  ACE_Coffee_Mug_Kristen_16_oz_cup: [0.126, 0.135, 0.091],
+  Cole_Hardware_Mug_Classic_Blue: [0.166, 0.095, 0.126],
+};
+const GSO_IDS = new Set(['ACE_Coffee_Mug_Kristen_16_oz_cup', 'Cole_Hardware_Mug_Classic_Blue']);
+const catalogs = new Map<string, Promise<Map<string, LibraryEntry>>>();
+function catalog(src: 'gso' | 'polyhaven') {
+  let p = catalogs.get(src);
+  if (!p) catalogs.set(src, (p = loadCatalog(src).then((all) => new Map(all.map((e) => [e.id, e]))).catch(() => new Map<string, LibraryEntry>())));
+  return p;
+}
 
 // ------------------------------------------------------------------ which type where
 
@@ -134,6 +157,7 @@ export class OfficeLevel implements Level {
   private kit = new Kit();
   private rng: Rng;
   private holders: { o: THREE.Group; id: string; done: boolean }[] = [];
+  private loads = new AbortController();
   private chairs: THREE.Matrix4[] = [];
   private screens: THREE.Matrix4[] = [];
   private lights: THREE.PointLight[] = [];
@@ -164,11 +188,12 @@ export class OfficeLevel implements Level {
       const dx = h.o.position.x - p.x, dz = h.o.position.z - p.z;
       if (dx * dx + dz * dz < 81) {
         h.done = true;
-        void fillHolder(h.o, h.id);
+        void this.stream(h);
       }
     }
   }
   dispose() {
+    this.loads.abort(ABORTED); // in-flight library loads drop their continuation (src/dispose.ts)
     disposeTree(this.group);
   }
 
@@ -232,9 +257,9 @@ export class OfficeLevel implements Level {
     yield;
 
     // ---- front strip: reception, waiting, kitchenette
-    this.reception(ex, z1, spineZ);
-    yield;
     const isOffice = this.type !== 'gym' && this.type !== 'dentist';
+    this.reception(ex, z1, spineZ, this.type !== 'gym' ? x1 - 4.4 : x1 - 0.2);
+    yield;
     if (this.type !== 'gym') this.kitchenette(x1 - 4.4, x1 - 0.2, z1, spineZ);
     yield;
 
@@ -259,7 +284,7 @@ export class OfficeLevel implements Level {
       case 'tech': yield* this.benching(area, 2.9, true); break;
       case 'cowork': yield* this.benching(area, 2.9, false); break;
       case 'cubicle': yield* this.cubicles(area, 2.2, 1.4, M.fabric('#8a9098'), false); break;
-      case 'eighties': yield* this.cubicles(area, 2.4, 1.6, M.fabric('#b8a88a'), true); break;
+      case 'eighties': yield* this.cubicles(area, 2.4, 1.45, M.fabric('#c8b896'), true); break;
       case 'law': yield* this.law(area); break;
       case 'creative': yield* this.creative(area); break;
       case 'dentist': yield* this.dentist({ ...area, x1: x1 - 0.2 }); break;
@@ -271,7 +296,7 @@ export class OfficeLevel implements Level {
       // only where it leaves a 0.9 m way past it to everything around (walls excepted)
       const wall = (c: Rect) => c.maxX - c.minX > look.W - 1 || c.maxZ - c.minZ > look.D - 1;
       if (this.cols.some((c) => !wall(c) && px > c.minX - 1.25 && px < c.maxX + 1.25 && pz > c.minZ - 1.25 && pz < c.maxZ + 1.25)) continue;
-      this.libItem('potted_plant_01', px, 0, pz, 0, () => k.at(px, 0, pz, 0, () => F.plant(k, r, 1.3)));
+      this.libItem('potted_plant_01', px, 0, pz, 0, (kk) => F.plant(kk, r, 1.3));
       this.col(px - 0.3, px + 0.3, pz - 0.3, pz + 0.3);
     }
     yield;
@@ -280,8 +305,8 @@ export class OfficeLevel implements Level {
     const nx = 4, nz = 2;
     if (withLights) for (let i = 0; i < nx; i++)
       for (let j = 0; j < nz; j++) {
-        const l = new THREE.PointLight(look.light, (W * D) / 8 * (look.warm ? 0.9 : 1.1), Math.max(W / nx, D / nz) * 2.4, 2);
-        l.position.set(x0 + (W / nx) * (i + 0.5), H - 0.5, z0 + (D / nz) * (j + 0.5));
+        const l = new THREE.PointLight(look.light, (W * D) / 8 * (look.warm ? 0.55 : 0.65), Math.max(W / nx, D / nz) * 2.4, 2); // (brighter blew out the ceiling)
+        l.position.set(x0 + (W / nx) * (i + 0.5), H * 0.62, z0 + (D / nz) * (j + 0.5)); // well below the ceiling: no hot spots on it
         this.group.add(l);
         this.lights.push(l);
       }
@@ -301,7 +326,7 @@ export class OfficeLevel implements Level {
       } else {
         // open ceiling: dark deck, round ducts, pendant lines of light
         k.box(M.matte('#2e3034'), W, 0.02, D, 0, H + 0.4, 0);
-        for (const z of [z0 + D * 0.3, z0 + D * 0.7]) k.rod(M.steel(), 0.28, W - 0.4, 0, H + 0.05, z, 'x', 16);
+        for (const z of [z0 + D * 0.3, z0 + D * 0.7]) k.rod(M.steel(), 0.2, W - 0.4, 0, H + 0.18, z, 'x', 16);
         for (let x = x0 + 2; x < x1 - 1; x += 4) for (const z of [z0 + D * 0.5]) {
           k.rod(M.black(), 0.008, 0.6, x, H - 0.1, z, 'z', 4);
           k.box(M.troffer(), 1.6, 0.05, 0.12, x, H - 0.45, z);
@@ -310,34 +335,82 @@ export class OfficeLevel implements Level {
     });
   }
 
-  private reception(ex: number, z1: number, spineZ: number) {
+  /**
+   * The front strip (between the front wall and the spine aisle): a reception desk facing the
+   * entry aisle with a logo wall behind it, a coat rack by the door, a waiting sofa, a copier
+   * station and recycling bins. `end`: where the kitchenette starts (nothing past it).
+   */
+  private reception(ex: number, z1: number, spineZ: number, end: number) {
     const k = this.kit, r = this.rng, look = this.look;
-    // the desk to the right of the entry aisle, facing the door
-    const dx = ex + 2.6, dz = z1 - 1.7;
+    const zf = spineZ + 0.75; // back edge of the strip (the spine aisle starts there)
     const front = this.type === 'law' ? M.walnut('#b8a898') : this.type === 'eighties' ? M.walnut('#d8b890') : this.type === 'gym' ? M.matte('#1a1a1c') : M.matte('#f2f1ee');
-    k.box(front, 2.2, 1.05, 0.6, dx, 0, dz);
-    k.box(this.type === 'dentist' ? M.marble() : M.oak('#e8d8c0'), 2.3, 0.04, 0.75, dx, 1.05, dz - 0.05);
-    this.col(dx - 1.15, dx + 1.15, dz - 0.4, dz + 0.3);
-    this.chairs.push(new THREE.Matrix4().makeRotationY(0).setPosition(dx, 0, dz - 0.9));
-    this.deskClutter(dx - 0.5, 0.74, dz - 0.15, 1.2, 0.4, 0, true, { x0: dx - 1.15, x1: dx + 1.15, z0: dz - 0.42, z1: dz + 0.2, top: 0.74 });
-    // the company name on the wall behind (refcounted sign texture, freed with the suite)
+    // reception desk: long side along z, its front facing the entry aisle (-x)
+    const dx = ex + 1.85, dz = (zf + z1) / 2, len = Math.min(2.2, z1 - zf - 0.7);
+    k.box(front, 0.6, 1.05, len, dx, 0, dz);
+    k.box(this.type === 'dentist' ? M.marble() : M.oak('#e8d8c0'), 0.75, 0.04, len + 0.1, dx + 0.05, 1.05, dz);
+    k.box(look.desk, 0.7, 0.03, len, dx + 0.3, 0.71, dz); // the work top behind the counter
+    this.col(dx - 0.3, dx + 0.65, dz - len / 2, dz + len / 2);
+    this.chairs.push(new THREE.Matrix4().makeRotationY(-Math.PI / 2).setPosition(dx + 1.05, 0, dz));
+    this.deskClutter(dx + 0.3, 0.74, dz, len - 0.4, 0.7, Math.PI / 2, this.type === 'eighties', { x0: dx - 0.05, x1: dx + 0.65, z0: dz - len / 2, z1: dz + len / 2, top: 0.74 });
+    // the logo wall behind the receptionist, its face to the entry, the company name on it
+    const lx = dx + 1.55, lw = z1 - zf - 0.3;
+    const wallM = this.type === 'law' ? M.walnut('#8a7a6a') : this.type === 'creative' ? M.matte('#2a2c30') : this.type === 'tech' ? M.matte(r.pick(['#3a6a8a', '#2f6a5a', '#5a3a7a'])) : this.type === 'eighties' ? M.matte('#8a6a4a') : this.type === 'gym' ? M.matte('#c8452f') : M.oak('#d8c0a0');
+    k.box(wallM, 0.15, Math.min(look.H, 2.7), lw, lx, 0, (zf + z1) / 2 + 0.15);
+    this.col(lx - 0.08, lx + 0.08, zf + 0.15, z1);
     const name = r.pick(COMPANY[this.type]);
-    const sm = new THREE.MeshStandardMaterial({ map: signTex(name, this.type === 'gym' ? '#1a1a1c' : '#2a2c30', this.type === 'creative' ? '#f2c94c' : '#f2f2f0'), roughness: 0.4 });
+    const sm = new THREE.MeshStandardMaterial({ map: signTex(name, this.type === 'law' ? '#5a4a3a' : '#1a1c20', this.type === 'creative' ? '#f2c94c' : '#f2f2f0'), roughness: 0.4 });
     sm.userData.owned = true;
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), sm);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(2.4, lw - 0.3), 0.6), sm);
     sign.userData.owned = true;
-    sign.position.set(dx, Math.min(look.H - 0.6, 2.2), z1 - 0.02);
-    sign.rotation.y = Math.PI;
+    sign.position.set(lx - 0.08, 1.75, (zf + z1) / 2 + 0.15);
+    sign.rotation.y = -Math.PI / 2;
     this.group.add(sign);
-    // waiting chairs along the front wall
-    const wn = this.type === 'dentist' ? 5 : 3;
-    for (let i = 0; i < wn; i++) {
-      const cx = dx + 1.8 + i * 0.65, cz = z1 - 0.45;
-      if (cx > look.W / 2 - 4.6 && this.type !== 'gym') break;
-      k.at(cx, 0, cz, Math.PI, () => F.diningChair(k, M.matte('#2a2a2c'), look.chair));
-      this.col(cx - 0.25, cx + 0.25, cz - 0.25, cz + 0.25);
+    // a coat rack against the left wall by the door
+    const cx0 = -look.W / 2 + 0.35, cz0 = z1 - 1.7;
+    k.cyl(M.iron(), 0.2, 0.22, 0.03, cx0, 0, cz0, 16);
+    k.cyl(M.iron(), 0.018, 0.018, 1.75, cx0, 0, cz0, 8);
+    for (let i = 0; i < 4; i++) k.at(cx0, 1.68, cz0, (i * Math.PI) / 2, () => k.boxM(M.iron(), 0.015, 0.015, 0.2, 0, 0, 0.08, new THREE.Euler(-0.6, 0, 0)));
+    if (r.chance(0.7)) k.boxM(M.fabric(r.pick(['#2a2a2c', '#5a4a3a', '#3a4a5a'])), 0.42, 0.9, 0.16, cx0 + 0.08, 1.15, cz0, new THREE.Euler(0, 0.3, 0.05));
+    this.col(cx0 - 0.25, cx0 + 0.25, cz0 - 0.25, cz0 + 0.25);
+    // along the front wall, left to right: waiting sofa with a low table, the copier station, recycling bins
+    let x = lx + 0.6;
+    const fits = (w: number) => x + w <= end - 0.3;
+    if (fits(2.4)) {
+      const sx = x + 1.1;
+      k.at(sx, 0, z1 - 0.5, Math.PI, () => F.sofa(k, r, 2.0, M.fabric(r.pick(['#5a6a7a', '#7a5a4a', '#4a5a4a', '#8a3a3a', '#c8b89a'])), M.black(), [M.fabric('#d8c8a8')]));
+      this.col(sx - 1.05, sx + 1.05, z1 - 0.95, z1);
+      const tz = z1 - 1.55;
+      k.box(M.oak('#e8d8c0'), 1.0, 0.4, 0.5, sx, 0, tz);
+      F.bookStack(k, r, sx - 0.2, 0.4, tz);
+      this.col(sx - 0.5, sx + 0.5, tz - 0.25, tz + 0.25);
+      this.seats.push(new THREE.Vector3(sx, 0, tz - 0.6));
+      x += 2.6;
     }
-    void spineZ;
+    if (this.type !== 'gym' && fits(1.9)) {
+      // copier: a big grey box with its control panel and paper drawers, a printer on a cabinet beside it
+      const cx = x + 0.4, cz = z1 - 0.4;
+      k.box(M.matte('#d8d8d4'), 0.65, 0.95, 0.65, cx, 0, cz);
+      for (let i = 0; i < 3; i++) k.box(M.matte('#b8b8b4'), 0.6, 0.005, 0.01, cx, 0.2 + i * 0.22, cz - 0.33);
+      k.box(M.matte('#c8c8c4'), 0.6, 0.12, 0.55, cx, 0.95, cz + 0.03);
+      k.box(M.screenOn(), 0.18, 0.1, 0.01, cx + 0.15, 1.0, cz - 0.3);
+      k.box(M.matte('#f6f5f0'), 0.21, 0.01, 0.297, cx - 0.1, 1.07, cz);
+      const px = x + 1.25;
+      k.box(M.matte('#c8c4bc'), 0.8, 0.72, 0.5, px, 0, cz + 0.05);
+      k.box(M.matte('#2a2a2c'), 0.45, 0.3, 0.4, px, 0.72, cz + 0.05);
+      k.box(M.matte('#f6f5f0'), 0.21, 0.04, 0.297, px - 0.25, 0.72, cz);
+      this.col(x + 0.05, x + 1.7, z1 - 0.75, z1);
+      x += 1.9;
+    }
+    if (fits(1.1)) {
+      // recycling: paper (blue), cans and bottles (green), waste (grey)
+      for (const [i, c] of (['#2a5aa8', '#2a8a4a', '#5a5a5c'] as const).entries()) {
+        const bx = x + 0.18 + i * 0.36;
+        k.box(M.matte(c), 0.32, 0.7, 0.38, bx, 0, z1 - 0.3);
+        k.box(M.matte('#1a1a1c'), 0.33, 0.02, 0.39, bx, 0.7, z1 - 0.3);
+      }
+      this.col(x, x + 1.1, z1 - 0.5, z1);
+      x += 1.2;
+    }
   }
 
   private kitchenette(a: number, b: number, z1: number, spineZ: number) {
@@ -460,13 +533,15 @@ export class OfficeLevel implements Level {
     if (r.chance(0.7)) {
       const mxl = -px * 0.8;
       const [mx, mz] = local(mxl, 0.1);
-      F.mug(k, r, mx, y, mz);
-      note('mug', mxl, 0.1, 0.085, 0.085, 0.095);
+      const id = r.pick([...GSO_IDS]);
+      const s = OFFICE_LIB[id];
+      this.libItem(id, mx, y, mz, rotY + r.range(-0.6, 0.6), (kk) => F.mug(kk, r, 0, 0, 0));
+      note(id, mxl, 0.1, s[0], s[2], s[1]);
     }
     // library decor (real size, streamed when near): a desk lamp, a laptop, a small plant or a frame
     if (r.chance(0.35)) {
       const id = r.pick(['potted_plant_04', 'standing_picture_frame_01', 'alarm_clock_01']);
-      const s = LIB[id];
+      const s = OFFICE_LIB[id];
       const lx = (w / 2 - s[0] / 2 - 0.03) * (px > 0 ? -1 : 1), lz = -d / 2 + s[2] / 2 + 0.03;
       const [hx, hz] = local(lx, lz);
       this.libItem(id, hx, y, hz, rotY);
@@ -475,19 +550,35 @@ export class OfficeLevel implements Level {
   }
 
   /** a library model in a holder at real size; until it streams in, a box of its size stands in */
-  private libItem(id: string, x: number, y: number, z: number, rotY: number, standIn?: () => void) {
+  /**
+   * A library model in a holder at real size (OFFICE_LIB sizes). Until it streams in (update(), when
+   * you come within 9 m) a procedural stand-in of the same size is drawn in the holder.
+   */
+  private libItem(id: string, x: number, y: number, z: number, rotY: number, standIn?: (k: Kit) => void) {
     const o = new THREE.Group();
     o.position.set(x, y, z);
     o.rotation.y = rotY;
-    const s = LIB[id];
-    if (standIn) standIn();
-    else if (s) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(s[0] * 0.9, s[1] * 0.9, s[2] * 0.9).translate(0, (s[1] * 0.9) / 2, 0), M.matte('#8a8680'));
-      b.userData.owned = true;
-      o.add(b);
-    }
+    const s = OFFICE_LIB[id];
+    const kk = new Kit();
+    if (standIn) standIn(kk);
+    else if (s) kk.box(M.matte('#8a8680'), s[0] * 0.9, s[1] * 0.9, s[2] * 0.9);
+    kk.finish(o, false);
     this.group.add(o);
     this.holders.push({ o, id, done: false });
+  }
+
+  /** stream one library model into its holder (the suite's AbortController drops it if the suite goes) */
+  private async stream(h: { o: THREE.Group; id: string }) {
+    const src = GSO_IDS.has(h.id) ? 'gso' : 'polyhaven';
+    const e = (await catalog(src)).get(h.id);
+    if (!e || h.o.userData.disposed || !libEnabled) return;
+    const m = await loadLibraryModel(e, { signal: this.loads.signal, quality: 'low' }).catch(() => null);
+    if (!m || h.o.userData.disposed) return;
+    for (const c of [...h.o.children]) {
+      c.removeFromParent();
+      disposeTree(c);
+    }
+    h.o.add(m);
   }
 
   // ---------------------------------------------------------------- layouts per type
@@ -699,19 +790,38 @@ export class OfficeLevel implements Level {
   }
 
   /** framed prints and canvases on the side walls (refcounted painting textures, own materials) */
+  /**
+   * Art on the side walls: framed prints and paintings from the library (Poly Haven frames with their
+   * artworks, streamed when near; a painted canvas of the same size stands in), and larger painted
+   * canvases (refcounted painting textures, own materials).
+   */
   private art(x0: number, x1: number, z0: number, z1: number, spineZ: number) {
     const r = this.rng, k = this.kit;
     const frame = this.type === 'law' ? M.walnut('#8a7a6a') : r.pick([M.black(), M.oak('#e8d8c0'), M.matte('#f4f4f2')]);
-    const n = this.type === 'law' ? 4 : this.type === 'gym' ? 1 : r.int(2, 4);
+    const lib = this.type === 'law' || this.type === 'eighties' || this.type === 'dentist'
+      ? ['fancy_picture_frame_01', 'fancy_picture_frame_02', 'hanging_picture_frame_02', 'hanging_picture_frame_03']
+      : ['hanging_picture_frame_01', 'hanging_picture_frame_02', 'hanging_picture_frame_03'];
+    const n = this.type === 'law' ? 5 : this.type === 'gym' ? 1 : r.int(3, 5);
     for (let i = 0; i < n; i++) {
       const left = i % 2 === 0 && this.type !== 'creative';
       const wx = left ? x0 + 0.02 : x1 - 0.02;
       if (!left && this.type === 'gym') continue;
       const z = r.range(z0 + 1.5, spineZ - 1) + (i >> 1) * 0.1;
-      const w = r.range(0.6, 1.2), h = w * r.range(0.65, 1.1);
-      const art = new THREE.MeshStandardMaterial({ map: paintingTex(r.int(0, 1e6)), roughness: 0.7 });
-      art.userData.owned = true;
-      k.at(wx, 0, z, left ? Math.PI / 2 : -Math.PI / 2, () => F.picture(k, art, w, h, 0, 1.55 + h / 2, 0.02, frame));
+      const rot = left ? Math.PI / 2 : -Math.PI / 2;
+      const paint = () => {
+        const m = new THREE.MeshStandardMaterial({ map: paintingTex(r.int(0, 1e6)), roughness: 0.7 });
+        m.userData.owned = true;
+        return m;
+      };
+      if (i % 2 === 1 || this.type === 'law') {
+        const id = r.pick(lib), s = OFFICE_LIB[id];
+        const y = 1.6 - s[1] / 2;
+        this.libItem(id, wx, y, z, rot, (kk) => F.picture(kk, paint(), s[0] - 0.06, s[1] - 0.06, 0, s[1] / 2, s[2] / 2, frame));
+        continue;
+      }
+      const w = r.range(0.7, 1.3), h = w * r.range(0.65, 1.0);
+      const art = paint();
+      k.at(wx, 0, z, rot, () => F.picture(k, art, w, h, 0, 1.55 + h / 2, 0.02, frame));
     }
   }
 
@@ -729,7 +839,7 @@ export class OfficeLevel implements Level {
         this.group.add(im);
       }
     };
-    const chair = this.type === 'law' || this.type === 'eighties' ? 'exec' : 'task';
+    const chair = this.type === 'law' ? 'exec' : 'task'; // (a wingback at a 1980s cubicle read wrong)
     put(`chair:${chair}:${look.chair.uuid}`, (k) => (chair === 'task' ? F.officeChair(k, look.chair) : F.armchair(k, look.chair, M.walnut('#9a8a7a'))), this.chairs);
     put('monitor', (k) => {
       // F.monitor without its keyboard (that is drawn per desk): foot, neck, panel, lit screen

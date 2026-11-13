@@ -8,6 +8,8 @@ import { signTex } from '../textures';
  * seen from above: tech, cubicle, law, creative / eighties, dentist, gym, cowork.
  * &seed= another seed for every suite; &type=law shows one type on its own.
  */
+const levels: OfficeLevel[] = [];
+let cam: THREE.Camera | null = null;
 const scene: LabScene = {
   name: 'offices',
   description: 'office suite types from above (ceilings cut away)',
@@ -15,15 +17,18 @@ const scene: LabScene = {
   look: [0, 0, 2],
   env: 'studio',
   ground: false,
-  build({ group, params }) {
+  build({ group, params, camera }) {
+    cam = camera;
+    levels.length = 0;
     const seed = Number(params.get('seed') ?? 7);
     const only = params.get('type');
     const types = only ? [only] : [...OFFICE_TYPES];
     types.forEach((t, i) => {
-      const lv = new OfficeLevel({ kind: 'interior', seed: seed + i, name: t, style: 'office', floor: 0, floors: 1, biome: 'town', office: t }, { cutaway: true, lights: false });
+      const lv = new OfficeLevel({ kind: 'interior', seed: seed + i, name: t, style: 'office', floor: 0, floors: 1, biome: 'town', office: t }, { cutaway: !only, lights: !!only });
       const cx = only ? 0 : ((i % 4) - 1.5) * 24, cz = only ? 0 : (Math.floor(i / 4) - 0.5) * 20;
       lv.group.position.set(cx, 0, cz);
       group.add(lv.group);
+      levels.push(lv);
       const m = new THREE.MeshBasicMaterial({ map: signTex(t.toUpperCase(), '#1a1c20', '#ffffff') });
       m.userData.owned = true;
       const label = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.5), m);
@@ -32,6 +37,10 @@ const scene: LabScene = {
       label.position.set(cx, 0.05, cz + lv.look.D / 2 + 1.4);
       group.add(label);
     });
+  },
+  update(dt) {
+    // library decor and art stream in near the camera (one suite at the origin when &type= is set)
+    if (cam) for (const lv of levels) lv.update(dt, cam.position.clone().sub(lv.group.position));
   },
 };
 export default scene;
