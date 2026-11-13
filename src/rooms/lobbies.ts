@@ -46,7 +46,7 @@ export interface LobbyStyle {
 const travertine = () => M.marble('#d8c8a8');
 export const LOBBY_STYLES: Record<LobbyStyleId, LobbyStyle> = {
   // Chrysler / Empire State: red-brown marble, travertine floor, gold leaf, a radiant mural, coves
-  deco: { id: 'deco', label: 'Art Deco', depth: 1.25, width: 1.05, H: 5.4, mezzanine: false, floor: travertine, wall: () => M.marble('#8a4a32'), ceiling: () => mat('#b8925a', { rough: 0.35, metal: 0.6 }), dado: null, desk: 'deco', art: 'mural', sculptures: 0, light: 'cove', seating: 'bench', plants: 0, residential: false },
+  deco: { id: 'deco', label: 'Art Deco', depth: 1.25, width: 1.05, H: 5.4, mezzanine: false, floor: travertine, wall: () => M.marble('#c4704a'), ceiling: () => mat('#b8925a', { rough: 0.35, metal: 0.6 }), dado: null, desk: 'deco', art: 'mural', sculptures: 0, light: 'cove', seating: 'bench', plants: 0, residential: false },
   // Lever House / Seagram: white terrazzo, travertine or green marble, low ceiling of pin lights, a colour field
   midcentury: { id: 'midcentury', label: 'International Style', depth: 0.9, width: 1.2, H: 3.7, mezzanine: false, floor: () => M.marble('#ece8e0'), wall: () => M.marble('#c9c2ae'), ceiling: () => M.paint('#f2f1ee'), dado: null, desk: 'slab', art: 'colourfield', sculptures: 1, light: 'pins', seating: 'barcelona', plants: 2, residential: false },
   // 1980s granite: pink and grey polished granite bands, drum pendants, a tapestry, big planters

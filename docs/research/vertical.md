@@ -92,3 +92,27 @@ the next floor) is gone. Any level that exposes `vcore` works with src/vertical.
 - A floor builds in about 10 slices of 1–20 ms in node (the first slice builds the building's
   stair column, and later floors reuse it). The slowest slices in the halls come from the
   apartments that seamless.ts prebuilds when you face their doors (InteriorLevel, 30–300 ms in node).
+
+## Lobbies (src/rooms/lobbies.ts)
+
+References:
+- Chrysler Building lobby, https://commons.wikimedia.org/wiki/File:Chrysler_Building_Lobby.jpg: red marble walls, stepped gilt
+  light boxes over doors, herringbone travertine floor, gold ceiling.
+- Empire State lobby mural, https://commons.wikimedia.org/wiki/File:Empire_State_Building_Lobby_Mural.jpg: metal-leaf rays
+  behind the tower on veined marble, a uniformed attendant with a peaked cap.
+- Lever House and Seagram (above): low white ceilings, pin lights, travertine, slim metal and glass.
+
+Six styles, picked from the building's type and seed:
+
+| Style | Picked for | Plan | Desk | Art | Lights | Other |
+|---|---|---|---|---|---|---|
+| Art Deco | office, pre-war | tall (5.4 m) | marble desk with a brass band | gilt mural | coves and sconces | |
+| International Style | office | low and wide (3.7 m) | walnut slab | colour field | pin lights | Barcelona chairs |
+| postmodern granite | office, pre-war | 4.6 m | granite block | tapestry | drum pendants | 2 sculptures |
+| glass atrium | office, loft | 8.5 m with a mezzanine | long white desk | photographs | globe pendants | trees, a big sculpture |
+| pre-war co-op | pre-war | | doorman's podium | oils | chandelier | walnut wainscot, checker floor, sofa, mailboxes |
+| converted loft | loft | | trestle desk | photographs | bare bulbs | steel columns, industrial bench |
+
+Staff: a doorman (long navy coat, cap) by residential doors, a guard behind office desks, a visitor
+waiting by the seating (src/nyc/people.ts Person with a Uniform). Sculpture comes from the showcase
+'statue' pool at real size, on plinths, and is inspectable with E.
