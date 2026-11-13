@@ -27,21 +27,28 @@ export const SHOPS: { type: string; names: string[]; pools: string[]; colors: st
   { type: 'garden', names: ['FLOWERS & GARDEN', 'PLANT SHOP'], pools: ['garden or outdoor'], colors: ['#2e6b2e', '#6b2e5c'] },
   { type: 'models', names: ['MODEL TRAINS & PLANES', 'HOBBY MODELS'], pools: ['vehicle', 'aircraft or spacecraft', 'watercraft'], colors: ['#1d3b5c', '#5c1d1d'] },
   { type: 'machines', names: ['MACHINE PARTS', 'INDUSTRIAL SUPPLY', 'BEARINGS & GEARS'], pools: ['cad', 'machine or industrial', 'automate', 'articraft'], colors: ['#3b3b3b', '#1d4a5c'] },
+  // [shops] clothing boutiques and cafés / diners: garments, tables and the espresso bar are built by the layout
+  { type: 'clothing', names: ['BOUTIQUE', 'APPAREL', 'DENIM & CO', 'VINTAGE CLOTHING', 'MENSWEAR'], pools: ['simready:textile furnishing', 'animal gear'], colors: ['#1c1c1c', '#7a5a3a', '#5b2333'] },
+  { type: 'cafe', names: ['CAFE', 'COFFEE', 'ESPRESSO BAR', 'DINER', 'COFFEE SHOP'], pools: ['food and drink', 'tableware', 'simready:food and drink', 'simready:tableware'], colors: ['#3a2e24', '#1d5c2e', '#a3201d'] },
 ];
+/** atlas cell of a building's entrance hall (after the shop types' cells) */
+export const HALL_CELL = 23;
+/** a tower lobby seen through its glass: not an atlas cell, the room shader draws it (buildings-win.ts) */
+export const OFFICE_LOBBY_CELL = 24;
 const PREFIX = ['JOE’S', 'LUCKY', 'NEW', 'BIG APPLE', 'EMPIRE', 'MIDTOWN', 'RAY’S', 'GOLDEN', 'ACE', 'METRO', 'PARK', 'CITY', 'BROADWAY', 'LIBERTY', 'STAR', 'UNION'];
 
 // ---------------------------------------------------------------- shop interiors atlas
 
-/** 8 x 2 cells of 512 px: the back wall of each kind of shop, seen through the glass */
+/** 8 x 3 cells of 512 px: the back wall of each kind of shop, seen through the glass (HALL_CELL: an entrance hall) */
 let atlasTex: THREE.Texture | null = null;
 function shopAtlas() {
   if (atlasTex) return atlasTex;
   const C = 512;
-  atlasTex = canvasTex(C * 8, C * 2, (g) => {
+  atlasTex = canvasTex(C * 8, C * 3, (g) => {
     SHOPS.forEach((s, i) => {
       const r = new Rng(hashN(i, 991));
       // row 0 is the bottom of the texture (v = 0): draw it in the lower half of the canvas
-      const x0 = (i % 8) * C, y0 = (1 - Math.floor(i / 8)) * C;
+      const x0 = (i % 8) * C, y0 = (2 - Math.floor(i / 8)) * C;
       g.save();
       g.translate(x0, y0);
       g.beginPath();
@@ -50,7 +57,7 @@ function shopAtlas() {
       drawShopWall(g, C, s.type, r);
       g.restore();
     });
-    // cell 15: a building's entrance hall seen through its door: marble wainscot, mailboxes, stairs
+    // HALL_CELL (23, top row): a building's entrance hall seen through its door: marble wainscot, mailboxes, stairs
     g.save();
     g.translate(7 * C, 0);
     const gr = g.createLinearGradient(0, 0, 0, C);
@@ -101,6 +108,41 @@ function drawShopWall(g: CanvasRenderingContext2D, C: number, type: string, r: R
     default: ['#c0392b', '#27ae60', '#2980b9', '#f1c40f', '#e67e22', '#8e44ad', '#ecf0f1', '#2c3e50', '#16a085'],
   };
   const pal = palettes[type] ?? palettes.default;
+  if (type === 'clothing') {
+    // [shops] wall rails: shirts over pants in colour runs, a folding table and a dress form in front
+    const tones = ['#1f2a44', '#f1ede4', '#8a1c2b', '#2f4f3a', '#c9b79c', '#111111', '#6d7b8a', '#e0b84a'];
+    for (const [y0, h] of [[0.22, 0.3], [0.58, 0.32]] as const) {
+      g.fillStyle = '#bfc3c7';
+      g.fillRect(0, C * y0 - 3, C, 3);
+      let c = r.pick(tones);
+      for (let x = 4; x < C - 6; x += 7) {
+        if (r.chance(0.2)) c = r.pick(tones);
+        g.fillStyle = c;
+        g.fillRect(x, C * y0, 6, C * h);
+      }
+    }
+    g.fillStyle = '#d9c3a0';
+    g.fillRect(C * 0.3, C * 0.86, C * 0.4, C * 0.06);
+    g.fillStyle = '#f1efe9';
+    g.beginPath(); g.ellipse(C * 0.82, C * 0.62, C * 0.05, C * 0.12, 0, 0, Math.PI * 2); g.fill();
+    return;
+  }
+  if (type === 'cafe') {
+    // [shops] espresso bar: counter, chrome machine, menu board, pendants
+    g.fillStyle = '#1c1c1c';
+    g.fillRect(C * 0.1, C * 0.08, C * 0.8, C * 0.22);
+    g.fillStyle = '#f1ede4';
+    for (let i = 0; i < 6; i++) g.fillRect(C * 0.14, C * (0.11 + i * 0.03), C * r.range(0.2, 0.6), 3);
+    g.fillStyle = '#3a2e24';
+    g.fillRect(0, C * 0.62, C, C * 0.38);
+    g.fillStyle = '#c9ccd0';
+    g.fillRect(C * 0.55, C * 0.5, C * 0.22, C * 0.12);
+    g.fillStyle = '#f2e2c4';
+    for (let i = 0; i < 6; i++) g.fillRect(C * (0.08 + i * 0.06), C * 0.56, C * 0.04, C * 0.05);
+    g.fillStyle = '#ffe2a0';
+    for (const x of [0.25, 0.5, 0.75]) { g.beginPath(); g.arc(C * x, C * 0.4, C * 0.03, 0, Math.PI * 2); g.fill(); }
+    return;
+  }
   if (type === 'deli') {
     // drinks fridges with glass doors along the back
     for (let x = 0; x < C; x += C / 4) {

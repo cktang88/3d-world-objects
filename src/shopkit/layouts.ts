@@ -6,6 +6,7 @@ import { Rng } from '../rng';
 import { Kit, lit, surfMat } from './kit';
 import { textTex, vctTile } from './tex';
 import * as F from './fixtures';
+import * as A from './apparel';
 import { retailBays, type RetailPlan } from './rows';
 
 /**
@@ -29,6 +30,8 @@ export interface Style {
   wall: Surface;
   trim?: string;
   env: Partial<Env>;
+  /** a layout's own variant (cafe: 'diner' | 'cafe') */
+  variant?: string;
   banner?: boolean;
   bannerX?: number;
   neon?: boolean;
@@ -759,6 +762,132 @@ const stationery: Layout = {
   },
 };
 
+/**
+ * Clothing boutique (SoHo / Nolita boutiques, mid-price chains): white or bare-brick walls with wall rails of
+ * shirts over pants, free-standing rails and folding tables down the middle, dress forms in the window line,
+ * curtained fitting rooms at the back, a cash wrap to one side, warm track spots.
+ */
+const clothing: Layout = {
+  style(r) {
+    const brick = r.chance(0.4);
+    return {
+      W: r.range(7.5, 10), D: r.range(13, 17), H: r.range(3.2, 3.8), ceil: brick ? 'exposed' : 'plain', ceilColor: '#2a2a2a',
+      floor: pbrS(r.pick(['floor_parquet', 'floor_laminate', 'floor_concrete']), { color: r.pick(['#b8977a', '#d8c8b0', '#a8a49c']), rough: 0.7 }),
+      wall: brick ? pbrS('nyc_brick', { color: '#c8b0a0' }) : paint(r.pick(['#f6f4ef', '#eef0f0', '#f3ece2'])),
+      env: { ...WARM, hemi: { sky: '#fff6ea', ground: '#5a4a3a', intensity: 0.5 }, exposure: 0.95 },
+    };
+  },
+  *build(k, r, st) {
+    const { W, D, H } = st;
+    const xi = W / 2, zb = -D / 2, zf = D / 2;
+    // wall rails both sides: shirts high, pants low
+    for (const s of [-1, 1]) {
+      const len = D - 5.5;
+      k.at(s * (xi - 0.02), zb + 2.2 + len / 2, -s * Math.PI / 2);
+      A.garmentRack(k, len, r, { double: true, wall: true, h: 1.5 });
+      yield;
+    }
+    // fitting rooms across the back
+    k.at(-xi + 0.2 + 1.5, zb + 1.25);
+    A.fittingRooms(k, 3, r);
+    yield;
+    // middle: alternating free-standing rails and folding tables, aisles >= 1 m either side
+    const cx = -0.3;
+    for (let j = 0, z = zb + 3.6; z < zf - 4.2; j++, z += 2.2) {
+      k.at(cx, z, j % 2 ? 0 : Math.PI / 2);
+      if (j % 2) A.foldTable(k, 1.6, 0.9, r);
+      else A.garmentRack(k, 1.5, r, { cut: r.pick(['shirt', 'dress', 'coat'] as const) });
+      yield;
+    }
+    // dress forms near the front, clear of the door
+    for (const s of [-1, 1]) {
+      k.at(s * (xi - 1.6), zf - 2.4, s * 0.4);
+      A.mannequin(k, r);
+      yield;
+    }
+    // cash wrap on the right toward the back
+    k.at(xi - 1.95, zb + 3.6, -Math.PI / 2); // 0.95 m for the clerk between it and the wall rail
+    A.cashWrap(k, 1.8, r);
+    yield;
+    tracks(k, st, [zb + 3, 0, zf - 3], 5);
+    lights(k, st, '#ffe6c8', 0.95, 1, 3);
+    yield;
+    void H;
+  },
+};
+
+/**
+ * Café or diner. Café: espresso bar with machine and grinder at the back, lit pastry case, menu board above,
+ * round tables with chairs, pendants. Diner: a long counter with stools, booths down one wall, chrome and red
+ * vinyl, checkerboard floor, a menu board and pie case.
+ */
+const cafe: Layout = {
+  style(r) {
+    const diner = r.chance(0.4);
+    return {
+      W: r.range(7, 10), D: r.range(12, 16), H: diner ? 3.1 : r.range(3.2, 3.8), ceil: diner ? 'drop' : r.pick(['tin', 'exposed'] as const),
+      tin: r.pick(['#efe9da', '#e8e2d0']), ceilColor: '#2a2622',
+      floor: diner ? vct('#f1ede4', '#1c1c1c') : pbrS(r.pick(['floor_parquet', 'oak', 'floor_concrete']), { color: '#a07a58', rough: 0.8 }),
+      wall: diner ? paint(r.pick(['#f4efe2', '#e8f0ee'])) : r.chance(0.5) ? pbrS('nyc_brick', { color: '#b89a88' }) : paint(r.pick(['#efe6d6', '#e2e8e0', '#2f3a33'])),
+      env: diner ? COOL : { ...WARM, exposure: 0.95 },
+      variant: diner ? 'diner' : 'cafe', trim: diner ? '#9a9a9a' : undefined,
+    };
+  },
+  *build(k, r, st) {
+    const { W, D, H } = st;
+    const xi = W / 2, zb = -D / 2, zf = D / 2;
+    const diner = st.variant === 'diner';
+    // the counter runs across the room near the back; the barista / cook works behind it
+    const cz = zb + 2.3;
+    // counter from the right, the pastry case in line at its left end (the customer end)
+    const cLen = Math.min(W - 2.4 - 1.8, diner ? 6.0 : 4.2);
+    k.at(xi - 1.0 - cLen / 2, cz, 0);
+    A.espressoBar(k, cLen, r, { diner });
+    yield;
+    // back counter and menu board on the back wall
+    k.at(xi - 1.0 - cLen / 2, zb + 0.35);
+    F.gondola(k, cLen, { double: false, height: 1.0, shelves: 2, color: diner ? '#c0c0c0' : '#3a2e24', messy: 0.2 });
+    yield;
+    k.at(xi - 1.0 - cLen / 2, zb + 0.02);
+    F.menu(k, Math.min(cLen, 3.2), r.int(0, 999), H - 0.6);
+    yield;
+    // pastry / pie case at the customer end of the counter
+    k.at(xi - 1.0 - cLen - 0.05 - 0.8, cz - 0.05);
+    A.pastryCase(k, 1.6);
+    yield;
+    if (diner) {
+      // stools along the counter, booths down the left wall
+      k.at(xi - 1.0 - cLen / 2, cz + 0.72); // stools tucked against the counter front
+      A.stools(k, Math.floor(cLen / 0.75), 0.75, r);
+      yield;
+      for (let z = cz + 2.0; z + 2.0 < zf - 1.6; z += 2.2) {
+        k.at(-xi + 0.62, z, Math.PI / 2);
+        A.booth(k, r);
+        yield;
+      }
+      for (let z = cz + 2.9; z < zf - 2.6; z += 2.6) {
+        k.at(xi - 1.6, z);
+        A.cafeTable(k, r, { square: true, seats: 4, diner: true });
+        yield;
+      }
+    } else {
+      // café tables in a loose grid, 1 m walkways
+      const cols = Math.max(1, Math.floor((W - 1.2) / 2.6));
+      for (let z = cz + 2.4; z < zf - 2.2; z += 2.6)
+        for (let i = 0; i < cols; i++) {
+          k.at(-xi + 0.6 + (W - 1.2) * ((i + 0.5) / cols), z);
+          A.cafeTable(k, r);
+          yield;
+        }
+    }
+    k.at(0, 0);
+    if (diner) troffers(k, st);
+    else for (let x = -W / 4; x <= W / 4 + 0.01; x += W / 2) for (let z = cz + 2.4; z < zf - 1.5; z += 2.6) F.pendantAt(k, x, H - 1.1, z, H, r.pick(['#1d3b2e', '#1c1c1c', '#b08a5a']));
+    lights(k, st, diner ? '#f4f8ff' : '#ffe2bc', diner ? 1.05 : 0.9, 1, 2);
+    yield;
+  },
+};
+
 const garden: Layout = {
   style(r) {
     return {
@@ -871,7 +1000,7 @@ const machines: Layout = {
   },
 };
 
-export const LAYOUTS: Record<string, Layout> = { deli, pharmacy, hardware, electronics, toys, music, kitchen, lighting, sports, furniture, antiques, stationery, garden, models, machines };
+export const LAYOUTS: Record<string, Layout> = { clothing, cafe, deli, pharmacy, hardware, electronics, toys, music, kitchen, lighting, sports, furniture, antiques, stationery, garden, models, machines };
 
 /**
  * Every shop type with an interior layout. To add one: write a Layout above (style() + a *build()

@@ -7,7 +7,7 @@ import { facade, type FacadeStyle } from '../textures';
 import { Rng, hashN } from '../rng';
 import type { Portal, Rect } from '../level';
 import { WindowBatch, dressWindow, REVEAL, type TrimKind, type SashKind } from './buildings-win';
-import { ShopGlass, TextBatch, storefront } from './buildings-shop';
+import { ShopGlass, TextBatch, storefront, HALL_CELL, OFFICE_LOBBY_CELL } from './buildings-shop';
 import { SW } from './common';
 import { buildingDesc } from '../rooms/vertical';
 import { districtAt } from './districts';
@@ -762,7 +762,7 @@ function doorway(F: Face, uc: number, y: number, w: number, h: number, frameColo
     // the hall behind shows through, and seamless.ts can preview the lobby
     const g0 = surround === 'brass' ? 0.3 : surround === 'hood' ? dh * 0.6 : dh * 0.48;
     const gw = w / 2 - 0.2, gh = dh - g0 - 0.18;
-    F.ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(pu - gw / 2, y + g0, -depth + 0.083)), gw, gh, 15, 4.5, 0.5 + s * 0.1, 1);
+    F.ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(pu - gw / 2, y + g0, -depth + 0.083)), gw, gh, HALL_CELL, 4.5, 0.5 + s * 0.1, 1);
     if (surround !== 'brass') B(F.f, pan, w / 2 - 0.22, Math.min(dh * 0.3, g0 - 0.3), 0.03, pu, y + 0.15, -depth + 0.09, false);
     B(F.f, mat('#c9a65a', { rough: 0.3, metal: 0.9 }), 0.03, 0.18, 0.05, uc + s * 0.07, y + 1.05, -depth + 0.1, false);
   }
@@ -989,7 +989,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
         doorway(F, du, 0.3, 1.15, Math.min(2.8, ground - 0.85), rng.pick(['#2a2a2a', '#3b2414', '#1d2a22', '#5a3a2a', '#6a6d70']), 'plain', undefined, addr.split(' ')[0]);
         F.cut(dEnd < 0 ? -L / 2 + pier : a1 + 0.3, dEnd < 0 ? a0 - 0.3 : L / 2 - pier, Math.min(2.8, ground - 0.85) + 0.3, ground - 0.55);
         // transom over the residential door: glazed panel lit from the hall
-        ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(du - dbay / 2 + 0.05, Math.min(2.8, ground - 0.85) + 0.35, -0.1)), dbay - 0.1, ground - 0.6 - Math.min(2.8, ground - 0.85) - 0.4, 15, 3, 0.3, 1);
+        ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(du - dbay / 2 + 0.05, Math.min(2.8, ground - 0.85) + 0.35, -0.1)), dbay - 0.1, ground - 0.6 - Math.min(2.8, ground - 0.85) - 0.4, HALL_CELL, 3, 0.3, 1);
         portalDoor(ctx, F, du, 0.8, alongX, addr, floors, type, rng.pick(['apartment', 'apartment', 'office']));
       }
       const nS = Math.max(1, Math.min(3, Math.floor((a1 - a0) / 5.0)));
@@ -1211,7 +1211,7 @@ function towerLobby(ctx: BCtx, F: Face, isFront: boolean, lobby: number, finM: T
     const bw = u1 - u0;
     // One double-height room behind the transom, rather than two stacked apartment halls.
     // Cell 16 selects the office lobby shader; cell 15 remains the residential entrance.
-    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, 0.05, gz)), bw, lobby - 0.95, 16, 9, 0.4 + k * 0.07, 1);
+    ctx.shop.add(F.m.clone().multiply(new THREE.Matrix4().makeTranslation(u0, 0.05, gz)), bw, lobby - 0.95, OFFICE_LOBBY_CELL, 9, 0.4 + k * 0.07, 1);
     holeU[0] = Math.min(holeU[0], u0);
     holeU[1] = Math.max(holeU[1], u1);
     // slim steel mullions every ~1.5 m, a transom bar, a sill

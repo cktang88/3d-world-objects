@@ -350,14 +350,14 @@ varying vec3 vRo; varying vec3 vRd; varying vec4 vInfo; varying vec4 vRoomI; var
 float h11(float n) { return fract(sin(n * 127.1) * 43758.5453); }
 vec3 atlas(float u, float v) {
 ${shop ? `float cell = vRoomI.y;
-  return texture2D(uAtlas, vec2((mod(cell, 8.0) + clamp(u, 0.002, 0.998)) / 8.0, (floor(cell / 8.0) + clamp(v, 0.002, 0.998)) / 2.0)).rgb;` : 'return vec3(0.5);'}
+  return texture2D(uAtlas, vec2((mod(cell, 8.0) + clamp(u, 0.002, 0.998)) / 8.0, (floor(cell / 8.0) + clamp(v, 0.002, 0.998)) / 3.0)).rgb;` : 'return vec3(0.5);'}
 }
 vec3 roomShade(out float lampGlow) {
   vec3 d = vRd; d.z = max(d.z, 1e-4);
   float seed = vInfo.x;
   float depth = vRoomI.x;
   bool shop = ${shop ? 'true' : 'false'};
-  bool officeLobby = shop && vRoomI.y > 15.5;
+  bool officeLobby = shop && vRoomI.y > 23.5; // OFFICE_LOBBY_CELL (24): drawn procedurally, past the atlas
   // room extents around the opening
   float sideW = shop ? 0.3 : 1.2 + h11(seed + 3.0) * 1.5;
   vec3 lo = vec3(-sideW, shop ? -0.55 : -0.85, 0.0);
