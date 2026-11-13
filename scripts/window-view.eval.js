@@ -7,14 +7,14 @@
   for (let i = 0; i < 1200 && !(W.level && W.desc.kind === 'nyc' && !W.transitioning); i++) await sl(100);
   const V = W.player.pos.constructor;
   const at = (p) => p.box.getCenter(new V()).distanceTo(W.player.pos);
-  const ps = W.level.portals().filter((p) => typeof p.target === 'object' && p.target.kind === 'floor' && p.target.floors >= 5 && p.door).sort((a, b) => at(a) - at(b));
+  const ps = W.level.portals().filter((p) => typeof p.target === 'object' && p.target.kind === 'floor' && p.target.floors >= 5 && p.door).sort((a, b) => Number(!/walkup|prewar/.test(a.target.type)) - Number(!/walkup|prewar/.test(b.target.type)) || at(a) - at(b));
   if (!ps.length) return 'no building of 5+ floors';
   await W.enter(ps[0]);
   for (let i = 0; i < 300 && W.transitioning; i++) await sl(100);
   if (W.desc.kind !== 'floor') return 'not in a lobby: ' + W.desc.kind;
   W.goFloor(3);
   await sl(300);
-  const ap = W.level.portals().filter((p) => typeof p.target === 'object' && p.target.kind === 'interior');
+  const ap = W.level.portals().filter((p) => typeof p.target === 'object' && p.target.kind === 'interior').sort((a, b) => Number(a.target.style !== 'apartment') - Number(b.target.style !== 'apartment'));
   if (!ap.length) return 'no apartment door on floor 4';
   await W.enter(ap[0]);
   for (let i = 0; i < 300 && W.transitioning; i++) await sl(100);
