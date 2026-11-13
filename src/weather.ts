@@ -389,12 +389,26 @@ vec4 clouds(vec3 dir, out float hz) {
   float dy = max(dir.y, 0.035);
   vec2 wp = uCloud2.xy + dir.xz * (${CLOUD_H.toFixed(1)} / dy);
   vec2 p = wp / ${CLOUD_SCALE.toFixed(1)} + uCloud.zw;
-  float n = cfbm(p);
+  // overcast / rain decks: a soft layered stratus instead of fair-weather cells. A broad, slow layer
+  // (2.7x larger) carries most of the shape and the fine fbm only textures it, with a much gentler
+  // self-shadow, so the deck reads as soft folds of grey rather than a cellular pattern
+  float oc = smoothstep(0.6, 1.0, cov);
+  vec2 pL = p * 0.37 + vec2(0.31, 0.67);
+  vec2 toSun = normalize(uSunDir.xz + 1e-4) * 0.012;
+  // (uniform branches: clear / partly pay for 2 fbm as before, a full deck for 3)
+  float n = 0.0, nS = 0.0, nL = 0.5, nLS = 0.5;
+  if (oc < 1.0) { n = cfbm(p); nS = cfbm(p + toSun); }
+  if (oc > 0.0) {
+    nL = cfbm(pL);
+    nLS = cfbm(pL + toSun * 0.37);
+    float layered = 0.7 * nL + 0.3 * cfbm(p * 0.63 + 0.5);
+    n = mix(n, layered, oc);
+  }
   float d = cdens(n, cov);
   // self shadowing: more cloud towards the sun = this side is in the cloud's own shade
-  vec2 toSun = normalize(uSunDir.xz + 1e-4) * 0.012;
-  float n2 = cfbm(p + toSun);
-  float lit = clamp(0.55 + (n - n2) * 9.0, 0.0, 1.0);
+  // (on the deck, from its broad layer and much gentler)
+  float n2 = mix(nS, nLS, oc);
+  float lit = clamp(0.55 + (mix(n, nL, oc) - n2) * mix(9.0, 2.5, oc), 0.0, 1.0);
   float thick = clamp((n - mix(0.74, 0.2, cov)) * 3.0, 0.0, 1.0);
   float mu = dot(dir, uSunDir);
   float silver = pow(max(mu, 0.0), 12.0) * (1.0 - thick) * 3.0 + pow(max(mu, 0.0), 3.0) * 0.4;
@@ -402,6 +416,8 @@ vec4 clouds(vec3 dir, out float hz) {
   vec3 base = uAmb * mix(1.1, 0.74, thick * (0.75 - 0.35 * cov)) * mix(1.0, 0.45, dark);
   vec3 col = base * (0.85 + 0.25 * lit) + uSunCol * sunVis * (lit * 0.6 + silver) * (0.35 + 0.65 * (1.0 - cov));
   col += uGlow * (0.6 + 0.4 * thick);
+  // the deck's broad folds: thicker, darker bands and thinner, brighter ones
+  col *= mix(1.0, 0.8 + 0.4 * smoothstep(0.3, 0.75, nL), oc);
   // towards the horizon the deck thins into haze
   float h = smoothstep(0.0, 0.3, dir.y);
   // (below dy's clamp at 0.035 the deck's noise would smear into vertical streaks: no cloud there)
