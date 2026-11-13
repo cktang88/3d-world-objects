@@ -27,7 +27,11 @@ export type Quality = 'ultra' | 'high' | 'low';
 
 export interface Preset {
   label: string;
-  /** Poly Haven HDRI id (CC0) */
+  /**
+   * Poly Haven HDRI id (CC0). Outdoors it is also the visible sky, so it must be a sky-only
+   * ("_puresky") HDRI: a photo with ground or buildings in it would show another city's skyline
+   * and cranes, at infinity and giant, behind ours (tests/lighting.test.ts checks)
+   */
   hdri: string;
   /** rotate the HDRI so its sun lands at sunAz (true), or use sunAz/sunElev for the light as given */
   align: boolean;
@@ -39,6 +43,12 @@ export interface Preset {
   sky: number;
   /** clip HDRI pixels brighter than this many times the median sky (the sun is the directional light) */
   clampMul: number;
+  /**
+   * radiance of the ground half of the image-based light, as a share of the upper sky's (a
+   * puresky HDRI's lower half is only a mirrored sky: it is replaced by warm street grey, the
+   * light bounced up off asphalt, pavement and facades)
+   */
+  ground: number;
   /** saturation of the image-based light / background (tames very blue skies, sodium-yellow skylines) */
   envSat: number;
   exposure: number;
@@ -63,26 +73,26 @@ export interface Preset {
 
 export const PRESETS: Record<TimeOfDay, Preset> = {
   day: {
-    label: 'Day', hdri: 'docklands_02', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 6,
-    sky: 0.6, clampMul: 12, envSat: 0.7, exposure: 0.58, bounce: { sky: '#dcd6cc', ground: '#b49478', intensity: 0.55 }, fog: 0.0012, fogTint: '#aab6c2', fogTintMix: 0, night: 0, lit: 0.04, wet: 0,
+    label: 'Day', hdri: 'kloofendal_48d_partly_cloudy_puresky', align: true, sunAz: 235, sunElev: 48, sunColor: '#fff1dd', sunIntensity: 6,
+    sky: 0.6, clampMul: 12, ground: 0.5, envSat: 0.7, exposure: 0.58, bounce: { sky: '#dcd6cc', ground: '#b49478', intensity: 0.55 }, fog: 0.0012, fogTint: '#aab6c2', fogTintMix: 0, night: 0, lit: 0.04, wet: 0,
     bloom: { strength: 0.12, radius: 0.4, threshold: 3.0 },
     grade: { gain: '#fffaf4', lift: '#04060a', sat: 1.04, contrast: 1.04, vignette: 0.22 },
   },
   golden: {
-    label: 'Golden hour', hdri: 'venice_sunset', align: true, sunAz: 250, sunElev: 8, sunColor: '#ffb067', sunIntensity: 5.5,
-    sky: 0.55, clampMul: 10, envSat: 0.95, exposure: 0.8, bounce: { sky: '#d8c8b8', ground: '#c08860', intensity: 0.35 }, fog: 0.0022, fogTint: '#c8a890', fogTintMix: 0, night: 0.15, lit: 0.12, wet: 0,
+    label: 'Golden hour', hdri: 'qwantani_sunset_puresky', align: true, sunAz: 250, sunElev: 8, sunColor: '#ffb067', sunIntensity: 5.5,
+    sky: 0.55, clampMul: 10, ground: 0.3, envSat: 0.95, exposure: 0.8, bounce: { sky: '#d8c8b8', ground: '#c08860', intensity: 0.35 }, fog: 0.0022, fogTint: '#c8a890', fogTintMix: 0.35, night: 0.15, lit: 0.12, wet: 0,
     bloom: { strength: 0.2, radius: 0.5, threshold: 2.2 },
     grade: { gain: '#fff1e0', lift: '#060812', sat: 1.08, contrast: 1.06, vignette: 0.28 },
   },
   dusk: {
-    label: 'Dusk (blue hour)', hdri: 'sunset_jhbcentral', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
-    sky: 0.12, clampMul: 30, envSat: 0.95, exposure: 1.3, bounce: { sky: '#8890a8', ground: '#6a5a50', intensity: 0.04 }, fog: 0.002, fogTint: '#6f7fa8', fogTintMix: 0.8, night: 0.75, lit: 0.3, wet: 0.35,
+    label: 'Dusk (blue hour)', hdri: 'qwantani_dusk_2_puresky', align: true, sunAz: 250, sunElev: 5, sunColor: '#8fa2d8', sunIntensity: 0.45,
+    sky: 0.12, clampMul: 30, ground: 0.3, envSat: 0.95, exposure: 1.3, bounce: { sky: '#8890a8', ground: '#6a5a50', intensity: 0.04 }, fog: 0.002, fogTint: '#6f7fa8', fogTintMix: 0.8, night: 0.75, lit: 0.3, wet: 0.35,
     bloom: { strength: 0.45, radius: 0.55, threshold: 1.0 },
     grade: { gain: '#f6f6ff', lift: '#06081a', sat: 1.08, contrast: 1.05, vignette: 0.32 },
   },
   night: {
-    label: 'Night', hdri: 'shanghai_bund', align: false, sunAz: 140, sunElev: 50, sunColor: '#8ea4d6', sunIntensity: 0.12,
-    sky: 0.04, clampMul: 400, envSat: 0.55, exposure: 1.35, bounce: { sky: '#404050', ground: '#4a3a2a', intensity: 0.03 }, fog: 0.0022, fogTint: '#2a2a3a', fogTintMix: 0.8, night: 1, lit: 0.36, wet: 0.8,
+    label: 'Night', hdri: 'kloppenheim_07_puresky', align: false, sunAz: 140, sunElev: 50, sunColor: '#8ea4d6', sunIntensity: 0.12,
+    sky: 0.04, clampMul: 400, ground: 0.45, envSat: 0.55, exposure: 1.35, bounce: { sky: '#404050', ground: '#4a3a2a', intensity: 0.03 }, fog: 0.0022, fogTint: '#2a2a3a', fogTintMix: 0.8, night: 1, lit: 0.36, wet: 0.8,
     bloom: { strength: 0.5, radius: 0.5, threshold: 0.8 },
     grade: { gain: '#fbfaff', lift: '#050712', sat: 1.12, contrast: 1.08, vignette: 0.38 },
   },
@@ -94,8 +104,8 @@ export const PRESETS: Record<TimeOfDay, Preset> = {
  * preset's night factor, lit windows and wetness.
  */
 export const OVERCAST: Preset = {
-  label: 'Overcast', hdri: 'potsdamer_platz', align: false, sunAz: 235, sunElev: 50, sunColor: '#e8ecf0', sunIntensity: 0.9,
-  sky: 0.75, clampMul: 30, envSat: 0.55, exposure: 0.66, bounce: { sky: '#d0d2d4', ground: '#8a8478', intensity: 0.12 }, fog: 0.0024, fogTint: '#b4b8bc', fogTintMix: 0.5, night: 0, lit: 0.06, wet: 0,
+  label: 'Overcast', hdri: 'overcast_soil_puresky', align: false, sunAz: 235, sunElev: 50, sunColor: '#e8ecf0', sunIntensity: 0.9,
+  sky: 0.75, clampMul: 30, ground: 0.25, envSat: 0.55, exposure: 0.66, bounce: { sky: '#d0d2d4', ground: '#8a8478', intensity: 0.12 }, fog: 0.0024, fogTint: '#b4b8bc', fogTintMix: 0.5, night: 0, lit: 0.06, wet: 0,
   bloom: { strength: 0.08, radius: 0.4, threshold: 3.0 },
   grade: { gain: '#fbfcff', lift: '#05060a', sat: 0.94, contrast: 1.02, vignette: 0.2 },
 };
@@ -443,6 +453,8 @@ interface Hdri {
   env: THREE.Texture;
   /** sun direction (world frame after rotation), or null */
   sun: THREE.Vector3 | null;
+  /** the brightest upper-sky direction (a dusk sky's afterglow when there is no sun disc) */
+  glow: THREE.Vector3;
   /** mean upper-sky radiance after clamping */
   skyMean: number;
   mean: number;
@@ -538,6 +550,7 @@ export function analyse(tex: THREE.DataTexture, clampMul: number, sat = 1): Omit
   for (let i = 0; i < (W * H) / 2; i++) if (lum[i] > max) { max = lum[i]; maxI = i; }
   let sun: THREE.Vector3 | null = null;
   const d = new THREE.Vector3();
+  const glow = dirFromPixel(maxI % W, Math.floor(maxI / W), W, H, new THREE.Vector3());
   if (max > median * 40) {
     const mr = Math.floor(maxI / W), mc = maxI % W;
     const acc = new THREE.Vector3();
@@ -583,7 +596,32 @@ export function analyse(tex: THREE.DataTexture, clampMul: number, sat = 1): Omit
   for (let r = 0; r < H; r++) totalW += Math.cos(((0.5 - (r + 0.5) / H) * Math.PI)) * W;
   hz.multiplyScalar(1 / Math.max(1, hzN));
   tex.needsUpdate = true;
-  return { sun, skyMean: skySum / Math.max(1e-6, skyN), mean: sum / totalW, horizon: hz };
+  return { sun, glow, skyMean: skySum / Math.max(1e-6, skyN), mean: sum / totalW, horizon: hz };
+}
+
+/**
+ * Replace the lower half of an equirect (below the horizon, blended over the first ~8 degrees)
+ * with a flat ground radiance: ratio x the upper-sky mean, in a warm street grey. Sky-only
+ * ("puresky") HDRIs mirror their sky there, which would light the city blue from below; this is
+ * the light bounced up off asphalt, pavement and facades. The dome never shows it (it fades to
+ * the fog colour at the horizon). Exported for tests.
+ */
+export function fillGround(tex: THREE.DataTexture, skyMean: number, ratio: number) {
+  const img = tex.image as unknown as { data: Uint16Array; width: number; height: number };
+  const { data, width: W, height: H } = img;
+  const half = THREE.DataUtils.fromHalfFloat, toHalf = THREE.DataUtils.toHalfFloat;
+  // warm grey (luminance 1): sunlit asphalt, concrete and brick
+  const g = [1.12, 0.98, 0.84].map((v) => v * skyMean * ratio);
+  for (let r = Math.floor(H / 2); r < H; r++) {
+    const el = (0.5 - (r + 0.5) / H) * 180;
+    const t = smooth(THREE.MathUtils.clamp(-el / 8, 0, 1));
+    if (t <= 0) continue;
+    for (let c = 0; c < W; c++) {
+      const p = (r * W + c) * 4;
+      for (let k = 0; k < 3; k++) data[p + k] = toHalf(half(data[p + k]) * (1 - t) + g[k] * t);
+    }
+  }
+  tex.needsUpdate = true;
 }
 
 // ---------------------------------------------------------------- grading pass
@@ -661,7 +699,18 @@ interface Src {
   sun: THREE.Vector3;
 }
 
-const SkyDomeShader = {
+/**
+ * The sky dome fades the HDRI into the fog colour between these sines of elevation (0 to ~5
+ * degrees): at and below the horizon it shows only fog, never the image (exported for tests)
+ */
+export const DOME_FADE = [0.0, 0.09] as const;
+/** CPU mirror of the dome shader's horizon fade (tests): the colour shown for an HDRI sample at elevation sine y */
+export function domeColor(sample: THREE.Color, fog: THREE.Color, y: number) {
+  const t = THREE.MathUtils.clamp((y - DOME_FADE[0]) / (DOME_FADE[1] - DOME_FADE[0]), 0, 1);
+  return fog.clone().lerp(sample, t * t * (3 - 2 * t));
+}
+
+export const SkyDomeShader = {
   uniforms: {
     tA: { value: null as THREE.Texture | null }, tB: { value: null as THREE.Texture | null }, tC: { value: null as THREE.Texture | null },
     wA: { value: 0 }, wB: { value: 1 }, wC: { value: 0 },
@@ -688,10 +737,10 @@ void main() {
   if (wA > 0.0) c += texture2D(tA, uv).rgb * wA;
   if (wB > 0.0) c += texture2D(tB, uv).rgb * wB;
   if (wC > 0.0) c += texture2D(tC, uv).rgb * wC;
-  // the HDRIs were shot at street level in other cities: below ~10 degrees their buildings would
-  // show at the end of every avenue, so the low sky melts into the fog colour (Manhattan's haze)
+  // sky-only HDRIs (no ground or skyline in them: our own far city is the skyline); below ~5
+  // degrees the sky melts into the fog colour (Manhattan's haze), and below the horizon it is fog
   float el = normalize(vDir).y;
-  c = mix(uFog, c, smoothstep(0.02, 0.2, el));
+  c = mix(uFog, c, smoothstep(${DOME_FADE[0].toFixed(3)}, ${DOME_FADE[1].toFixed(3)}, el));
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -1261,7 +1310,7 @@ export class Lighting {
 
   /** load (cached) the HDRI for a preset and work out its scale and sun */
   private async source(p: Preset): Promise<Src | null> {
-    const h = await this.hdri(p.hdri, this.res(), p.clampMul, p.envSat, p.align ? p.sunAz : null);
+    const h = await this.hdri(p.hdri, this.res(), p.clampMul, p.envSat, p.align ? p.sunAz : null, p.ground);
     if (!h || !(h.skyMean > 1e-5 && Number.isFinite(h.skyMean))) return null;
     const sun = p.align && h.sun ? dirOf(p.sunAz, Math.max(4, THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(h.sun.y, -1, 1))))) : dirOf(p.sunAz, p.sunElev);
     return { name: p.hdri, h, scale: p.sky / h.skyMean, sun };
@@ -1354,7 +1403,7 @@ export class Lighting {
     return f;
   }
 
-  private hdri(name: string, res: string, clampMul: number, sat: number, alignAz: number | null): Promise<Hdri | null> {
+  private hdri(name: string, res: string, clampMul: number, sat: number, alignAz: number | null, ground: number | null = null): Promise<Hdri | null> {
     if (NO_HDRI) return Promise.resolve(null);
     const key = `${name}@${res}`;
     let pr = hdriCache.get(key);
@@ -1365,11 +1414,14 @@ export class Lighting {
         .loadAsync(url)
         .then((tex) => {
           const a = analyse(tex, clampMul, sat);
-          // bake the rotation that puts the HDRI's sun at the light's azimuth into the pixels
-          if (alignAz !== null && a.sun) {
-            const alpha = THREE.MathUtils.degToRad(alignAz) - Math.atan2(a.sun.x, a.sun.z);
+          if (ground !== null) fillGround(tex, a.skyMean, ground);
+          // bake the rotation that puts the HDRI's sun (or, at dusk, its afterglow) at the light's azimuth into the pixels
+          const aim = a.sun ?? a.glow;
+          if (alignAz !== null) {
+            const alpha = THREE.MathUtils.degToRad(alignAz) - Math.atan2(aim.x, aim.z);
             rotateEquirect(tex, alpha);
-            a.sun.applyAxisAngle(new THREE.Vector3(0, 1, 0), alpha);
+            a.sun?.applyAxisAngle(new THREE.Vector3(0, 1, 0), alpha);
+            a.glow.applyAxisAngle(new THREE.Vector3(0, 1, 0), alpha);
           }
           tex.mapping = THREE.EquirectangularReflectionMapping;
           tex.colorSpace = THREE.LinearSRGBColorSpace;

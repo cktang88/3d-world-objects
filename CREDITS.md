@@ -538,7 +538,7 @@
 ## HDRI environments (CC0, src/lighting.ts)
 
 Streamed from dl.polyhaven.org (Poly Haven, CC0 1.0), used as sky/background and image-based light; sun clamped out and intensity normalised at load:
-docklands_02 (day), venice_sunset (golden hour), sunset_jhbcentral (dusk), shanghai_bund (night), sculpture_exhibition (museum), phone_shop (shops), lebombo (interiors) — https://polyhaven.com/a/<id>
+kloofendal_48d_partly_cloudy_puresky (day), qwantani_sunset_puresky (golden hour), qwantani_dusk_2_puresky (dusk), kloppenheim_07_puresky (night), overcast_soil_puresky (overcast), sculpture_exhibition (museum), phone_shop (shops), lebombo (interiors) — https://polyhaven.com/a/<id>
 
 ## Vehicles (public/assets/vehicles/)
 

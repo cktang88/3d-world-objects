@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { test, expect, between, near } from './qa';
 import './env';
-import { PRESETS, TIMES, INDOOR_HDRI, OVERCAST, LIGHT_BUDGET, analyse, blendPreset, rotateEquirect, downsampleEquirect } from '../src/lighting';
+import { PRESETS, TIMES, INDOOR_HDRI, OVERCAST, LIGHT_BUDGET, analyse, blendPreset, rotateEquirect, downsampleEquirect, fillGround, DOME_FADE, domeColor, SkyDomeShader } from '../src/lighting';
 
 const H2F = THREE.DataUtils.toHalfFloat;
 
@@ -125,4 +125,61 @@ test('downsampled copy for the PMREM keeps the mean, overcast preset and light b
   expect(OVERCAST.envSat < 0.9 && OVERCAST.align === false, 'overcast is grey and has no sun to align');
   // museum rig 10 spots + 3 points, interiors 12 points + 1 shadow point, plus 2 seamless preview + 1 lift light
   expect(LIGHT_BUDGET.spot >= 10 && LIGHT_BUDGET.point >= 15 && LIGHT_BUDGET.pointShadow >= 1, 'budget covers the level rigs');
+});
+
+test('outdoor skies are sky-only HDRIs: no other city skyline or cranes, giant at infinity, behind ours', () => {
+  // the outdoor HDRI is the visible sky dome. Only Poly Haven "pure skies" (sky above a clean
+  // horizon); a street/port HDRI shows its buildings behind our real-scale city
+  const outdoor = [...TIMES.map((t) => [t, PRESETS[t]] as const), ['overcast', OVERCAST] as const];
+  for (const [t, p] of outdoor) {
+    expect(/_puresky$/.test(p.hdri), `${t}: ${p.hdri} is not a sky-only (_puresky) HDRI`);
+    between(p.ground, 0.1, 0.8, `${t} ground bounce share`);
+  }
+  // the indoor HDRIs only light rooms: never the visible background
+  for (const v of Object.values(INDOOR_HDRI)) expect(!outdoor.some(([, p]) => p.hdri === v.hdri), `indoor ${v.hdri} is not an outdoor sky`);
+  // the dome shader uses the shared fade constants
+  expect(SkyDomeShader.fragmentShader.includes(`smoothstep(${DOME_FADE[0].toFixed(3)}, ${DOME_FADE[1].toFixed(3)}, el)`), 'dome shader fades with DOME_FADE');
+  between(Math.asin(DOME_FADE[1]) * 180 / Math.PI, 3, 7, 'sky fully shown from ~5 degrees');
+  expect(DOME_FADE[0] >= 0, 'nothing below the horizon is ever drawn from the image');
+});
+
+test('dome pixels at and below the horizon are the fog colour; above it a fog -> sky gradient', () => {
+  const t = hdr();
+  analyse(t, 12, 1);
+  const img = t.image as unknown as { data: Uint16Array; width: number; height: number };
+  const fog = new THREE.Color(0.5, 0.55, 0.6);
+  const px = (elDeg: number, c: number) => {
+    const r = Math.min(img.height - 1, Math.floor((0.5 - elDeg / 180) * img.height));
+    const p = (r * img.width + c) * 4, f = THREE.DataUtils.fromHalfFloat;
+    return new THREE.Color(f(img.data[p]), f(img.data[p + 1]), f(img.data[p + 2]));
+  };
+  let prev = -1;
+  for (let el = -40; el <= 30; el += 0.5) for (const c of [0, 37, 90]) {
+    const s = px(el, c), y = Math.sin(el * Math.PI / 180);
+    const d = domeColor(s, fog, y);
+    if (el <= 0) expect(d.equals(fog), `dome at ${el} deg shows only fog`);
+    else {
+      // on the segment fog..sky, moving monotonically towards the sky
+      const k = (d.r - fog.r) / (s.r - fog.r || 1e-9);
+      between(k, 0, 1, `fade weight at ${el}`);
+      if (c === 0) { expect(k >= prev - 1e-9, `fade is monotonic at ${el}`); prev = k; }
+      if (el >= 6) near(k, 1, 1e-6, `sky fully shown at ${el}`);
+    }
+  }
+});
+
+test('ground fill: the lower image-light half becomes warm street grey (not a mirrored blue sky)', () => {
+  const t = hdr({ sun: [0.5, 40] });
+  const a = analyse(t, 12, 1);
+  fillGround(t, a.skyMean, 0.4);
+  const img = t.image as unknown as { data: Uint16Array; width: number; height: number };
+  const f = THREE.DataUtils.fromHalfFloat;
+  const row = (elDeg: number) => Math.floor((0.5 - elDeg / 180) * img.height);
+  const at = (r: number) => { const p = r * img.width * 4; return [f(img.data[p]), f(img.data[p + 1]), f(img.data[p + 2])]; };
+  const g = at(row(-30));
+  near((0.2126 * g[0] + 0.7152 * g[1] + 0.0722 * g[2]) / a.skyMean, 0.4, 0.03, 'ground radiance share');
+  expect(g[0] > g[2], 'warm, not blue');
+  const sky = at(row(30));
+  expect(sky[2] > sky[0], 'the sky half is untouched');
+  expect(finiteData(t), 'finite');
 });

@@ -53,8 +53,10 @@ interface Params {
   wind: number;
 }
 
+// clear: no procedural deck (the sky HDRI has its own clouds; a thin deck broke up into small grey
+// flecks that read as debris flying in the sky)
 const P: Record<WeatherState, Params> = {
-  clear: { cloud: 0.12, dark: 0, rain: 0, snow: 0, ground: 0, haze: 1, base: 1200, inCloud: 0, fogSky: 0, wind: 2 },
+  clear: { cloud: 0, dark: 0, rain: 0, snow: 0, ground: 0, haze: 1, base: 1200, inCloud: 0, fogSky: 0, wind: 2 },
   partly: { cloud: 0.48, dark: 0.1, rain: 0, snow: 0, ground: 0, haze: 1.1, base: 1200, inCloud: 0, fogSky: 0, wind: 3 },
   overcast: { cloud: 0.97, dark: 0.3, rain: 0, snow: 0, ground: 0.0004, haze: 1.6, base: 420, inCloud: 0.012, fogSky: 0.1, wind: 3 },
   lightrain: { cloud: 1, dark: 0.55, rain: 0.3, snow: 0, ground: 0.001, haze: 2.2, base: 260, inCloud: 0.02, fogSky: 0.25, wind: 3 },
@@ -401,7 +403,8 @@ vec4 clouds(vec3 dir, out float hz) {
   col += uGlow * (0.6 + 0.4 * thick);
   // towards the horizon the deck thins into haze
   float h = smoothstep(0.0, 0.3, dir.y);
-  float a = d * smoothstep(-0.01, 0.06, dir.y);
+  // (below dy's clamp at 0.035 the deck's noise would smear into vertical streaks: no cloud there)
+  float a = d * smoothstep(0.035, 0.1, dir.y);
   hz = 0.65 * (1.0 - h);
   // overcast / fog: also fill below the horizon so the HDRI's own skyline fades into the grey
   float A = max(max(a, uCloud2.w * smoothstep(-0.25, 0.0, dir.y)), uCloud2.z);

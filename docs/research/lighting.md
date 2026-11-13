@@ -26,13 +26,23 @@ works on paper), accent spots 3-5x brighter on the work; retail: 500-1000 lux ge
 
 | use | id | why |
 |---|---|---|
-| day | `docklands_02` | clear sky with a visible sun, modern glass/office buildings at the horizon, urban paving |
-| golden hour | `venice_sunset` | low warm sun near the horizon, blue zenith |
-| dusk / blue hour | `sunset_jhbcentral` | rooftop view over a city at twilight: pink clouds, city skyline at the horizon |
-| night | `shanghai_bund` | skyline of lit towers + light-polluted sky, neon colours for reflections |
+| day | `kloofendal_48d_partly_cloudy_puresky` | sky only, sun at 48 deg (matches the preset), cumulus |
+| golden hour | `qwantani_sunset_puresky` | sky only, sun at ~6 deg, warm band at the horizon |
+| dusk / blue hour | `qwantani_dusk_2_puresky` | sky only, pink afterglow (no sun disc: aligned to the glow) |
+| night | `kloppenheim_07_puresky` | sky only, overcast night lit orange from below (light pollution, no stars) |
+| overcast (weather) | `overcast_soil_puresky` | sky only, even grey cloud |
 | museum | `sculpture_exhibition` | white-walled gallery with skylights |
 | shop | `phone_shop` | fluorescent retail interior |
 | apartment interiors | `lebombo` | daylight through big windows in a plain room |
+
+The outdoor HDRIs are also the visible sky dome, so they must be **sky-only** ("pure skies"
+category, `_puresky` ids): the earlier street/port HDRIs (docklands_02, venice_sunset,
+sunset_jhbcentral, shanghai_bund, potsdamer_platz) projected their own buildings and a red port
+crane at infinity, giant, behind our real-scale city. Our skyline is our own geometry (HLOD far
+city, far shore). A puresky image's lower half is a mirrored sky, so for the image-based light
+`fillGround()` replaces it with a warm street grey at `preset.ground` x the upper-sky mean (the
+light bounced off asphalt and facades); the dome shows only fog at and below the horizon and fades
+to the sky by ~5 deg (`DOME_FADE`). tests/lighting.test.ts checks both.
 
 Other candidates looked at: canary_wharf, potsdamer_platz (overcast), hamburg_canal,
 rooftop_night, hansaplatz, neuer_zollhof, modern_buildings_night, st_fagans_interior,
