@@ -48,3 +48,7 @@ column, two adjacent floors never repeat a type.
 | dentist | waiting room, treatment rooms with dental chairs | pale vinyl, white walls |
 | gym | treadmill row at the windows, weight racks, mirror wall | rubber floor, dark walls |
 | cowork | hot-desk benches, lounge sofas, booths, coffee bar | parquet |
+
+## Contact sheet
+
+`?lab=offices` (ceilings cut away, seed 7): ![office types](offices-contact-sheet.png)

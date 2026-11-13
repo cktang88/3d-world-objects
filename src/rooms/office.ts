@@ -138,7 +138,7 @@ export class OfficeLevel implements Level {
   private screens: THREE.Matrix4[] = [];
   private lights: THREE.PointLight[] = [];
 
-  constructor(desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean; cutaway?: boolean } = {}) {
+  constructor(desc: Extract<LevelDesc, { kind: 'interior' }>, opts: { staged?: boolean; cutaway?: boolean; lights?: boolean } = {}) {
     this.type = (OFFICE_TYPES as readonly string[]).includes(desc.office ?? '') ? (desc.office as OfficeType) : 'cubicle';
     this.rng = new Rng(hashN(desc.seed, 991));
     this.name = desc.name;
@@ -147,7 +147,7 @@ export class OfficeLevel implements Level {
       skyTop: '#1a1612', skyBottom: '#2a241e', stars: false, fog: null, fogNear: 0, fogFar: 0, sun: null,
       hemi: { sky: '#f4f6ff', ground: '#5a5a58', intensity: 0.5 }, ambient: 0.06, envIntensity: 0.4, exposure: 1.0,
     };
-    this.staging = this.generate(!!opts.cutaway);
+    this.staging = this.generate(!!opts.cutaway, opts.lights !== false);
     if (!opts.staged) finishBuilding(this);
   }
 
@@ -193,7 +193,7 @@ export class OfficeLevel implements Level {
     this.cols.push({ minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) });
   }
 
-  private *generate(cutaway: boolean) {
+  private *generate(cutaway: boolean, withLights: boolean) {
     const look = (this.look = this.lookFor(this.type));
     const { W, D, H } = look;
     const k = this.kit, r = this.rng;
@@ -278,7 +278,7 @@ export class OfficeLevel implements Level {
 
     // ---- lights: a fixed 8 (no shader recompiles between suites), within the light budget
     const nx = 4, nz = 2;
-    for (let i = 0; i < nx; i++)
+    if (withLights) for (let i = 0; i < nx; i++)
       for (let j = 0; j < nz; j++) {
         const l = new THREE.PointLight(look.light, (W * D) / 8 * (look.warm ? 0.9 : 1.1), Math.max(W / nx, D / nz) * 2.4, 2);
         l.position.set(x0 + (W / nx) * (i + 0.5), H - 0.5, z0 + (D / nz) * (j + 0.5));
