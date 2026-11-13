@@ -163,3 +163,18 @@ test('street lamps carry a glare that reads from across the street at dusk, and 
   expect(minY > 7, `glare not up at the luminaires (lowest ${fmt(minY)} m)`);
   expect(!g.visible && g.opacity < 0.05, `by day the glare draws (visible ${g.visible}, opacity ${g.opacity})`);
 });
+
+test('doors stand at least 1.5 m apart (no door drawn through another)', () => {
+  // two shop doors 0.15 m apart overlapped on the facade (and stacked their sidewalk displays)
+  const bad: string[] = [];
+  for (const [name, cx, cz] of [['spawn', 0, 0], ['spawn east', 1, 0], ['construction', 4, -1], ['flea market', 3, -1]] as [string, number, number][]) {
+    const ps = nycChunk(1, cx, cz).portals;
+    const at = ps.map((p) => ({ x: (p.box.min.x + p.box.max.x) / 2, z: (p.box.min.z + p.box.max.z) / 2, label: p.label }));
+    for (let i = 0; i < at.length; i++)
+      for (let j = i + 1; j < at.length; j++) {
+        const d = Math.hypot(at[i].x - at[j].x, at[i].z - at[j].z);
+        if (d < 1.5) bad.push(`${name}: ${at[i].label} / ${at[j].label} ${fmt(d)} m apart at ${fmt(at[i].x)},${fmt(at[i].z)}`);
+      }
+  }
+  none(bad, 'doors closer than 1.5 m');
+});
