@@ -340,6 +340,26 @@ function railPanel() {
   });
 }
 const postGeo = () => cg('post', () => merged([bx(0.09, 1.12, 0.09, 0, 0.56, 0), cy(0.065, 0.065, 0.06, 0, 1.15, 0)]));
+/**
+ * one 2.4 m panel of the Hudson River Park railing (ref: Hudson_River_Park_td_(2018-04-03)_08): brushed steel, a
+ * square tapered post, a round top rail and four wavy pipe rails between them
+ */
+function hrpPanel() {
+  return cg('rail-hrp', () => {
+    const P: THREE.BufferGeometry[] = [bx(0.13, 0.12, 0.13, 0, 0.06, 0), bx(0.09, 1.0, 0.09, 0, 0.62, 0), bx(0.12, 0.05, 0.12, 0, 1.12, 0)];
+    const top = new THREE.CylinderGeometry(0.045, 0.045, RAIL_PANEL, 8).rotateZ(Math.PI / 2).translate(RAIL_PANEL / 2, 1.08, 0);
+    P.push(top);
+    for (let k = 0; k < 4; k++) {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        pts.push(new THREE.Vector3(t * RAIL_PANEL, 0.3 + k * 0.19 + Math.sin(t * Math.PI * 2 + k * 0.9) * 0.06, Math.sin(t * Math.PI) * 0.05));
+      }
+      P.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.022, 5, false));
+    }
+    return merged(P);
+  });
+}
 /** a cast-iron mooring bollard (0.55 m) and a deck cleat */
 const bollardGeo = () => cg('bollard', () => merged([cy(0.2, 0.24, 0.1, 0, 0.05, 0, 12), cy(0.14, 0.16, 0.42, 0, 0.31, 0, 12), cy(0.22, 0.17, 0.1, 0, 0.56, 0, 12)]));
 const cleatGeo = () => cg('cleat', () => merged([bx(0.12, 0.08, 0.14, 0, 0.04, 0), bx(0.5, 0.06, 0.08, 0, 0.11, 0)]));
@@ -362,12 +382,14 @@ const tuftGeo = () => cg('tuft', () => {
   return merged(parts);
 });
 const kitMats = {
+  steelHrp: () => (kitHrp ??= new THREE.MeshStandardMaterial({ color: '#a3a8ab', roughness: 0.35, metalness: 0.75 })),
   steel: () => (kitSteel ??= new THREE.MeshStandardMaterial({ color: '#3b4140', roughness: 0.6, metalness: 0.4 })),
   tuft: () => (kitTuft ??= new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95, side: THREE.DoubleSide })),
   iron: () => (kitIron ??= new THREE.MeshStandardMaterial({ color: '#1d2420', roughness: 0.5, metalness: 0.55 })),
   timber: () => (kitTimber ??= new THREE.MeshStandardMaterial({ color: '#4a3b2c', roughness: 0.95 })),
   rock: () => (kitRock ??= new THREE.MeshStandardMaterial({ color: '#6f6b64', roughness: 0.95, flatShading: true })),
 };
+let kitHrp: THREE.MeshStandardMaterial | null = null;
 let kitSteel: THREE.MeshStandardMaterial | null = null, kitTuft: THREE.MeshStandardMaterial | null = null;
 let kitIron: THREE.MeshStandardMaterial | null = null, kitTimber: THREE.MeshStandardMaterial | null = null, kitRock: THREE.MeshStandardMaterial | null = null;
 
@@ -413,14 +435,15 @@ export class WaterKit {
     e.m.push(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), this.q.clone(), new THREE.Vector3(...s)));
   }
   /** esplanade railing along axis ax at c, from a0 to a1, standing at y */
-  rail(ax: 'x' | 'z', c: number, a0: number, a1: number, y = CURB) {
+  rail(ax: 'x' | 'z', c: number, a0: number, a1: number, y = CURB, style: 'picket' | 'hrp' = 'picket') {
+    const [k, geo, m] = style === 'hrp' ? ['rail-hrp', hrpPanel, kitMats.steelHrp] as const : ['rail', railPanel, kitMats.iron] as const;
     const n = Math.max(1, Math.round((a1 - a0) / RAIL_PANEL));
     const step = (a1 - a0) / n;
     for (let i = 0; i < n; i++) {
       const a = a0 + i * step;
       // panels run along +x; along z they turn by -90°
-      if (ax === 'x') this.add('rail', railPanel, kitMats.iron, a, y, c, 0, [step / RAIL_PANEL, 1, 1]);
-      else this.add('rail', railPanel, kitMats.iron, c, y, a, -Math.PI / 2, [step / RAIL_PANEL, 1, 1]);
+      if (ax === 'x') this.add(k, geo, m, a, y, c, 0, [step / RAIL_PANEL, 1, 1]);
+      else this.add(k, geo, m, c, y, a, -Math.PI / 2, [step / RAIL_PANEL, 1, 1]);
     }
     // the closing post
     if (ax === 'x') this.add('post', postGeo, kitMats.iron, a1, y, c);

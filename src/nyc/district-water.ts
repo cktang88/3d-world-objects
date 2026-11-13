@@ -89,8 +89,8 @@ export function buildWater(c: OpenCtx) {
   for (const zz of [inner.minZ + 14, inner.maxZ - 14]) slot({ kind: ['folly', 'structure', 'smallbuilding'], x: X(uLand0 + 22), y: CURB + 0.02, z: zz, rot: s > 0 ? Math.PI / 2 : -Math.PI / 2, w: 8, d: 6, h: 7, min: 1.8, radius: 110, maxTris: 250_000 });
   // the bulkhead railing, open where the pier starts
   const pz0 = -10, pz1 = 10;
-  seawall(kit, stat, 'z', X(PIER_SHORE), inner.minZ, pz0, s, false); // [nbhd] granite bulkhead + rail
-  seawall(kit, stat, 'z', X(PIER_SHORE), pz1, inner.maxZ, s, false);
+  seawall(kit, stat, 'z', X(PIER_SHORE), inner.minZ, pz0, s, false, 'hrp'); // [nbhd] granite bulkhead + Hudson River Park rail
+  seawall(kit, stat, 'z', X(PIER_SHORE), pz1, inner.maxZ, s, false, 'hrp');
   kit.riprap('z', X(PIER_SHORE), inner.minZ + 1, pz0 - 3, s, hashN(c.seed, 41));
   kit.riprap('z', X(PIER_SHORE), pz1 + 3, inner.maxZ - 1, s, hashN(c.seed, 42));
   // the river around the pier
@@ -122,9 +122,9 @@ export function buildWater(c: OpenCtx) {
   // bollards and cleats along the edges, inside the rail
   for (let u = PIER_SHORE + 6; u < tipU - 2; u += 14) for (const z of [pz0 + 0.55, pz1 - 0.55]) kit.bollard(X(u), DECK, z);
   // rails along the pier's long sides and its end
-  kit.rail('x', pz0 + 0.1, px0, px1, DECK);
-  kit.rail('x', pz1 - 0.1, px0, px1, DECK);
-  kit.rail('z', X(tipU - 0.1), pz0, pz1, DECK);
+  kit.rail('x', pz0 + 0.1, px0, px1, DECK, 'hrp');
+  kit.rail('x', pz1 - 0.1, px0, px1, DECK, 'hrp');
+  kit.rail('z', X(tipU - 0.1), pz0, pz1, DECK, 'hrp');
   colliders.push({ minX: px0, maxX: px1, minZ: pz0 - 0.3, maxZ: pz0 + 0.2 }, { minX: px0, maxX: px1, minZ: pz1 - 0.2, maxZ: pz1 + 0.3 }, rect(X(tipU), 0, 0.4, pz1 - pz0));
 
   const kind = ((cz % 3) + 3) % 3;
@@ -171,7 +171,7 @@ export function buildWater(c: OpenCtx) {
  * [nbhd] the bulkhead (Hudson River Park / East River esplanade): a granite ashlar face from below the water up
  * to a projecting granite coping, the esplanade railing on it, foam at its foot. wd: the side the water is on.
  */
-function seawall(kit: WaterKit, stat: THREE.Object3D, ax: 'x' | 'z', c: number, a0: number, a1: number, wd: number, railOnly = false) {
+function seawall(kit: WaterKit, stat: THREE.Object3D, ax: 'x' | 'z', c: number, a0: number, a1: number, wd: number, railOnly = false, style: 'picket' | 'hrp' = 'picket') {
   const len = a1 - a0;
   if (len < 0.5) return;
   if (!railOnly) {
@@ -184,7 +184,7 @@ function seawall(kit: WaterKit, stat: THREE.Object3D, ax: 'x' | 'z', c: number, 
     if (ax === 'x') kit.foam(a0, c + wd * 0.1, a1, c + wd * 0.1, 0, wd);
     else kit.foam(c + wd * 0.1, a0, c + wd * 0.1, a1, wd, 0);
   }
-  kit.rail(ax, c - wd * 0.25, a0, a1, CURB + 0.03);
+  kit.rail(ax, c - wd * 0.25, a0, a1, CURB + 0.03, style);
 }
 
 

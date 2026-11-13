@@ -90,7 +90,7 @@ test('pier chunks: esplanade rail, pile grid, fender piles, bollards, riprap and
   const bad: string[] = [];
   for (const cz of [0, 1, -1]) {
     const c = nycChunk(1, PIER_CX, cz);
-    const rail = instances(c.group, 'rail'), pile = instances(c.group, 'pile'), boll = instances(c.group, 'bollard'), rock = instances(c.group, 'rock');
+    const rail = instances(c.group, 'rail') + instances(c.group, 'rail-hrp'), pile = instances(c.group, 'pile'), boll = instances(c.group, 'bollard'), rock = instances(c.group, 'rock');
     const foam = named(c.group, /^waterfront-foam$/).length;
     if (rail < 60) bad.push(`cz ${cz}: ${rail} rail panels`);
     if (pile < 100) bad.push(`cz ${cz}: ${pile} piles`);
