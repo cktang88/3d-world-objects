@@ -1045,7 +1045,7 @@ export class Lighting {
   }
   /** the street's colour grade (a window view applies it: the screen's is the room's) */
   get outdoorGrade() {
-    return this.outdoor?.grade ?? null;
+    return this.outdoor ? { ...this.outdoor.grade, night: this.outdoor.night } : null;
   }
   /** the time of day or weather changed since the outdoor light was taken (you are indoors) */
   get outdoorStale() {

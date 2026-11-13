@@ -162,7 +162,7 @@ const FRAG = /* glsl */ `
 uniform samplerCube uCube;
 uniform mat4 uWorld;
 uniform vec3 uCap, uBoxMin, uBoxMax, uGradeGain, uGradeLift;
-uniform float uGain, uSat, uContrast;
+uniform float uGain, uSat, uContrast, uNight;
 varying vec3 vPos;
 void main() {
   // the view ray, in the city's frame
@@ -177,13 +177,17 @@ void main() {
   vec3 dir = o2 + d * t - uCap;
   gl_FragColor = vec4(textureCube(uCube, dir).rgb * uGain, 1.0);
   #include <tonemapping_fragment>
-  // the street's colour grade (gain / lift, saturation, contrast), as the screen shows it outdoors
-  vec3 col = clamp(gl_FragColor.rgb, 0.0, 1.0);
-  col = col * uGradeGain + uGradeLift * (1.0 - col);
-  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(vec3(l), col, uSat);
-  gl_FragColor.rgb = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0);
   #include <colorspace_fragment>
+  // the street's colour grade (gain / lift, saturation, contrast) on display values, as the grade
+  // pass does on screen (in linear light its lift and S-curve crushed a night sky into saturated
+  // blue). At night the blue gain and the saturation are held back further: a dark navy sky,
+  // the sodium lamps stay warm
+  vec3 gg = mix(uGradeGain, vec3(dot(uGradeGain, vec3(0.3333))), 0.7 * uNight);
+  vec3 col = clamp(gl_FragColor.rgb, 0.0, 1.0);
+  col = col * gg + uGradeLift * (1.0 - col);
+  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(vec3(l), col, uSat * mix(1.0, 0.55, uNight));
+  gl_FragColor.rgb = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0);
 }`;
 
 export interface Grade {
@@ -191,6 +195,8 @@ export interface Grade {
   lift: THREE.Vector3;
   sat: number;
   contrast: number;
+  /** 0 day .. 1 night */
+  night?: number;
 }
 
 /** the window-plane material for one capture (one per level; the level's dispose frees it) */
@@ -207,6 +213,7 @@ export function viewMaterial(e: ViewEntry, world: THREE.Matrix4, gain: number, g
       uGradeLift: { value: grade?.lift.clone() ?? new THREE.Vector3() },
       uSat: { value: grade?.sat ?? 1 },
       uContrast: { value: grade?.contrast ?? 1 },
+      uNight: { value: grade?.night ?? 0 },
     },
     vertexShader: VERT,
     fragmentShader: FRAG,
