@@ -220,7 +220,7 @@ interface City {
 
 export class WindowViews {
   cache = new ViewCache(3);
-  stats = { captures: 0, faces: 0, hits: 0, applied: 0, freed: 0, lastSpot: null as THREE.Vector3 | null, lastWindow: null as THREE.Vector3 | null };
+  stats = { captures: 0, faces: 0, hits: 0, applied: 0, freed: 0, maxFaceMs: 0, lastSpot: null as THREE.Vector3 | null, lastWindow: null as THREE.Vector3 | null };
   private level: Level | null = null;
   private world: THREE.Matrix4 | null = null;
   private city: City | null = null;
@@ -284,6 +284,7 @@ export class WindowViews {
     const r = this.o.renderer, sc = this.o.scene;
     const added = !city.group.parent;
     const lights: THREE.Object3D[] = [];
+    const t0 = performance.now();
     const ok = this.o.asOutdoor(() => {
       // the city in, its own lights out (the light count stays: no recompiles), the room far away
       if (added) sc.add(city.group);
@@ -314,6 +315,7 @@ export class WindowViews {
     });
     if (!ok) return void (this.pending = null);
     e.faces++;
+    this.stats.maxFaceMs = Math.max(this.stats.maxFaceMs, performance.now() - t0);
     this.stats.faces++;
     if (e.faces === 6) {
       this.pending = null;
