@@ -229,3 +229,9 @@ the world pose, `&ring=1` neighbours as HLOD), 30–60 s each, no world lock, no
   Duffy Square framed by the billboards on the walls behind it; the Hudson Yards supertall on a 40 × 25 m
   footprint (taking 20 m of the row) with a glass podium. Left: the tower facade comes out as panel, not full
   curtain-wall glass, at this seed (tower() picks it); the Vessel.
+- **Times Square screens** (`nb/ts-ads-nyc.png`, `nb/ts-ads-night.png`, `nb/ts-led-close.png`): a procedural ad
+  atlas (nyc/billboards.ts) with 28 ads in 8 layouts — Broadway posters, product hero shots, portraits, big-type
+  brand walls, key art, sports, food, tech — plus news and stock tickers; LED pixel grid up close, emissive
+  boosted at night, scrolling tickers and crossfading screens in the shader; one mesh per block as before.
+  Products are hand-drawn shaded silhouettes, not library renders. 30 Hudson Yards is now full curtain wall
+  (`nb/blk-hy5.png`). Left: the Vessel.
