@@ -8,6 +8,8 @@ import { districtAt } from '../src/nyc/districts';
 import { BROWN_FLOORS } from '../src/nyc/brownstone';
 import type { Hull } from '../src/nyc/buildings';
 import * as THREE from 'three';
+import { Waterfront, HUDSON_X, riverCovered, PIER_CX } from '../src/nyc/waterfront';
+import { CityVis } from '../src/nyc/occlusion';
 
 /** Brownstone Row blocks on the hand-made map */
 const BROWN_BLOCKS: [number, number][] = [[-3, -6], [-3, -3], [-2, -2], [-2, 0]];
@@ -71,4 +73,67 @@ test('brownstones are dressed: ashlar fronts, newels, sunbursts, garden doors, p
     if (m && !Array.isArray(m)) mats.add(m.name);
   });
   expect(mats.has('brownstone-ashlar'), `ashlar material in a brownstone block (have ${[...mats].filter(Boolean).join(', ')})`);
+});
+
+// ---------------------------------------------------------------- the waterfront
+
+const named = (root: THREE.Object3D, re: RegExp) => {
+  const out: THREE.Object3D[] = [];
+  root.traverse((o) => { if (re.test(o.name)) out.push(o); });
+  return out;
+};
+const instances = (root: THREE.Object3D, k: string) => named(root, new RegExp(`^waterfront-${k}$`)).reduce((n, o) => n + ((o as THREE.InstancedMesh).count ?? 0), 0);
+
+test('pier chunks: esplanade rail, pile grid, fender piles, bollards, riprap and foam (instanced)', () => {
+  const bad: string[] = [];
+  for (const cz of [0, 1, -1]) {
+    const c = nycChunk(1, PIER_CX, cz);
+    const rail = instances(c.group, 'rail'), pile = instances(c.group, 'pile'), boll = instances(c.group, 'bollard'), rock = instances(c.group, 'rock');
+    const foam = named(c.group, /^waterfront-foam$/).length;
+    if (rail < 60) bad.push(`cz ${cz}: ${rail} rail panels`);
+    if (pile < 100) bad.push(`cz ${cz}: ${pile} piles`);
+    if (boll < 4) bad.push(`cz ${cz}: ${boll} bollards`);
+    if (rock < 40) bad.push(`cz ${cz}: ${rock} riprap stones`);
+    if (!foam) bad.push(`cz ${cz}: no foam`);
+    // instanced: the kit adds a handful of draws, not hundreds
+    const inst = named(c.group, /^waterfront-/).length;
+    if (inst > 8) bad.push(`cz ${cz}: ${inst} waterfront meshes`);
+  }
+  none(bad, 'pier detail');
+});
+
+test('river chunks leave the open river to the Waterfront surface (no doubled water planes)', () => {
+  expect(riverCovered(HUDSON_X + 1, HUDSON_X + 50), 'Hudson covered');
+  const c = nycChunk(1, PIER_CX + 2, 0);
+  const water = named(c.group, /.*/).filter((o) => ((o as THREE.Mesh).material as THREE.Material | undefined)?.name === 'river');
+  expect(water.length === 0, `river chunk draws ${water.length} water meshes of its own`);
+});
+
+test('Waterfront: open river and far shores within budget, backdrop inside the far plane', () => {
+  const w = new Waterfront();
+  const eye = new THREE.Vector3(HUDSON_X - 5, 1.75, -40);
+  w.update(0, eye);
+  let tris = 0, meshes = 0;
+  w.group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    meshes++;
+    const g = m.geometry;
+    tris += (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+  });
+  expect(meshes <= 4, `${meshes} meshes (draw calls)`);
+  expect(tris > 5000 && tris < 120_000, `${tris} triangles`);
+  // every backdrop vertex lands inside the camera's 900 m far plane
+  w.group.updateMatrixWorld(true);
+  let far = 0;
+  const v = new THREE.Vector3();
+  for (const m of w.backdrop.children as THREE.Mesh[]) {
+    const p = m.geometry.getAttribute('position');
+    for (let i = 0; i < p.count; i += 7) far = Math.max(far, v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld).distanceTo(eye));
+  }
+  expect(far < 900, `backdrop reaches ${fmt(far)} m`);
+});
+
+test('no HLOD proxy within 150 m of the eye', () => {
+  expect(new CityVis().hlodDist >= 150, 'hlodDist under 150 m');
 });

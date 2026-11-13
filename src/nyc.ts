@@ -26,6 +26,9 @@ import { districtAt, SPAWN, spawnView } from './nyc/districts';
 import { nycMinimapSource } from './nyc/minimap-nyc'; // [minimap]
 import { registerMinimapSource } from './minimap';
 import { brownRun, BROWN_FLOORS, type BrownRun } from './nyc/brownstone'; // [nbhd] brownstone rows
+import { Waterfront } from './nyc/waterfront'; // [nbhd] open rivers + far shores
+const eyeV = new THREE.Vector3();
+const eyeOf = (p: THREE.Vector3) => eyeV.set(p.x, p.y + 1.6, p.z); // [nbhd]
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
 
 // ---------------------------------------------------------------- static geometry baking
@@ -53,6 +56,8 @@ export class NycLevel implements Level {
   private steam: THREE.Sprite[] = [];
   /** [vis] which chunks draw real geometry, an HLOD proxy, or only a shadow proxy */
   readonly vis = new CityVis();
+  /** [nbhd] the rivers out to the far shores (New Jersey, Queens) */
+  readonly waterfront = new Waterfront();
 
   constructor(desc: Extract<LevelDesc, { kind: 'nyc' }>) {
     this.seed = desc.seed;
@@ -65,6 +70,7 @@ export class NycLevel implements Level {
     };
     void b;
     this.vis.attach(this.group); // [vis]
+    this.group.add(this.waterfront.group); // [nbhd]
     // the first ring at once (?r=0: just the spawn block, so fast dev/QA boots build one chunk, not nine)
     for (let dz = -Math.min(1, RZ); dz <= Math.min(1, RZ); dz++) for (let dx = -Math.min(1, RX); dx <= Math.min(1, RX); dx++) this.ensure(dx, dz);
     this.refresh(0, 0);
@@ -88,6 +94,7 @@ export class NycLevel implements Level {
   update(dt: number, p: THREE.Vector3, time: number) {
     const cx = Math.round(p.x / AX), cz = Math.round(p.z / SZ);
     this.lastCenter = [cx, cz];
+    this.waterfront.update(time, eyeOf(p)); // [nbhd]
     // [vis] time-sliced streaming: the nearest missing chunk is built a few ms per frame (a
     // generator yielding between buildings), and at most one far chunk is unloaded per frame
     if (!this.pending) {

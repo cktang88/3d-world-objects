@@ -1,15 +1,17 @@
 import * as THREE from 'three';
 import { rect, type Rect } from '../level';
 import { Rng, hashN } from '../rng';
-import { AX, CURB } from './common';
+import { AX, SZ, CURB } from './common';
 import { lampPost } from './streetprops';
 import { addSlot, type SlotSpec } from './district-showcase';
-import { waterMat, grassMat, hexPaverMat, flat, slab } from './district-tex';
+import { grassMat, hexPaverMat, flat, slab } from './district-tex';
 import { parkBench } from './district-props';
 import { treePlanter } from './district-park';
 import { PIER_SHORE } from './districts';
 import type { OpenCtx } from './district-open';
 import { canvasTex } from './common';
+// [nbhd] real-scale waterfront: open river surface, granite bulkhead, esplanade rail, pile grid, fenders, riprap, foam
+import { WaterKit, riverCovered, waterRect, graniteBox, plankMat, bikewayMat, stripZ, deckRect } from './waterfront';
 
 /**
  * The Hudson waterfront (docs/research/districts.md): Hudson River Park's lawns, bikeway and
@@ -28,6 +30,7 @@ const DRAFT = 0.3;
 export function buildWater(c: OpenCtx) {
   const { d, inner, group, stat, colliders, cx, cz } = c;
   const r = new Rng(hashN(c.seed, 31));
+  const kit = new WaterKit(); // [nbhd]
   const slot = (s: Omit<SlotSpec, 'seed'>, col = true) => {
     addSlot(group, c.portals, { ...s, seed: hashN(c.seed, Math.round(s.x * 10), Math.round(s.z * 10)) });
     if (col) {
@@ -37,7 +40,8 @@ export function buildWater(c: OpenCtx) {
   };
   const water = (x0: number, x1: number, z0: number, z1: number) => {
     if (x1 - x0 < 0.1 || z1 - z0 < 0.1) return;
-    group.add(slab(waterMat(), x0, x1, z0, z1, WATER, 14));
+    // [nbhd] the open river (Waterfront in nyc.ts) draws water beyond the bulkhead; chunks only fill the rest
+    if (!riverCovered(cx * AX + x0, cx * AX + x1)) group.add(waterRect(x0, x1, z0, z1, cx * AX, cz * SZ, WATER));
     colliders.push({ minX: x0, maxX: x1, minZ: z0, maxZ: z1 });
   };
   // seawall + railing wherever a street sidewalk meets the river
@@ -47,12 +51,13 @@ export function buildWater(c: OpenCtx) {
     const line = alongX ? (s > 0 ? inner.maxZ : inner.minZ) : s > 0 ? inner.maxX : inner.minX;
     if (d.kind === 'pier' && !alongX && s === -(d.waterSide ?? 1)) continue; // the landward avenue: park, not water
     const a0 = alongX ? inner.minX : inner.minZ, a1 = alongX ? inner.maxX : inner.maxZ;
-    seawall(stat, alongX ? 'x' : 'z', line, a0, a1);
+    seawall(kit, stat, alongX ? 'x' : 'z', line, a0, a1, -s); // [nbhd] the river lies inside the chunk
   }
 
   if (d.kind !== 'pier') {
     water(inner.minX, inner.maxX, inner.minZ, inner.maxZ);
     if (cx === 7 && cz === -1) carrier(c, slot);
+    kit.flush(group); // [nbhd]
     return;
   }
 
@@ -64,7 +69,7 @@ export function buildWater(c: OpenCtx) {
   // Hudson River Park: lawn, bikeway (green-grey), esplanade along the bulkhead
   stat.add(slab(grassMat(), uMin, uMax, inner.minZ, inner.maxZ, CURB + 0.02, 4));
   const band = (u0: number, u1: number, m: THREE.Material, y: number) => stat.add(slab(m, Math.min(X(u0), X(u1)), Math.max(X(u0), X(u1)), inner.minZ, inner.maxZ, y, 3));
-  band(uLand0 + 6, uLand0 + 10, flat('#4f6656', 0.9), CURB + 0.03);
+  stat.add(stripZ(bikewayMat(), Math.min(X(uLand0 + 6), X(uLand0 + 10)), Math.max(X(uLand0 + 6), X(uLand0 + 10)), inner.minZ, inner.maxZ, CURB + 0.03, 16, s < 0)); // [nbhd] marked bikeway
   band(PIER_SHORE - 7, PIER_SHORE, hexPaverMat(), CURB + 0.03);
   const plant = treePlanter(group);
   for (let z = inner.minZ + 4; z < inner.maxZ - 2; z += 8.5) {
@@ -76,16 +81,18 @@ export function buildWater(c: OpenCtx) {
     parkBench(stat, X(PIER_SHORE - 6.2), CURB, z, s > 0 ? Math.PI / 2 : -Math.PI / 2);
     colliders.push(rect(X(PIER_SHORE - 6.2), z, 0.8, 2));
     if (k % 2 === 0) {
-      lampPost(stat, group, X(PIER_SHORE - 6.8), z + 6, 'z', -s, 'cobra');
-      colliders.push(rect(X(PIER_SHORE - 6.8), z + 6, 0.4, 0.4));
+      lampPost(stat, group, X(PIER_SHORE - 1.0), z + 6, 'z', -s, 'crook'); // [nbhd] park lamps along the rail
+      colliders.push(rect(X(PIER_SHORE - 1.0), z + 6, 0.4, 0.4));
     }
   }
   // a kiosk, a shelter or a little pavilion on the lawn of the riverside park
   for (const zz of [inner.minZ + 14, inner.maxZ - 14]) slot({ kind: ['folly', 'structure', 'smallbuilding'], x: X(uLand0 + 22), y: CURB + 0.02, z: zz, rot: s > 0 ? Math.PI / 2 : -Math.PI / 2, w: 8, d: 6, h: 7, min: 1.8, radius: 110, maxTris: 250_000 });
   // the bulkhead railing, open where the pier starts
   const pz0 = -10, pz1 = 10;
-  seawall(stat, 'z', X(PIER_SHORE), inner.minZ, pz0, true);
-  seawall(stat, 'z', X(PIER_SHORE), pz1, inner.maxZ, true);
+  seawall(kit, stat, 'z', X(PIER_SHORE), inner.minZ, pz0, s, false); // [nbhd] granite bulkhead + rail
+  seawall(kit, stat, 'z', X(PIER_SHORE), pz1, inner.maxZ, s, false);
+  kit.riprap('z', X(PIER_SHORE), inner.minZ + 1, pz0 - 3, s, hashN(c.seed, 41));
+  kit.riprap('z', X(PIER_SHORE), pz1 + 3, inner.maxZ - 1, s, hashN(c.seed, 42));
   // the river around the pier
   const wu0 = PIER_SHORE, wu1 = AX / 2;
   const wx0 = Math.min(X(wu0), X(wu1)), wx1 = Math.max(X(wu0), X(wu1));
@@ -96,22 +103,28 @@ export function buildWater(c: OpenCtx) {
   water(tip0, tip1, pz0, pz1);
   // ---- the pier deck on pilings
   const px0 = Math.min(X(PIER_SHORE), X(tipU)), px1 = Math.max(X(PIER_SHORE), X(tipU));
-  stat.add(slab(flat('#8d877c', 0.9), px0, px1, pz0, pz1, DECK, 3));
-  const edge = new THREE.Mesh(new THREE.BoxGeometry(px1 - px0, 1.4, pz1 - pz0), flat('#5a554d', 0.95));
-  edge.position.set((px0 + px1) / 2, DECK - 0.7, 0);
+  // [nbhd] the deck: timber planks on park and marina piers, concrete on the shed pier; a 0.45 m slab on a pile grid
+  const kind0 = ((cz % 3) + 3) % 3;
+  stat.add(kind0 === 0 ? slab(flat('#8d877c', 0.9), px0, px1, pz0, pz1, DECK, 3) : deckRect(plankMat(), px0, px1, pz0, pz1, DECK));
+  const edge = new THREE.Mesh(new THREE.BoxGeometry(px1 - px0, 0.45, pz1 - pz0), flat('#5a554d', 0.95));
+  edge.position.set((px0 + px1) / 2, DECK - 0.225, 0);
   edge.userData.owned = true;
   stat.add(edge);
-  for (let u = PIER_SHORE + 3; u < tipU; u += 6)
-    for (const z of [pz0 + 0.6, pz1 - 0.6]) {
-      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 2.2, 8), flat('#3a332b', 0.95));
-      p.position.set(X(u), WATER + 0.1, z);
-      p.userData.owned = true;
-      stat.add(p);
-    }
+  for (let u = PIER_SHORE + 1.5; u < tipU; u += 3.2)
+    for (let z = pz0 + 0.8; z < pz1; z += 3.1) kit.pile(X(u), z, DECK - 0.45);
+  // timber fender piles and whalers along the long sides and the end; foam around them
+  for (let u = PIER_SHORE + 1; u <= tipU; u += 2.1) for (const z of [pz0 - 0.22, pz1 + 0.22]) kit.pile(X(u), z, DECK + 0.25, 0.85);
+  for (let z = pz0 + 0.5; z < pz1; z += 2.1) kit.pile(X(tipU + 0.22), z, DECK + 0.25, 0.85);
+  for (const z of [pz0 - 0.32, pz1 + 0.32]) for (const y of [DECK - 0.35, WATER + 0.45]) stat.add(graniteBox(px1 - px0, 0.22, 0.2, (px0 + px1) / 2, y, z, '#5c4a3a'));
+  kit.foam(px0, pz0 - 0.35, px1, pz0 - 0.35, 0, -1);
+  kit.foam(px0, pz1 + 0.35, px1, pz1 + 0.35, 0, 1);
+  kit.foam(X(tipU + 0.35), pz0, X(tipU + 0.35), pz1, s, 0);
+  // bollards and cleats along the edges, inside the rail
+  for (let u = PIER_SHORE + 6; u < tipU - 2; u += 14) for (const z of [pz0 + 0.55, pz1 - 0.55]) kit.bollard(X(u), DECK, z);
   // rails along the pier's long sides and its end
-  railing(stat, 'x', pz0 + 0.1, px0, px1);
-  railing(stat, 'x', pz1 - 0.1, px0, px1);
-  railing(stat, 'z', X(tipU - 0.1), pz0, pz1);
+  kit.rail('x', pz0 + 0.1, px0, px1, DECK);
+  kit.rail('x', pz1 - 0.1, px0, px1, DECK);
+  kit.rail('z', X(tipU - 0.1), pz0, pz1, DECK);
   colliders.push({ minX: px0, maxX: px1, minZ: pz0 - 0.3, maxZ: pz0 + 0.2 }, { minX: px0, maxX: px1, minZ: pz1 - 0.2, maxZ: pz1 + 0.3 }, rect(X(tipU), 0, 0.4, pz1 - pz0));
 
   const kind = ((cz % 3) + 3) % 3;
@@ -141,47 +154,39 @@ export function buildWater(c: OpenCtx) {
     for (const side of [-1, 1]) {
       const dz = side * 20;
       const fx0 = Math.min(X(PIER_SHORE + 2), X(tipU - 6)), fx1 = Math.max(X(PIER_SHORE + 2), X(tipU - 6));
-      stat.add(slab(flat('#9b8f7a', 0.9), fx0, fx1, dz - 1.2, dz + 1.2, fy, 2));
+      stat.add(deckRect(plankMat(), fx0, fx1, dz - 1.2, dz + 1.2, fy)); // [nbhd] timber floats
       for (let u = PIER_SHORE + 8; u < tipU - 8; u += 9) {
-        stat.add(slab(flat('#9b8f7a', 0.9), X(u) - 0.6, X(u) + 0.6, Math.min(dz, dz - side * 7), Math.max(dz, dz - side * 7), fy, 2));
+        stat.add(deckRect(plankMat(), X(u) - 0.6, X(u) + 0.6, Math.min(dz, dz - side * 7), Math.max(dz, dz - side * 7), fy));
+        for (let k = 1; k < 7; k += 2.5) kit.cleat(X(u) + 0.5, fy, dz - side * k, Math.PI / 2); // [nbhd] cleats on the fingers
+        kit.pile(X(u), dz - side * 7, fy + 1.2, 0.9);
         slot({ kind: 'boat', x: X(u + 4.5), y: WATER - DRAFT, z: dz - side * 4.5, rot: Math.PI / 2, w: 11, d: 4.2, h: 12, min: 4, radius: 140, maxTris: 250_000 }, false);
       }
     }
     for (let u = PIER_SHORE + 6; u < tipU - 4; u += 16) slot({ kind: 'pierprop', x: X(u), y: DECK, z: pz0 + 1.3, rot: 0, w: 1.6, d: 1.2, h: 2, min: 0.4, radius: 60, maxTris: 60_000 });
   }
+  kit.flush(group); // [nbhd]
 }
 
-/** granite seawall face down to the water with a black railing on top */
-function seawall(stat: THREE.Object3D, ax: 'x' | 'z', c: number, a0: number, a1: number, railOnly = false) {
+/**
+ * [nbhd] the bulkhead (Hudson River Park / East River esplanade): a granite ashlar face from below the water up
+ * to a projecting granite coping, the esplanade railing on it, foam at its foot. wd: the side the water is on.
+ */
+function seawall(kit: WaterKit, stat: THREE.Object3D, ax: 'x' | 'z', c: number, a0: number, a1: number, wd: number, railOnly = false) {
   const len = a1 - a0;
   if (len < 0.5) return;
   if (!railOnly) {
-    const w = new THREE.Mesh(new THREE.BoxGeometry(ax === 'x' ? len : 0.6, CURB - WATER + 0.6, ax === 'x' ? 0.6 : len), flat('#7d786f', 0.95));
-    w.position.set(ax === 'x' ? (a0 + a1) / 2 : c, (CURB + WATER - 0.6) / 2, ax === 'x' ? c : (a0 + a1) / 2);
-    w.userData.owned = true;
-    stat.add(w);
+    const mid = (a0 + a1) / 2, h = CURB - 0.2 - (WATER - 0.8);
+    const face = ax === 'x' ? graniteBox(len, h, 0.6, mid, WATER - 0.8 + h / 2, c - wd * 0.2) : graniteBox(0.6, h, len, c - wd * 0.2, WATER - 0.8 + h / 2, mid);
+    stat.add(face);
+    // the coping: 0.7 m granite, 0.3 m high, overhanging the face by 8 cm
+    const cap = ax === 'x' ? graniteBox(len, 0.3, 0.7, mid, CURB - 0.12, c - wd * 0.17, '#cfcac0') : graniteBox(0.7, 0.3, len, c - wd * 0.17, CURB - 0.12, mid, '#cfcac0');
+    stat.add(cap);
+    if (ax === 'x') kit.foam(a0, c + wd * 0.1, a1, c + wd * 0.1, 0, wd);
+    else kit.foam(c + wd * 0.1, a0, c + wd * 0.1, a1, wd, 0);
   }
-  railing(stat, ax, c, a0, a1);
+  kit.rail(ax, c - wd * 0.25, a0, a1, CURB + 0.03);
 }
 
-function railing(stat: THREE.Object3D, ax: 'x' | 'z', c: number, a0: number, a1: number) {
-  const len = a1 - a0;
-  if (len < 0.5) return;
-  const iron = flat('#1c1d1f', 0.5, 0.5);
-  const top = new THREE.Mesh(new THREE.BoxGeometry(ax === 'x' ? len : 0.06, 0.06, ax === 'x' ? 0.06 : len), iron);
-  top.position.set(ax === 'x' ? (a0 + a1) / 2 : c, CURB + 1.05, ax === 'x' ? c : (a0 + a1) / 2);
-  top.userData.owned = true;
-  stat.add(top);
-  const mid = top.clone();
-  mid.position.y = CURB + 0.55;
-  stat.add(mid);
-  for (let u = a0; u <= a1; u += 2) {
-    const p = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.05, 0.06), iron);
-    p.position.set(ax === 'x' ? u : c, CURB + 0.52, ax === 'x' ? c : u);
-    p.userData.owned = true;
-    stat.add(p);
-  }
-}
 
 /** a Chelsea Piers shed: blue steel panels, red roll-up doors and stairs, clerestory */
 function shed(stat: THREE.Object3D, x0: number, x1: number, z0: number, z1: number) {

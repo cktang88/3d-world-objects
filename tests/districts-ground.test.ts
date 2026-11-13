@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { test, none, fmt } from './qa';
 import { nycChunk } from './world';
 import { slotsUnder, type SlotSpec } from '../src/nyc/district-showcase';
+import { riverCovered, WATER_Y } from '../src/nyc/waterfront';
+import { AX } from '../src/nyc/common';
 
 const ALL: [string, number, number][] = [
   ['park fountain', 0, -4], ['park pond', 1, -4], ['park playground', -1, -4], ['park ballfield', 2, -4], ['park dogrun', -1, -5], ['park garden', 1, -5], ['park meadow', 0, -5], ['park kiosk', 2, -5],
@@ -42,7 +44,8 @@ test('showcase slots rest on a surface (gap <= 3 cm), boats at the waterline', (
       ray.set(new THREE.Vector3(s.x, y + (isBoat(s) ? 1.5 : 0.05), s.z), down);
       ray.far = 40;
       const hit = ray.intersectObjects(meshes, false).find((h) => (h.face?.normal ? h.face.normal.clone().transformDirection(h.object.matrixWorld).y > 0.5 : true));
-      const top = hit ? hit.point.y : -Infinity;
+      // [nbhd] out in the open river the water is the level's Waterfront surface, not the chunk's
+      const top = hit ? hit.point.y : isBoat(s) && riverCovered(cx * AX + s.x - 1, cx * AX + s.x + 1) ? WATER_Y : -Infinity;
       const gap = y - top;
       if (isBoat(s)) {
         // a hull floats with its bottom a little below the water surface
