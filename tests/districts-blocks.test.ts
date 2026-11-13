@@ -142,3 +142,24 @@ test('brick facades: the wall palette survives the photo tint (reds, browns and 
   expect(spread >= 40, `tenement colours span only ${fmt(spread)} sRGB units over the brick photo (want >= 40)`);
   expect(sat(eff('#8c3b2a')) >= 0.4, `the red brick tenement reads ${eff('#8c3b2a').getHexString()}: saturation ${fmt(sat(eff('#8c3b2a')))} (want >= 0.4)`);
 });
+
+test('street lamps carry a glare that reads from across the street at dusk, and is off by day', async () => {
+  // street audit: at dusk the cobra head's flat lens (0.7 x 0.3 m, 9 m up) was under a pixel from the far
+  // sidewalk, so lamps read as off; the glare is 1.6 m across (~4.5 degrees from 20 m)
+  const { lampGlare } = await import('../src/nyc/streetprops');
+  const g = lampGlare();
+  let tris = 0, minY = Infinity, maxW = 0;
+  nycChunk(1, 0, 0).group.traverse((o) => {
+    const m = o as import('three').Mesh;
+    if (!m.isMesh || m.material !== g) return;
+    tris += (m.geometry.index?.count ?? m.geometry.getAttribute('position').count) / 3;
+    m.geometry.computeBoundingBox();
+    const b = m.geometry.boundingBox!;
+    minY = Math.min(minY, b.min.y + m.position.y);
+    maxW = Math.max(maxW, b.max.y - b.min.y);
+  });
+  expect(tris >= 4 * 4, `${tris / 4} lamp glares on the spawn block (want >= 4: lamps every 26 m along four kerbs, skipping doors)`);
+  expect(maxW >= 1.0, `glare only ${fmt(maxW)} m tall`);
+  expect(minY > 7, `glare not up at the luminaires (lowest ${fmt(minY)} m)`);
+  expect(!g.visible && g.opacity < 0.05, `by day the glare draws (visible ${g.visible}, opacity ${g.opacity})`);
+});

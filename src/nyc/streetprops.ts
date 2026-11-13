@@ -8,7 +8,7 @@ import { SIG, CURB, AX, SZ, BX, BZ, LX, LZ, streetName } from './common';
 import { onRamp } from './ground';
 import { rect, overlaps, type Rect as LRect } from '../level';
 import { addTree, pickSpecies, TREE_VARIANTS, type Species } from './streettrees';
-import { streetLightMarker } from '../lighting';
+import { streetLightMarker, getNight, onTimeChange } from '../lighting';
 import { propAtlas, propAtlasLit, region, signSlot, toRect, wireMesh, type Rect, type Region } from './propatlas';
 
 /** Street furniture: signals, name signs, lamp posts, trees, hydrants, subway entrances and the rest. */
@@ -324,6 +324,39 @@ function tinted(g: THREE.BufferGeometry, hex: string) {
 }
 const lampLens = () => glowVC();
 
+/**
+ * [districts] street audit: at dusk the LED lens (a flat disc 9 m up) was under a pixel from across the
+ * street, so lamps read as off. A soft additive glare (two crossed upright quads, so it shows from every
+ * side) hangs under each luminaire, its strength the night factor; hidden by day.
+ */
+let glareM: THREE.MeshBasicMaterial | null = null;
+export function lampGlare() {
+  if (!glareM) {
+    const N = 32, px = new Uint8Array(N * N * 4);
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const d = Math.hypot(x + 0.5 - N / 2, y + 0.5 - N / 2) / (N / 2);
+        const a = Math.max(0, 1 - d) ** 2.2;
+        px.set([255, 226, 176, Math.round(255 * a)], (y * N + x) * 4);
+      }
+    const t = new THREE.DataTexture(px, N, N);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.needsUpdate = true;
+    const m = (glareM = new THREE.MeshBasicMaterial({ map: t, color: '#ffffff', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: true }));
+    m.name = 'lamp-glare';
+    const set = (n: number) => { m.opacity = Math.min(1, n * 1.15); m.visible = n > 0.05; };
+    set(getNight());
+    onTimeChange((_t, n) => set(n));
+  }
+  return glareM;
+}
+/** the glare's two crossed quads, centred at (x, y, z), `size` metres across */
+function addGlare(k: KitBuilder, x: number, y: number, z: number, size: number) {
+  const q = new THREE.PlaneGeometry(1, 1);
+  k.add(q, lampGlare(), x, y, z, 0, 0, 0, size, false);
+  k.add(q, lampGlare(), x, y, z, 0, Math.PI / 2, 0, size, false);
+}
+
 // ---------------------------------------------------------------- traffic signals
 
 /**
@@ -522,6 +555,7 @@ function cobraLamp() {
     const lens = new THREE.CircleGeometry(1, 20);
     lens.rotateX(Math.PI / 2);
     k.add(lens, lampLens(), hx + 0.04, hy - 0.052, 0, 0, 0, 0, [0.36, 1, 0.15], false);
+    addGlare(k, hx + 0.04, hy - 0.2, 0, 1.6); // [districts] street audit
     // slip-fitter onto the arm
     k.add(new THREE.CylinderGeometry(0.06, 0.06, 0.25, 10), G, 2.55, hy + 0.06, 0, 0, 0, Math.PI / 2);
   });
@@ -561,6 +595,7 @@ function crookLamp() {
     k.add(cap, Bk, lx, 4.38, 0);
     const glass = new THREE.LatheGeometry([[0, -0.08], [0.2, -0.08], [0.2, -0.2], [0.15, -0.36], [0.07, -0.47], [0, -0.5]].map(([r, y]) => new THREE.Vector2(r, y)), 18);
     k.add(glass, lampLens(), lx, 4.38, 0, 0, 0, 0, 1, false);
+    addGlare(k, lx, 4.38, 0, 1.1); // [districts] street audit
   });
 }
 
