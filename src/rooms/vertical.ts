@@ -10,6 +10,7 @@ import * as F from './furniture';
 import { Rng, hashN } from '../rng';
 import { signTex, facade, roofTex } from '../textures';
 import { mat } from '../build';
+import { officeTypeFor, OFFICE_NAMES } from './office';
 
 /**
  * Vertical circulation: a building as a stack of floor levels joined by a real stair and
@@ -81,10 +82,10 @@ export function buildingType(nycType: string, style: string, floors: number): BT
   return floors > 6 ? 'prewar' : 'walkup';
 }
 /** the level desc for a building's lobby */
-export function buildingDesc(nycType: string, style: string, seed: number, name: string, floors: number): LevelDesc | null {
+export function buildingDesc(nycType: string, style: string, seed: number, name: string, floors: number, district?: string): LevelDesc | null {
   const type = buildingType(nycType, style, floors);
   if (!type) return null;
-  return { kind: 'floor', seed, name, type, floor: 0, floors: Math.max(2, Math.min(floors, 40)) };
+  return { kind: 'floor', seed, name, type, floor: 0, floors: Math.max(2, Math.min(floors, 40)), ...(district ? { district } : {}) };
 }
 
 export function floorLabel(type: string, f: number, floors: number) {
@@ -1279,12 +1280,14 @@ export class FloorLevel implements Level, VCore {
     const [ix, iz] = toWorld(fr, 0, 0.9);
     const unitSeed = hashN(this.desc.seed, this.floor, i, 77);
     const style = this.rng.pick(this.spec.unitStyles);
+    // office suites: a type per building, floor, unit and district (src/rooms/office.ts)
+    const suite = style === 'office' ? officeTypeFor(this.desc.seed, this.type, this.desc.district, this.floor, i) : null;
     const box = new THREE.Box3().setFromPoints([new THREE.Vector3(...xyz(toWorld(fr, -0.7, -0.3), 0)), new THREE.Vector3(...xyz(toWorld(fr, 0.7, 0.6), 2.4))]);
     this.ports.push({
       box,
       label: office ? `Enter ${label}` : `Go into apartment ${label}`,
-      sub: style === 'office' ? 'offices' : style === 'workshop' ? 'a loft workshop' : `${this.rng.int(1, 3)} bedrooms`,
-      target: { kind: 'interior', seed: unitSeed, name: `${this.desc.name} · ${label}`, style, floor: 0, floors: 1, biome: 'town' },
+      sub: suite ? OFFICE_NAMES[suite] : style === 'workshop' ? 'a loft workshop' : `${this.rng.int(1, 3)} bedrooms`,
+      target: { kind: 'interior', seed: unitSeed, name: `${this.desc.name} · ${label}`, style, floor: 0, floors: 1, biome: 'town', ...(suite ? { office: suite } : {}) },
       returnPos: new THREE.Vector3(ix, 0, iz),
       returnYaw: fr.r + Math.PI,
       door: { pos: new THREE.Vector3(dx, 0, dz), yaw: fr.r },

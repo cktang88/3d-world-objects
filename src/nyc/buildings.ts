@@ -10,6 +10,7 @@ import { WindowBatch, dressWindow, REVEAL, type TrimKind, type SashKind } from '
 import { ShopGlass, TextBatch, storefront } from './buildings-shop';
 import { SW } from './common';
 import { buildingDesc } from '../rooms/vertical';
+import { districtAt } from './districts';
 
 export { setNight } from './buildings-win';
 export { SHOPS } from './buildings-shop';
@@ -1168,7 +1169,7 @@ function portalDoor(ctx: BCtx, F: Face, u: number, out: number, _alongX: boolean
     label: `Enter ${addr}`,
     sub: `${floors}-storey ${type === 'brownstone' ? 'brownstone' : type === 'tower' ? 'office tower' : type === 'castiron' ? 'cast-iron loft' : type === 'prewar' ? 'pre-war apartment house' : 'walk-up'}`,
     // vertical.ts hook: walk-ups, pre-war, office and loft buildings open onto their lobby (floors with stairs and lifts); brownstones keep their interior
-    target: buildingDesc(type, style, hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), addr, floors) ?? { kind: 'interior', seed: hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), name: addr, style, floor: 0, floors: Math.min(floors, 40), biome: 'town' },
+    target: buildingDesc(type, style, hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), addr, floors, districtAt(ctx.cx, ctx.cz).kind) ?? { kind: 'interior', seed: hashN(ctx.seed, Math.round(entry.x * 10), Math.round(entry.z * 10), 3), name: addr, style, floor: 0, floors: Math.min(floors, 40), biome: 'town' },
     // seamless.ts: the door in the facade (solid, so not seen through): E puts you just inside it
     door: glass
       ? (() => {

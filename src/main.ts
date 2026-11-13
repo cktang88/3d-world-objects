@@ -12,6 +12,7 @@ import { CityLevel } from './city';
 import { InteriorLevel } from './interior';
 import { NycLevel, SHOPS } from './nyc';
 import { ShopLevel } from './shop';
+import { OfficeLevel } from './rooms/office';
 import { AtriumLevel, GalleryLevel } from './museum';
 import { loadMuseum, museum } from './museumData';
 import { DATASET_LABEL, loadRebuiltIndex, queueHold, type RemoteEntry } from './remote';
@@ -236,7 +237,7 @@ function build(desc: LevelDesc, staged = false): Level {
     case 'nyc': return new NycLevel(desc);
     case 'atrium': return new AtriumLevel();
     case 'gallery': return new GalleryLevel(desc);
-    case 'interior': return desc.shop ? new ShopLevel(desc, { staged }) : new InteriorLevel(desc, { staged });
+    case 'interior': return desc.shop ? new ShopLevel(desc, { staged }) : desc.office ? new OfficeLevel(desc, { staged }) : new InteriorLevel(desc, { staged }); // office suites: src/rooms/office.ts
     case 'floor': return new FloorLevel(desc, { staged }); // src/rooms/vertical.ts
     case 'macro': return new MacroLevel(desc, { staged }); // src/macro.ts: the world inside an object
   }

@@ -21,12 +21,12 @@ export function vehicleRect(r: Rect): Rect {
 
 export type LevelDesc =
   | { kind: 'city'; seed: number; biome: string; name: string; source?: ModelEntry; sourceScale?: number }
-  | { kind: 'interior'; seed: number; name: string; style: string; floor: number; floors: number; biome: string; shop?: string }
+  | { kind: 'interior'; seed: number; name: string; style: string; floor: number; floors: number; biome: string; shop?: string; office?: string }
   | { kind: 'nyc'; seed: number; name: string }
   | { kind: 'atrium' }
   | { kind: 'gallery'; theme: number; page: number; wing?: string }
   /** a storey of a building (src/rooms/vertical.ts): floor 0 is the lobby, floor === floors the roof */
-  | { kind: 'floor'; seed: number; name: string; type: string; floor: number; floors: number }
+  | { kind: 'floor'; seed: number; name: string; type: string; floor: number; floors: number; district?: string }
   /** the world inside a small object, built from the object (src/macro.ts): garden, vessel, circuit, food, surface */
   | { kind: 'macro'; seed: number; name: string; mode: string; title: string; source?: ModelEntry; sourceScale: number };
 

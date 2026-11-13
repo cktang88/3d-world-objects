@@ -43,7 +43,7 @@ const AREAS = {
   people: ['people', 'crossing'], crossing: ['crossing'], vehicles: ['vehicles'], traffic: ['vehicles', 'crossing'],
   shop: ['shop', 'shopaudit'], shops: ['shop', 'shopaudit'], interior: ['interior'], interiors: ['interior'], vertical: ['vertical'],
   lighting: ['lighting'], light: ['lighting'], materials: ['materials'], rebuilt: ['materials'],
-  zfight: ['zfight'], flicker: ['zfight'], memory: ['memory', 'memory-city', 'memory-rooms'], mem: ['memory', 'memory-city', 'memory-rooms'], leaks: ['memory', 'memory-city', 'memory-rooms'],
+  zfight: ['zfight'], flicker: ['zfight'], offices: ['offices'], office: ['offices'], memory: ['memory', 'memory-city', 'memory-rooms'], mem: ['memory', 'memory-city', 'memory-rooms'], leaks: ['memory', 'memory-city', 'memory-rooms'],
   meshlod: ['meshlod'], lod: ['meshlod'], simplify: ['meshlod'],
   museum: ['museum'], libraries: ['libraries'], library: ['libraries'], seamless: ['seamless'], lazy: ['seamless', 'interior', 'shop'], realscale: ['realscale', 'seamless', 'museum'],
 };
@@ -54,7 +54,8 @@ const SRC_MAP = [
   [/^tests\/(heap|memlib)\.ts$|^src\/dispose\.ts$/, ['memory', 'memory-city', 'memory-rooms']],
   [/^src\/nyc\/people/, ['people']],
   [/^src\/nyc\/ground/, ['ground']],
-  [/^src\/rooms\/vertical/, ['vertical']],
+  [/^src\/rooms\/office/, ['offices']],
+  [/^src\/rooms\/vertical/, ['vertical', 'offices']],
   [/^src\/nyc\/vehicle/, ['vehicles']],
   [/^src\/zfix\.ts$/, ['zfight']],
   [/^src\/(meshlod|meshlod-core)\.ts$|^src\/vendor\/meshopt|^scripts\/(build_vehicles\.mjs|lib\/simplify-doc\.mjs)$|^public\/assets\/vehicles\//, ['meshlod', 'vehicles']],
