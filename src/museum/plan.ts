@@ -33,7 +33,8 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
     const k = classify(m, st, r);
     if (i === 0 && k !== 'hang') {
       // the room's hero: its own stage in the middle
-      if (k === 'floor') units.push(platform({ st, r }, m, true, barrier));
+      // (motor halls turn the hero to the visitor, Petersen; turning every car costs its rotated footprint)
+      if (k === 'floor') units.push(platform({ st, r }, m, true, barrier, st.arch === 'motor' ? r.range(0.25, 0.45) : 0));
       else if (k === 'medium') units.push(plinth(m, false, true));
       else units.push(plinth(m, true, true, along(m).w < 0.6 ? 0.18 : 0));
       return;
@@ -46,9 +47,7 @@ export function assemble(items: Measured[], st: Style, r: Rng): Unit[] {
     buckets.medium = [];
   }
   for (const m of buckets.hang) units.push(hang(m, r.range(-0.12, 0.12)));
-  // motor halls sometimes turn the cars to the visitor, alternately left and right (Petersen)
-  const turn = st.arch === 'motor' && r.chance(0.6) ? r.range(0.25, 0.45) : 0;
-  buckets.floor.forEach((m, i) => units.push(platform({ st, r }, m, false, barrier, turn * (i % 2 ? 1 : -1))));
+  buckets.floor.forEach((m) => units.push(platform({ st, r }, m, false, barrier)));
   for (const m of buckets.mount) units.push(mount(m));
 
   // medium things: period rooms, stepped risers, plinth landscapes or single plinths
@@ -335,7 +334,9 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
 
   const hangLanes = hangU.length >= 7 ? 3 : hangU.length >= 3 ? 2 : 1;
   let W = Math.max(Wf + 2 * inset, intimate ? 6 : 8, hangLanes * (hangS + 1.5));
-  const entry = Math.max(3.6, wallDepth + 2);
+  // the zone inside the entrance is deep enough for the side doorways to open there (a door's width
+  // plus its corridor): otherwise every row gap had to grow until one fitted a side door
+  const entry = Math.max(3.6, wallDepth + 2, !intimate && exits >= 2 ? 3.4 + 1.8 : 0);
   const rowD = rows.map((rw) => Math.max(...rw.map((u) => u.d)));
   const minD = entry + rowD.reduce((s, d) => s + d, 0) + aisle * Math.max(0, rows.length - 1) + (heroU ? 2 : 0) + inset;
   const laneLen = Math.max(0, ...Array.from({ length: hangLanes }, (_, li) => hangU.filter((_, i) => i % hangLanes === li).reduce((s, u) => s + u.d + 2, 2)));
@@ -442,7 +443,7 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
     });
     gaps.push([-D, top]);
     let ok = true;
-    const used: number[] = [];
+    const used: { wall: Wall; at: number }[] = [];
     const final = proposed.map((d) => {
       if (d.wall === 'N') return d;
       const need = Math.max(CLEAR, d.w + 0.4);
@@ -451,14 +452,14 @@ export function planRoom(units: Unit[], st: Style, r: Rng, exits: number): Plan 
         const lo = Math.max(g0 + need / 2, -D + 1 + d.w / 2), hi = Math.min(g1 - need / 2, -1.5 - d.w / 2);
         if (lo > hi) continue;
         const at = Math.min(hi, Math.max(lo, d.at));
-        if (used.some((u) => Math.abs(u - at) < d.w + 1)) continue;
+        if (used.some((u) => u.wall === d.wall && Math.abs(u.at - at) < d.w + 1)) continue;
         if (best === null || Math.abs(at - d.at) < Math.abs(best - d.at)) best = at;
       }
       if (best === null) {
         ok = false;
         return d;
       }
-      used.push(best);
+      used.push({ wall: d.wall, at: best });
       return { ...d, at: best };
     });
     if (!ok) {

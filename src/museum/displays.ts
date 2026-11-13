@@ -219,9 +219,11 @@ export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, 
   const big = Math.max(a.w, a.d);
   const st = c0.st;
   const ph = barrierKind === 'line' || st.outdoor ? (st.outdoor ? 0.12 : 0) : big > 8 ? 0.2 : st.arch === 'motor' ? 0.16 : 0.24;
-  const margin = Math.min(1.6, Math.max(0.35, big * 0.12));
+  // motor halls park cars close (Petersen, Beaulieu): a narrow plinth edge and the barrier near it
+  const motor = st.arch === 'motor';
+  const margin = motor ? Math.min(0.6, Math.max(0.25, big * 0.06)) : Math.min(1.6, Math.max(0.35, big * 0.12));
   const pw = a.w + margin * 2, pd = a.d + margin * 2;
-  const bOff = barrierKind === 'edge' ? 0 : 0.45;
+  const bOff = barrierKind === 'edge' ? 0 : motor ? 0.3 : 0.45;
   const bw = pw + bOff * 2, bd = pd + bOff * 2;
   const cradle = st.arch === 'maritime' && m.real.y < big;
   const lift = cradle ? Math.min(0.6, 0.12 * m.real.y + 0.2) : 0;
@@ -229,7 +231,7 @@ export function platform(c0: { st: Style; r: Rng }, m: Measured, hero: boolean, 
   const cs = Math.abs(Math.cos(angle)), sn = Math.abs(Math.sin(angle));
   const fw = bw * cs + bd * sn, fd = bw * sn + bd * cs;
   return {
-    type: 'platform', place: 'floor', w: fw, d: fd + 1.0, h: ph + lift + m.real.y, items: [m], hero,
+    type: 'platform', place: 'floor', w: fw, d: fd + (motor ? 0.6 : 1.0), h: ph + lift + m.real.y, items: [m], hero,
     focus: new THREE.Vector3(0, ph + lift + m.real.y * 0.5, -0.5), glow: Math.max(pw, pd) * 0.62,
     build(c, f) {
       const lv = c.lv;

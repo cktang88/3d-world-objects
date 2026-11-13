@@ -485,3 +485,29 @@ test('exhibit loads: a room built ahead (doorway prebuild) has its loads queued 
   g.dispose();
   if (!had) delete g0.Worker;
 });
+
+test('floor coverage: motor halls are at most ~2x museum norms (about 40 m2 per car: the object and 1 m round it, x1.6), plus the entrance zone', async () => {
+  await loadMuseum();
+  const { styleFor } = await import('../src/museum/style');
+  const m = museum();
+  const motor = m.themes.filter((t) => styleFor(t.collection).arch === 'motor');
+  const step = Math.max(1, Math.floor(motor.length / 8));
+  const bad: string[] = [];
+  const lines: string[] = [];
+  for (const t of motor.filter((_, i) => i % step === 0).slice(0, 8)) {
+    const g = new GalleryLevel({ kind: 'gallery', theme: t.id, page: 0 });
+    await Promise.race([g.built, settle(8000)]);
+    const p = g.plan;
+    g.dispose();
+    if (!p) continue;
+    const items = p.floor.flatMap((q) => q.u.items);
+    // colossal things (> 25 m: a railway loop, a ship) get square halls by design
+    if (!items.length || items.some((it) => Math.max(it.real.x, it.real.z) > 25)) continue;
+    const norm = 1.6 * items.reduce((s, it) => s + (it.real.x + 2) * (it.real.z + 2), 0);
+    const area = p.W * p.D;
+    lines.push(`${t.name} ${fmt(area)} m2 / norm ${fmt(norm)} (${items.length} on the floor)`);
+    if (area > 2 * norm + 150) bad.push(`${t.name}: ${fmt(p.W)} x ${fmt(p.D)} m = ${fmt(area)} m2 for ${items.length} floor exhibits (2x norm ${fmt(2 * norm)} + 150)`);
+  }
+  console.log('     ' + lines.join('\n     '));
+  none(bad, 'oversized motor halls');
+});
