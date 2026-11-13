@@ -74,7 +74,16 @@ export function buildPark(c: OpenCtx) {
       if (alongX) stoneWall(stat, u0, c0 - s * 0.3, u1, c0 - s * 0.3, CURB);
       else stoneWall(stat, c0 - s * 0.3, u0, c0 - s * 0.3, u1, CURB);
       colliders.push(alongX ? { minX: u0, maxX: u1, minZ: c0 - s * 0.3 - 0.3, maxZ: c0 - s * 0.3 + 0.3 } : { minX: c0 - s * 0.3 - 0.3, maxX: c0 - s * 0.3 + 0.3, minZ: u0, maxZ: u1 });
+      // [nbhd] Fifth Avenue / Central Park South: settees in a long row against the wall, facing the street
+      for (let u = u0 + 1.6; u < u1 - 1.2; u += 4.2) {
+        const [bx, bz] = alongX ? [u, c0 + s * 0.55] : [c0 + s * 0.55, u];
+        parkBench(stat, bx, CURB, bz, alongX ? (s > 0 ? 0 : Math.PI) : s > 0 ? Math.PI / 2 : -Math.PI / 2);
+        colliders.push(alongX ? rect(bx, bz, 1.9, 0.6) : rect(bx, bz, 0.6, 1.9));
+      }
     }
+    // [nbhd] the park's hexagonal asphalt pavers on its own sidewalk
+    if (alongX) stat.add(slab(hexPaverMat(), a0, a1, Math.min(c0, c0 + s * 4.5), Math.max(c0, c0 + s * 4.5), CURB + 0.004, 3));
+    else stat.add(slab(hexPaverMat(), Math.min(c0, c0 + s * 4.5), Math.max(c0, c0 + s * 4.5), a0, a1, CURB + 0.004, 3));
     // entrance path from the gate to the middle
     if (alongX) stat.add(slab(hexPaverMat(), -2.2, 2.2, Math.min(0, c0), Math.max(0, c0), G + 0.01, 3));
     else stat.add(slab(hexPaverMat(), Math.min(0, c0), Math.max(0, c0), -2.2, 2.2, G + 0.01, 3));
