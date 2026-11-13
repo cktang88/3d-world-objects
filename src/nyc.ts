@@ -27,6 +27,7 @@ import { nycMinimapSource } from './nyc/minimap-nyc'; // [minimap]
 import { registerMinimapSource } from './minimap';
 import { brownRun, BROWN_FLOORS, type BrownRun } from './nyc/brownstone'; // [nbhd] brownstone rows
 import { Waterfront } from './nyc/waterfront'; // [nbhd] open rivers + far shores
+import { highLine } from './nyc/nbhd'; // [nbhd]
 const eyeV = new THREE.Vector3();
 const eyeOf = (p: THREE.Vector3) => eyeV.set(p.x, p.y + 1.6, p.z); // [nbhd]
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
@@ -241,7 +242,7 @@ export class NycLevel implements Level {
     // road, sidewalk, curbs, ramps and markings (nyc/ground.ts)
     // Belgian block on the old industrial / loft streets and some brownstone blocks
     const loft = D.kind === 'industrial' || D.kind === 'canal' || D.kind === 'bowery' || D.kind === 'garment';
-    const cobble = (D.kind === 'industrial' && hashN(this.seed, cx, cz, 9) % 2 === 0) || ((D.kind === 'canal' || village) && hashN(this.seed, cx, cz, 9) % 4 === 0);
+    const cobble = (D.kind === 'industrial' && (cz >= 0 /* [nbhd] Meatpacking: all Belgian block */ || hashN(this.seed, cx, cz, 9) % 2 === 0)) || ((D.kind === 'canal' || village) && hashN(this.seed, cx, cz, 9) % 4 === 0);
     groundBase({ group, stat, cx, cz, village: loft, cobble });
     yield; // [vis]
     // the backyard core of the block: kept below the pavement plane so it never stands in front of
@@ -279,7 +280,8 @@ export class NycLevel implements Level {
     for (const row of [-1, 1]) {
       if (!plan.rows[row < 0 ? 0 : 1]) continue; // [districts]
       const side: Side = row < 0 ? 'N' : 'S';
-      let x = -LX + 20;
+      const hl = highLine(cx, cz); // [nbhd] the High Line's strip stays free of row buildings
+      let x = hl ? hl.x1 + 0.5 : -LX + 20;
       let run: BrownRun | null = null; // [nbhd] a developer's run of identical brownstones
       while (x < LX - 20 - 3) {
         const type = rowType(D, rng); // [districts]

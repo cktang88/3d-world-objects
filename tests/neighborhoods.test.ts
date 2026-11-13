@@ -10,6 +10,7 @@ import type { Hull } from '../src/nyc/buildings';
 import * as THREE from 'three';
 import { Waterfront, HUDSON_X, riverCovered, PIER_CX } from '../src/nyc/waterfront';
 import { CityVis } from '../src/nyc/occlusion';
+import { highLine } from '../src/nyc/nbhd';
 
 /** Brownstone Row blocks on the hand-made map */
 const BROWN_BLOCKS: [number, number][] = [[-3, -6], [-3, -3], [-2, -2], [-2, 0]];
@@ -132,6 +133,41 @@ test('Waterfront: open river and far shores within budget, backdrop inside the f
     for (let i = 0; i < p.count; i += 7) far = Math.max(far, v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld).distanceTo(eye));
   }
   expect(far < 900, `backdrop reaches ${fmt(far)} m`);
+});
+
+// ---------------------------------------------------------------- district signatures
+
+test('the High Line runs through its blocks, 8–10 m up, its strip free of buildings', () => {
+  const bad: string[] = [];
+  for (let cz = -1; cz <= 3; cz++) {
+    const hl = highLine(5, cz)!;
+    if (!hl) { bad.push(`no strip at 5,${cz}`); continue; }
+    const c = nycChunk(1, 5, cz) as unknown as { group: THREE.Group; hulls: Hull[] };
+    for (const h of c.hulls) if (h.rect.maxX > hl.x0 + 0.1 && h.rect.minX < hl.x1 - 0.1) bad.push(`5,${cz}: a building in the strip (${fmt(h.rect.minX)}..${fmt(h.rect.maxX)})`);
+    const rails = instances(c.group, 'rail');
+    if (rails < 40) bad.push(`5,${cz}: ${rails} High Line rail panels`);
+    const tufts = instances(c.group, 'tuft');
+    if (tufts < 200) bad.push(`5,${cz}: ${tufts} planting tufts`);
+  }
+  none(bad, 'High Line');
+});
+
+test('Meatpacking: steel loading-dock canopies over the sidewalks', () => {
+  const meat = nycChunk(1, 4, 2);
+  let canopies = 0;
+  meat.group.updateMatrixWorld(true);
+  // canopies are merged into the block: count the steel plate area via a ray grid at 3.3 m under the sidewalks
+  const ray = new THREE.Raycaster();
+  const meshes: THREE.Object3D[] = [];
+  meat.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && !(o as THREE.InstancedMesh).isInstancedMesh && !(o as THREE.BatchedMesh).isBatchedMesh) meshes.push(o); });
+  for (let x = -40; x <= 40; x += 4)
+    for (const z of [24.5, -24.5]) {
+      ray.set(new THREE.Vector3(x, 2.5, z), new THREE.Vector3(0, 1, 0));
+      ray.far = 1.2;
+      if (ray.intersectObjects(meshes, false).length) canopies++;
+    }
+  const hulls = (meat as unknown as { hulls: Hull[] }).hulls;
+  expect(canopies >= 6, `${canopies} sidewalk points under a canopy in Meatpacking (${hulls.length} buildings: ${hulls.map((h) => `${h.side}${fmt(h.h)}`).join(' ')})`);
 });
 
 test('no HLOD proxy within 150 m of the eye', () => {

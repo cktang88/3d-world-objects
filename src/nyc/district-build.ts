@@ -8,6 +8,7 @@ import { customBlock } from './district-custom';
 import { sidewalkDisplays } from './district-displays';
 import { updateShowcases } from './district-showcase';
 import { tickWater } from './district-tex';
+import { neighbourhoodExtras } from './nbhd'; // [nbhd]
 
 /**
  * The hooks nyc.ts calls while building a block: which building types, floors, shops and styles
@@ -62,6 +63,7 @@ export { openChunk, customBlock };
 /** after the street furniture: displays outside the shops, district props */
 export function districtExtras(ctx: BCtx, d: District) {
   sidewalkDisplays(ctx, d);
+  neighbourhoodExtras(ctx, d); // [nbhd] High Line, Meatpacking canopies, garment racks
 }
 
 export function updateDistricts(p: THREE.Vector3, time: number) {

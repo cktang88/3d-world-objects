@@ -354,11 +354,21 @@ const rockGeo = () => cg('rock', () => {
 });
 const pileGeo = () => cg('pile', () => merged([cy(0.17, 0.2, 1, 0, 0.5, 0, 7)]));
 
+const unitGeo = () => cg('unit', () => merged([bx(1, 1, 1, 0, 0, 0)]));
+/** a clump of blades: three crossed, tapering cards (base at 0, 1 m tall) */
+const tuftGeo = () => cg('tuft', () => {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 3; i++) parts.push(new THREE.ConeGeometry(0.35, 1, 4, 1, true).translate(0, 0.5, 0).rotateY((i * Math.PI) / 3).scale(1, 1, 0.25));
+  return merged(parts);
+});
 const kitMats = {
+  steel: () => (kitSteel ??= new THREE.MeshStandardMaterial({ color: '#3b4140', roughness: 0.6, metalness: 0.4 })),
+  tuft: () => (kitTuft ??= new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95, side: THREE.DoubleSide })),
   iron: () => (kitIron ??= new THREE.MeshStandardMaterial({ color: '#1d2420', roughness: 0.5, metalness: 0.55 })),
   timber: () => (kitTimber ??= new THREE.MeshStandardMaterial({ color: '#4a3b2c', roughness: 0.95 })),
   rock: () => (kitRock ??= new THREE.MeshStandardMaterial({ color: '#6f6b64', roughness: 0.95, flatShading: true })),
 };
+let kitSteel: THREE.MeshStandardMaterial | null = null, kitTuft: THREE.MeshStandardMaterial | null = null;
 let kitIron: THREE.MeshStandardMaterial | null = null, kitTimber: THREE.MeshStandardMaterial | null = null, kitRock: THREE.MeshStandardMaterial | null = null;
 
 let foamM: THREE.MeshStandardMaterial | null = null;
@@ -391,13 +401,14 @@ function foamMat() {
 
 /** collects one chunk's waterfront parts; flush() adds one InstancedMesh per kind and one foam mesh */
 export class WaterKit {
-  private inst = new Map<string, { geo: () => THREE.BufferGeometry; mat: () => THREE.Material; m: THREE.Matrix4[]; shadow: boolean }>();
+  private inst = new Map<string, { geo: () => THREE.BufferGeometry; mat: () => THREE.Material; m: THREE.Matrix4[]; shadow: boolean; c: THREE.Color[] }>();
   private foamPos: number[] = [];
   private foamUv: number[] = [];
   private q = new THREE.Quaternion();
-  private add(k: string, geo: () => THREE.BufferGeometry, m: () => THREE.Material, x: number, y: number, z: number, ry = 0, s: [number, number, number] = [1, 1, 1], shadow = true) {
+  private add(k: string, geo: () => THREE.BufferGeometry, m: () => THREE.Material, x: number, y: number, z: number, ry = 0, s: [number, number, number] = [1, 1, 1], shadow = true, color?: string) {
     let e = this.inst.get(k);
-    if (!e) this.inst.set(k, (e = { geo, mat: m, m: [], shadow }));
+    if (!e) this.inst.set(k, (e = { geo, mat: m, m: [], shadow, c: [] }));
+    if (color) e.c.push(new THREE.Color(color));
     this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry);
     e.m.push(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), this.q.clone(), new THREE.Vector3(...s)));
   }
@@ -414,6 +425,14 @@ export class WaterKit {
     // the closing post
     if (ax === 'x') this.add('post', postGeo, kitMats.iron, a1, y, c);
     else this.add('post', postGeo, kitMats.iron, c, y, a1);
+  }
+  /** a steel box (stiffeners, posts): base at y */
+  post(x: number, y: number, z: number, w: number, h: number, d: number) {
+    this.add('steel', unitGeo, kitMats.steel, x, y + h / 2, z, 0, [w, h, d], false);
+  }
+  /** a tuft of grass or a perennial clump, h tall */
+  tuft(x: number, y: number, z: number, h: number, color: string) {
+    this.add('tuft', tuftGeo, kitMats.tuft, x, y, z, x * 7.3 + z, [h * 0.7, h, h * 0.7], false, color);
   }
   bollard(x: number, y: number, z: number) {
     this.add('bollard', bollardGeo, kitMats.iron, x, y, z);
@@ -451,6 +470,7 @@ export class WaterKit {
     for (const [k, e] of this.inst) {
       const im = new THREE.InstancedMesh(e.geo(), e.mat(), e.m.length);
       e.m.forEach((m, i) => im.setMatrixAt(i, m));
+      if (e.c.length === e.m.length) e.c.forEach((c, i) => im.setColorAt(i, c));
       im.castShadow = e.shadow;
       im.receiveShadow = true;
       im.computeBoundingSphere();
