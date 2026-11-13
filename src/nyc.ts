@@ -27,7 +27,7 @@ import { nycMinimapSource } from './nyc/minimap-nyc'; // [minimap]
 import { registerMinimapSource } from './minimap';
 import { brownRun, BROWN_FLOORS, type BrownRun } from './nyc/brownstone'; // [nbhd] brownstone rows
 import { Waterfront } from './nyc/waterfront'; // [nbhd] open rivers + far shores
-import { highLine, landmarkFrontage } from './nyc/nbhd'; // [nbhd]
+import { highLine, landmarkFrontage, rowCut } from './nyc/nbhd'; // [nbhd]
 const eyeV = new THREE.Vector3();
 const eyeOf = (p: THREE.Vector3) => eyeV.set(p.x, p.y + 1.6, p.z); // [nbhd]
 import { openChunk, customBlock, aveType, rowType, floorsFor, districtStyle, districtExtras, updateDistricts } from './nyc/district-build';
@@ -258,7 +258,7 @@ export class NycLevel implements Level {
     // avenue frontage: both ends of the block
     for (const end of [-1, 1]) {
       if (!plan.ave[end < 0 ? 0 : 1]) continue; // [districts]
-      if (landmarkFrontage(ctx, end, end < 0 ? -LX : LX - 20, end < 0 ? -LX + 20 : LX)) { yield; continue; } // [nbhd] TKTS steps, Hudson Yards supertalls
+      if (landmarkFrontage(ctx, end, end < 0 ? -LX : LX - 20, end < 0 ? -LX + 20 : LX, plan.rows)) { yield; continue; } // [nbhd] TKTS steps, Hudson Yards supertalls
       const x0 = end < 0 ? -LX : LX - 20;
       const x1 = end < 0 ? -LX + 20 : LX;
       const side: Side = end < 0 ? 'W' : 'E';
@@ -282,13 +282,15 @@ export class NycLevel implements Level {
       if (!plan.rows[row < 0 ? 0 : 1]) continue; // [districts]
       const side: Side = row < 0 ? 'N' : 'S';
       const hl = highLine(cx, cz); // [nbhd] the High Line's strip stays free of row buildings
-      let x = hl ? hl.x1 + 0.5 : -LX + 20;
+      const cut = rowCut.get(ctx); // [nbhd] a landmark took part of the row
+      const xEnd = cut && cut.end > 0 ? cut.x : LX - 20;
+      let x = hl ? hl.x1 + 0.5 : cut && cut.end < 0 ? -cut.x : -LX + 20;
       let run: BrownRun | null = null; // [nbhd] a developer's run of identical brownstones
-      while (x < LX - 20 - 3) {
+      while (x < xEnd - 3) {
         const type = rowType(D, rng); // [districts]
         run = type === 'brownstone' ? brownRun(rng, run) : null; // [nbhd]
         let w = run ? run.w : type === 'castiron' ? rng.range(9, 14) : rng.range(7, 10);
-        if (x + w > LX - 20 - 3) w = LX - 20 - x;
+        if (x + w > xEnd - 3) w = xEnd - x;
         const depth = rng.range(14, 19);
         const r: Rect = row < 0 ? { minX: x, maxX: x + w, minZ: -LZ, maxZ: -LZ + depth } : { minX: x, maxX: x + w, minZ: LZ - depth, maxZ: LZ };
         const floors = run ? run.floors : floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));

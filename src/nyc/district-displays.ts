@@ -92,22 +92,24 @@ function billboards(ctx: BCtx, r: Rng) {
     ctx.stat.add(f);
   };
   for (const s of [-1, 1]) {
-    if (tktsAt(ctx.cx, ctx.cz, s)) continue; // [nbhd] Duffy Square: the plaza, no facade to hang screens on
+    // [nbhd] Duffy Square: the screens hang on the walls behind the plaza (20 m in), up to those walls' tops
+    const plaza = tktsAt(ctx.cx, ctx.cz, s);
+    const wallTop = plaza ? Math.max(18, ...ctx.hulls.filter((h) => Math.abs((s > 0 ? h.rect.maxX : h.rect.minX) - s * (LX - 20)) < 0.6).map((h) => h.top)) - 1 : 52;
     // facing the avenue: the facade at x = s * LX, normal +s x
     const ry = s > 0 ? Math.PI / 2 : -Math.PI / 2;
-    const x = s * (LX + 0.45);
+    const x = s * (plaza ? LX - 20 + 0.45 : LX + 0.45);
     // two columns of stacked screens, nearly wall to wall
     for (const col of [-1, 1]) {
       let y = r.range(4.7, 5.4); // [nbhd] screens start right over the storefronts and run higher (street-level audit)
-      for (let k = 0; k < 7 && y < 52; k++) {
-        const h = r.range(5, 10), w = r.range(14, LZ - 2);
+      for (let k = 0; k < 7 && y < wallTop - 5; k++) {
+        const h = Math.min(r.range(5, 10), wallTop - y), w = r.range(14, LZ - 2);
         const z = col * (w / 2 + 0.6);
         quad(x, y + h / 2, z, w, h, ry, r.int(0, ADS.length - 1));
         y += h + r.range(0.8, 2.5);
       }
     }
     // a wraparound band on each corner building, facing the cross streets
-    for (const sz of [-1, 1]) {
+    for (const sz of plaza ? [] : [-1, 1]) {
       const zf = sz * (LZ + 0.45);
       const w = r.range(10, 16);
       quad(s * (LX - w / 2 - 1), r.range(8, 14), zf, w, r.range(3.5, 6), sz > 0 ? 0 : Math.PI, r.int(0, ADS.length - 1));

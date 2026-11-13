@@ -228,23 +228,79 @@ function freeAt(ctx: BCtx, x: number, z: number, w: number, d: number, pad = 0.2
   // doors and their portals only matter near the building line (more than 1.5 m in from the kerb)
   const front = Math.abs(x) < BX - 1.6 && Math.abs(z) < BZ - 1.6;
   if (front && ctx.doors.some((p) => Math.abs(p.x - x) < w / 2 + 1.2 && Math.abs(p.z - z) < d / 2 + 1.2)) return false;
+  // nothing where a door puts you back on the street
+  if (ctx.portals.some((p) => p.returnPos && Math.abs(p.returnPos.x - x) < w / 2 + 0.7 && Math.abs(p.returnPos.z - z) < d / 2 + 0.7)) return false;
   if (front && ctx.portals.some((p) => p.box.distanceToPoint(new THREE.Vector3(x, 1, z)) < Math.max(w, d) / 2 + 0.2)) return false;
   return !ctx.colliders.some((c) => overlaps(c, r, pad));
 }
 
-let shrubGeo: THREE.BufferGeometry | null = null;
-/** a clipped shrub: a subdivided sphere with a lumpy surface (no faceted blob) */
-function shrub() {
-  const g = new THREE.IcosahedronGeometry(0.3, 2);
-  const p = g.getAttribute('position') as THREE.BufferAttribute;
-  for (let i = 0; i < p.count; i++) {
-    const v = new THREE.Vector3().fromBufferAttribute(p, i);
-    const n = 1 + 0.12 * Math.sin(v.x * 23) * Math.sin(v.y * 19) * Math.sin(v.z * 17);
-    p.setXYZ(i, v.x * n, v.y * n, v.z * n);
-  }
-  g.computeVertexNormals();
-  return g;
+let boxM: THREE.MeshStandardMaterial | null = null;
+/** small-leaved boxwood / flowering-annual foliage: an alpha atlas (left: boxwood, right: begonias in leaf) */
+function shrubMat() {
+  if (boxM) return boxM;
+  const t = canvasTex(512, 256, (g) => {
+    const r = new Rng(61);
+    g.clearRect(0, 0, 512, 256);
+    for (let half = 0; half < 2; half++)
+      for (let i = 0; i < 1400; i++) {
+        const x = half * 256 + r.range(8, 248), y = r.range(8, 248);
+        const flower = half === 1 && r.chance(0.35);
+        g.fillStyle = flower ? r.pick(['#d8283c', '#f0e8e0', '#e86aa0', '#f2c230']) : `hsl(${r.range(85, 115)},${r.range(35, 55)}%,${r.range(14, 32)}%)`;
+        g.save();
+        g.translate(x, y);
+        g.rotate(r.range(0, Math.PI));
+        g.beginPath();
+        g.ellipse(0, 0, flower ? 5 : r.range(4, 7), flower ? 5 : r.range(2, 3.5), 0, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+  }, false);
+  boxM = new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.85 });
+  boxM.name = 'boxwood';
+  return boxM;
 }
+const shrubGeos: THREE.BufferGeometry[] = [];
+/**
+ * a clipped shrub ~0.65 m across: a dark core under ~40 outward-facing leaf cards over a dome, normals
+ * pointing out from the centre (soft, rounded shading); variant 1 = flowering annuals
+ */
+function shrub(variant: number) {
+  if (shrubGeos[variant]) return shrubGeos[variant];
+  const r = new Rng(70 + variant);
+  const pos: number[] = [], nor: number[] = [], uv: number[] = [];
+  const u0 = variant ? 0.5 : 0;
+  const N = 44;
+  for (let i = 0; i < N; i++) {
+    // points on an upper dome (golden spiral), card facing out, slightly tilted
+    const y = 1 - (i / (N - 1)) * 1.15, rad = Math.sqrt(Math.max(0, 1 - Math.min(1, y * y)));
+    const th = i * 2.399963;
+    const c = new THREE.Vector3(Math.cos(th) * rad, Math.max(-0.15, y), Math.sin(th) * rad).multiply(new THREE.Vector3(0.32, 0.26, 0.32));
+    const n = c.clone().normalize();
+    const t1 = new THREE.Vector3(0, 1, 0).cross(n).normalize();
+    if (t1.lengthSq() < 0.1) t1.set(1, 0, 0);
+    const t2 = n.clone().cross(t1).normalize();
+    t1.applyAxisAngle(n, r.range(0, Math.PI));
+    t2.applyAxisAngle(n, r.range(0, Math.PI));
+    const sz = r.range(0.16, 0.22);
+    const corner = (a: number, b: number) => c.clone().addScaledVector(t1, a * sz).addScaledVector(t2, b * sz).add(new THREE.Vector3(0, 0.26, 0));
+    const q = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, -1), corner(1, 1), corner(-1, 1)];
+    const quv = [[0, 0], [1, 0], [1, 1], [0, 0], [1, 1], [0, 1]];
+    const ou = r.range(0, 0.25), ov = r.range(0, 0.5);
+    q.forEach((p, k) => {
+      pos.push(p.x, p.y, p.z);
+      const nn = p.clone().sub(new THREE.Vector3(0, 0.15, 0)).normalize();
+      nor.push(nn.x, nn.y, nn.z);
+      uv.push(u0 + ou + quv[k][0] * 0.25, ov + quv[k][1] * 0.5);
+    });
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return (shrubGeos[variant] = g);
+}
+let coreGeo: THREE.BufferGeometry | null = null;
+
 /** a granite planter box with clipped shrubs and seasonal flowers (Fifth Avenue BID) */
 function planter(ctx: BCtx, x: number, z: number, alongX: boolean, r: Rng) {
   const L = 1.8, W = 0.75;
@@ -252,13 +308,19 @@ function planter(ctx: BCtx, x: number, z: number, alongX: boolean, r: Rng) {
   box(ctx.stat, mat('#8e8b84', { rough: 0.85 }), w, 0.55, d, x, CURB, z);
   box(ctx.stat, mat('#b1aea6', { rough: 0.8 }), w + 0.08, 0.06, d + 0.08, x, CURB + 0.55, z);
   box(ctx.stat, mat('#3b2d22', { rough: 1 }), w - 0.12, 0.05, d - 0.12, x, CURB + 0.57, z);
-  const leaf = [mat('#3f6a2c', { rough: 0.9 }), mat('#4f7a34', { rough: 0.9 })];
-  const flower = mat(r.pick(['#c4304a', '#e8d24a', '#d86aa0', '#f2f0ea', '#7a4ab0']), { rough: 0.9 });
+  // two clipped boxwoods and flowering annuals between them, on a dark core so the cards never show through
+  const core = mat('#1f3318', { rough: 1 });
   for (let k = -1; k <= 1; k++) {
-    const o = new THREE.Mesh((shrubGeo ??= shrub()), k ? r.pick(leaf) : flower);
-    o.scale.set(r.range(0.85, 1.05), r.range(0.7, 0.85), r.range(0.85, 1.05));
+    const px = x + (alongX ? k * 0.56 : 0), pz = z + (alongX ? 0 : k * 0.56);
+    const c = new THREE.Mesh((coreGeo ??= new THREE.SphereGeometry(0.26, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2)), core);
+    c.scale.set(1, k ? 1.15 : 0.7, 1);
+    c.position.set(px, CURB + 0.6, pz);
+    ctx.stat.add(c);
+    const o = new THREE.Mesh(shrub(k ? 0 : 1), shrubMat());
+    const sc = k ? r.range(1.0, 1.2) : 0.9;
+    o.scale.set(sc, k ? sc : 0.7, sc);
     o.rotation.y = r.range(0, 6);
-    o.position.set(x + (alongX ? k * 0.55 : 0), CURB + 0.82, z + (alongX ? 0 : k * 0.55));
+    o.position.set(px, CURB + 0.6, pz);
     o.castShadow = true;
     ctx.stat.add(o);
   }
@@ -343,6 +405,8 @@ export function midtownSidewalks(ctx: BCtx) {
 export function tktsAt(cx: number, cz: number, end: number) {
   return cx === 2 && cz === -3 && end > 0;
 }
+/** where a landmark took part of a row: nyc.ts stops the row houses at |x| = x on that end */
+export const rowCut = new WeakMap<BCtx, { end: number; x: number }>();
 /** Hudson Yards supertalls on the construction blocks' built avenue end */
 const SUPERTALL: Record<string, { floors: number; edge: boolean }> = { '4,-2': { floors: 82, edge: true }, '4,0': { floors: 66, edge: false } };
 
@@ -350,21 +414,78 @@ const SUPERTALL: Record<string, { floors: number; edge: boolean }> = { '4,-2': {
  * An avenue frontage built by this module instead of nyc.ts's default buildings; true when handled.
  * x0..x1: the frontage rect along x (block-local), the whole block depth along z.
  */
-export function landmarkFrontage(ctx: BCtx, end: number, x0: number, x1: number) {
+export function landmarkFrontage(ctx: BCtx, end: number, x0: number, x1: number, rows: [boolean, boolean] = [true, true]) {
   if (tktsAt(ctx.cx, ctx.cz, end)) {
     duffySquare(ctx, x0, x1);
     return true;
   }
   const st = SUPERTALL[`${ctx.cx},${ctx.cz}`];
   if (st && !ctx.hulls.some((h) => h.h > 150)) {
-    supertall(ctx, x0, x1, end > 0 ? 'E' : 'W', st.floors, st.edge);
+    // a real footprint: 40 m of the block along the built row (the frontage plus 20 m taken from the row),
+    // a glass podium on the rest of the frontage; rowCut tells nyc.ts where the row houses stop
+    const zs = rows[0] && !rows[1] ? -1 : rows[1] && !rows[0] ? 1 : -1;
+    const xa = end > 0 ? LX - 40 : -LX, xb = end > 0 ? LX : -LX + 40;
+    const zt: [number, number] = zs < 0 ? [-LZ, 3] : [-3, LZ];
+    supertall(ctx, { minX: xa, maxX: xb, minZ: zt[0], maxZ: zt[1] }, end > 0 ? 'E' : 'W', st.floors, st.edge);
+    const zp: [number, number] = zs < 0 ? [3, LZ] : [-LZ, -3];
+    building(ctx, { minX: x0, maxX: x1, minZ: zp[0], maxZ: zp[1] }, end > 0 ? 'E' : 'W', 'midrise', 9, true, [zs < 0 ? false : true, zs < 0 ? true : false], { material: 'glass' });
+    rowCut.set(ctx, { end, x: LX - 40 });
     return true;
   }
   return false;
 }
 
 let redGlass: THREE.MeshStandardMaterial | null = null;
-const group = (ctx: BCtx) => ctx.group;
+const bistroGeos: Record<string, THREE.BufferGeometry> = {};
+function mergeParts(parts: THREE.BufferGeometry[]) {
+  const pos: number[] = [], nor: number[] = [];
+  for (const p0 of parts) {
+    const p = p0.index ? p0.toNonIndexed() : p0;
+    pos.push(...(p.getAttribute('position').array as Float32Array));
+    nor.push(...(p.getAttribute('normal').array as Float32Array));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((pos.length / 3) * 2), 2));
+  return g;
+}
+/** the Times Square plaza's red metal bistro chair (seat 0.45 m, back 0.82 m) and round café table (0.6 m, 0.74 m) */
+function bistroGeo(kind: 'chair' | 'table') {
+  if (bistroGeos[kind]) return bistroGeos[kind];
+  const P: THREE.BufferGeometry[] = [];
+  const leg = (x: number, z: number, h: number, tilt = 0) => P.push(new THREE.CylinderGeometry(0.012, 0.012, h, 6).rotateX(tilt).translate(x, h / 2, z));
+  if (kind === 'chair') {
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) leg(sx * 0.19, sz * 0.19, 0.45);
+    // seat of flat slats, a seat rim, the back frame with three horizontal slats
+    for (let k = 0; k < 5; k++) P.push(new THREE.BoxGeometry(0.42, 0.012, 0.06).translate(0, 0.45, -0.17 + k * 0.085));
+    P.push(new THREE.BoxGeometry(0.44, 0.02, 0.02).translate(0, 0.44, 0.2), new THREE.BoxGeometry(0.44, 0.02, 0.02).translate(0, 0.44, -0.2));
+    for (const sx of [-1, 1]) P.push(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 6).translate(sx * 0.19, 0.65, -0.2).rotateX(-0.08));
+    for (let k = 0; k < 3; k++) P.push(new THREE.BoxGeometry(0.4, 0.04, 0.012).translate(0, 0.62 + k * 0.09, -0.22));
+  } else {
+    P.push(new THREE.CylinderGeometry(0.3, 0.3, 0.02, 20).translate(0, 0.73, 0), new THREE.CylinderGeometry(0.31, 0.31, 0.02, 20, 1, true).translate(0, 0.72, 0));
+    P.push(new THREE.CylinderGeometry(0.025, 0.025, 0.72, 8).translate(0, 0.36, 0));
+    for (let k = 0; k < 4; k++) P.push(new THREE.BoxGeometry(0.5, 0.025, 0.04).translate(0.25, 0.012, 0).rotateY((k * Math.PI) / 2));
+  }
+  return (bistroGeos[kind] = mergeParts(P));
+}
+function bistroSet(parent: THREE.Object3D, x: number, z: number, r: Rng) {
+  const red = mat('#b3122a', { rough: 0.45, metal: 0.4 });
+  const t = new THREE.Mesh(bistroGeo('table'), red);
+  t.position.set(x, CURB, z);
+  t.castShadow = true;
+  parent.add(t);
+  const n = r.int(2, 4);
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + r.range(0, 0.8);
+    const c = new THREE.Mesh(bistroGeo('chair'), red);
+    c.position.set(x + Math.cos(a) * 0.62, CURB, z + Math.sin(a) * 0.62);
+    // facing the table, a little askew
+    c.rotation.y = -a - Math.PI / 2 + r.range(-0.3, 0.3);
+    c.castShadow = true;
+    parent.add(c);
+  }
+}
 /** the TKTS stairs: 27 red glass risers rising to ~5 m over the booth, a plaza of pavers, planters, red tables */
 function duffySquare(ctx: BCtx, x0: number, x1: number) {
   const r = new Rng(hashN(ctx.seed, 4747));
@@ -385,92 +506,113 @@ function duffySquare(ctx: BCtx, x0: number, x1: number) {
   plaza.position.set(xc, CURB + 0.004, 0);
   plaza.receiveShadow = true;
   stat.add(plaza);
-  // the steps: 9 m wide (along the avenue), rising towards the north (-z) over 14 m
-  redGlass ??= new THREE.MeshStandardMaterial({ color: '#c8102e', emissive: new THREE.Color('#ff2040'), emissiveIntensity: 0.55, roughness: 0.15, metalness: 0.1 });
+  // the steps: 9 m wide (along the avenue), rising towards the north (-z): red glass treads lit from within,
+  // darker risers, a steel substructure, glass cheeks, steel handrails down the aisles and sides
+  redGlass ??= new THREE.MeshStandardMaterial({ color: '#d0142e', emissive: new THREE.Color('#ff2a48'), emissiveIntensity: 0.45, roughness: 0.08, metalness: 0.15 });
+  const riserM = mat('#5c0a14', { rough: 0.2, metal: 0.2, emissive: '#7a0a18', ei: 0.35 });
+  const steelM = mat('#9aa0a4', { rough: 0.3, metal: 0.85 });
   const W = 9, N = 27, rise = 0.18, tread = 0.5, z0 = 7;
   for (let k = 0; k < N; k++) {
-    const st = new THREE.Mesh(new THREE.BoxGeometry(W, rise, tread + 0.02), redGlass);
-    st.position.set(xc, CURB + rise * (k + 0.5), z0 - k * tread);
-    st.castShadow = true;
-    stat.add(st);
+    const y = CURB + rise * (k + 1), z = z0 - k * tread;
+    box(stat, redGlass, W, 0.05, tread + 0.03, xc, y - 0.05, z - tread / 2);
+    box(stat, riserM, W, rise - 0.05, 0.04, xc, y - rise, z + 0.01);
   }
-  // the structure under the steps: the TKTS booth (glass box with a red sign band) and a dark steel back
   const top = CURB + N * rise, zb = z0 - N * tread;
-  box(stat, mat('#202326', { rough: 0.5, metal: 0.5 }), W, top - CURB, 0.2, xc, CURB, zb - 0.1);
-  // glass cheek walls following the slope of the steps
+  // the substructure: a dark steel box under the flight (closed sides behind the glass cheeks)
+  const under = new THREE.Shape();
+  under.moveTo(0, 0);
+  under.lineTo(z0 - zb, 0);
+  under.lineTo(z0 - zb, top - CURB - 0.06);
+  under.lineTo(0, rise - 0.06);
+  under.closePath();
+  const ug = new THREE.ExtrudeGeometry(under, { depth: W - 0.1, bevelEnabled: false });
+  ug.rotateY(Math.PI / 2);
+  const um = new THREE.Mesh(ug, mat('#1d2023', { rough: 0.6, metal: 0.4 }));
+  um.position.set(xc - (W - 0.1) / 2, CURB, z0);
+  stat.add(um);
+  // the TKTS booth in the back of the structure: glass front, ticket windows, the red sign band
+  box(stat, mat('#1e2a33', { rough: 0.1, metal: 0.4 }), W - 1, 2.6, 0.1, xc, CURB, zb - 0.05);
+  for (let k = -3; k <= 3; k++) box(stat, mat('#fff1d0', { emissive: '#ffd9a0', ei: 0.6, rough: 0.3 }), 0.8, 0.9, 0.04, xc + k * 1.15, CURB + 1.0, zb - 0.12);
+  box(stat, redGlass, W - 1, 0.6, 0.12, xc, CURB + 2.7, zb - 0.07);
+  ctx.text.add(new THREE.Matrix4().makeRotationY(Math.PI).setPosition(xc, 0, zb - 0.14), 'tkts', 0, CURB + 2.78, 0, 0.42, 3, '#ffffff', 1, 'neon');
+  // glass cheek walls following the slope
   const cheek = new THREE.Shape();
   cheek.moveTo(0, 0);
   cheek.lineTo(z0 - zb, 0);
-  cheek.lineTo(z0 - zb, top - CURB + 0.9);
-  cheek.lineTo(0, rise + 0.9);
+  cheek.lineTo(z0 - zb, top - CURB + 0.95);
+  cheek.lineTo(0, rise + 0.95);
   cheek.closePath();
-  const cg = new THREE.ExtrudeGeometry(cheek, { depth: 0.06, bevelEnabled: false });
+  const cg = new THREE.ExtrudeGeometry(cheek, { depth: 0.04, bevelEnabled: false });
   cg.rotateY(Math.PI / 2);
-  const glassM = new THREE.MeshStandardMaterial({ color: '#c9d6dc', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.35, depthWrite: false });
-  for (const s of [-1, 1]) {
+  const glassM = new THREE.MeshStandardMaterial({ color: '#c9d6dc', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.3, depthWrite: false });
+  for (const sd of [-1, 1]) {
     const m = new THREE.Mesh(cg, glassM);
-    m.position.set(xc + s * (W / 2 + 0.05), CURB, z0);
-    group(ctx).add(m);
+    m.position.set(xc + sd * (W / 2 + 0.03), CURB, z0);
+    ctx.group.add(m);
   }
-  box(stat, mat('#1e2a33', { rough: 0.1, metal: 0.4 }), W - 1, 2.6, 0.1, xc, CURB, zb - 0.25);
-  box(stat, redGlass, W - 1, 0.6, 0.12, xc, CURB + 2.7, zb - 0.27);
-  ctx.text.add(new THREE.Matrix4().makeRotationY(Math.PI).setPosition(xc, 0, zb - 0.34), 'tkts', 0, CURB + 2.78, 0, 0.42, 3, '#ffffff', 1, 'neon');
+  // handrails: sloped steel pipes on posts at both cheeks and two aisles
+  const run = Math.hypot(z0 - zb, top - CURB - rise), ang = Math.atan2(top - CURB - rise, z0 - zb);
+  for (const ax of [-W / 2 + 0.15, -1.5, 1.5, W / 2 - 0.15]) {
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, run, 8), steelM);
+    rail.rotation.x = ang - Math.PI / 2; // rises towards -z
+    rail.position.set(xc + ax, CURB + rise + (top - CURB - rise) / 2 + 0.9, (z0 + zb) / 2);
+    stat.add(rail);
+    for (let k = 1; k < N; k += 5) box(stat, steelM, 0.03, 0.9, 0.03, xc + ax, CURB + rise * (k + 1), z0 - k * tread - tread / 2);
+  }
   colliders.push(rect(xc, (z0 + zb) / 2 - 0.2, W + 0.3, z0 - zb + 0.4));
-  // planters, red café tables and chairs on the plaza
+  // planters, red bistro tables and chairs on the plaza
   for (const z of [-LZ + 3, LZ - 3]) for (const dx of [-6, 6]) planter(ctx, xc + dx, z, true, r);
-  const red = mat('#b3122a', { rough: 0.5, metal: 0.3 });
-  for (let i = 0; i < 6; i++) {
-    const x = xc + r.range(-7, 7), z = r.range(9, LZ - 5);
-    if (!freeAt(ctx, x, z, 1.6, 1.6)) continue;
-    box(stat, red, 0.06, 0.72, 0.06, x, CURB, z);
-    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.03, 16), red);
-    t.position.set(x, CURB + 0.73, z);
-    stat.add(t);
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2 + r.range(0, 1);
-      box(stat, red, 0.42, 0.45, 0.42, x + Math.cos(a) * 0.65, CURB, z + Math.sin(a) * 0.65);
-    }
-    colliders.push(rect(x, z, 1.4, 1.4));
+  for (let i = 0; i < 7; i++) {
+    const x = xc + r.range(-7, 7), z = r.range(9.5, LZ - 5);
+    if (!freeAt(ctx, x, z, 1.8, 1.8)) continue;
+    bistroSet(stat, x, z, r);
+    colliders.push(rect(x, z, 1.5, 1.5));
   }
   ctx.hulls.push({ rect: { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ }, h: top, top: 0.5, side: 'E', type: 'midrise' });
 }
 
 /** 30 / 10 Hudson Yards: a glass supertall with a sloped crown and (on the taller) the Edge's cantilevered deck */
-function supertall(ctx: BCtx, x0: number, x1: number, side: Side, floors: number, edge: boolean) {
-  const r: Rect = { minX: x0, maxX: x1, minZ: -LZ, maxZ: LZ };
+function supertall(ctx: BCtx, r: Rect, side: Side, floors: number, edge: boolean) {
   building(ctx, r, side, 'tower', floors, true, [true, true], { material: 'glass' });
-  const h = ctx.hulls[ctx.hulls.length - 1]?.h ?? 7.2 + floors * 3.6;
+  const hull = ctx.hulls[ctx.hulls.length - 1];
+  const h = hull?.h ?? 7.2 + floors * 3.6;
   const glass = mat('#6f8597', { rough: 0.08, metal: 0.85 });
-  const xc = (x0 + x1) / 2, W = x1 - x0, D = LZ * 2;
-  // the crown: a slanted glass wedge rising 36 m to a point over the north face
+  const W = r.maxX - r.minX, D = r.maxZ - r.minZ, xc = (r.minX + r.maxX) / 2, zc = (r.minZ + r.maxZ) / 2;
+  // the crown: a slanted glass wedge rising 40 m to its high point over the north face
   const sh = new THREE.Shape();
-  sh.moveTo(-D / 2, 0);
-  sh.lineTo(D / 2, 0);
-  sh.lineTo(-D / 2 + 2, 36);
+  sh.moveTo(D / 2, 0);
+  sh.lineTo(-D / 2, 0);
+  sh.lineTo(-D / 2, 40);
+  sh.lineTo(-D / 2 + 6, 40);
   sh.closePath();
   const g = new THREE.ExtrudeGeometry(sh, { depth: W - 1, bevelEnabled: false });
   g.rotateY(Math.PI / 2);
-  g.translate(xc - (W - 1) / 2, h, 0);
+  g.translate(xc - (W - 1) / 2, h, zc);
   const crown = new THREE.Mesh(g, glass);
   crown.castShadow = true;
   ctx.stat.add(crown);
+  // vertical mullion fins up the corners (the tower's chamfered, faceted look)
+  const fin = mat('#a9b4bc', { rough: 0.3, metal: 0.8 });
+  for (const [x, z] of [[r.minX, r.minZ], [r.maxX, r.minZ], [r.minX, r.maxZ], [r.maxX, r.maxZ]]) box(ctx.stat, fin, 0.6, h - 8, 0.6, x, 8, z);
   if (edge) {
-    // the Edge: a triangular deck cantilevered 20 m out of the south-west corner, ~0.9 h up, glass walls
+    // the Edge: a triangular deck cantilevered ~20 m out of the south-west corner, 0.9 h up, glass walls
     const t = new THREE.Shape();
     t.moveTo(0, 0);
-    t.lineTo(W * 0.9, 0);
-    t.lineTo(W * 0.2, -22);
+    t.lineTo(W * 0.8, 0);
+    t.lineTo(W * 0.15, -22);
     t.closePath();
     const dg = new THREE.ExtrudeGeometry(t, { depth: 1.2, bevelEnabled: false });
     dg.rotateX(Math.PI / 2);
     const deck = new THREE.Mesh(dg, mat('#d8dcdf', { rough: 0.4, metal: 0.6 }));
-    deck.position.set(x0 + 0.5, h * 0.9, LZ);
+    deck.position.set(r.minX + 1, h * 0.9, r.maxZ);
     deck.castShadow = true;
     ctx.stat.add(deck);
+    const gw = new THREE.Mesh(new THREE.ExtrudeGeometry(t, { depth: 1.6, bevelEnabled: false }).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#cfdbe2', roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.3, depthWrite: false }));
+    gw.position.set(r.minX + 1, h * 0.9 + 0.01, r.maxZ);
+    gw.scale.set(1, 1, 1);
+    ctx.group.add(gw);
   }
-  // occlusion / HLOD: the crown on top of the tower's hull
-  const hull = ctx.hulls[ctx.hulls.length - 1];
-  if (hull) hull.h = h + 30;
+  if (hull) hull.h = h + 34;
 }
 
 /** Greenmarket: white market tents with produce crates on the avenue sidewalks */
