@@ -232,6 +232,19 @@ function freeAt(ctx: BCtx, x: number, z: number, w: number, d: number, pad = 0.2
   return !ctx.colliders.some((c) => overlaps(c, r, pad));
 }
 
+let shrubGeo: THREE.BufferGeometry | null = null;
+/** a clipped shrub: a subdivided sphere with a lumpy surface (no faceted blob) */
+function shrub() {
+  const g = new THREE.IcosahedronGeometry(0.3, 2);
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const v = new THREE.Vector3().fromBufferAttribute(p, i);
+    const n = 1 + 0.12 * Math.sin(v.x * 23) * Math.sin(v.y * 19) * Math.sin(v.z * 17);
+    p.setXYZ(i, v.x * n, v.y * n, v.z * n);
+  }
+  g.computeVertexNormals();
+  return g;
+}
 /** a granite planter box with clipped shrubs and seasonal flowers (Fifth Avenue BID) */
 function planter(ctx: BCtx, x: number, z: number, alongX: boolean, r: Rng) {
   const L = 1.8, W = 0.75;
@@ -242,8 +255,9 @@ function planter(ctx: BCtx, x: number, z: number, alongX: boolean, r: Rng) {
   const leaf = [mat('#3f6a2c', { rough: 0.9 }), mat('#4f7a34', { rough: 0.9 })];
   const flower = mat(r.pick(['#c4304a', '#e8d24a', '#d86aa0', '#f2f0ea', '#7a4ab0']), { rough: 0.9 });
   for (let k = -1; k <= 1; k++) {
-    const o = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 0), k ? r.pick(leaf) : flower);
-    o.scale.set(1, 0.8, 1);
+    const o = new THREE.Mesh((shrubGeo ??= shrub()), k ? r.pick(leaf) : flower);
+    o.scale.set(r.range(0.85, 1.05), r.range(0.7, 0.85), r.range(0.85, 1.05));
+    o.rotation.y = r.range(0, 6);
     o.position.set(x + (alongX ? k * 0.55 : 0), CURB + 0.82, z + (alongX ? 0 : k * 0.55));
     o.castShadow = true;
     ctx.stat.add(o);

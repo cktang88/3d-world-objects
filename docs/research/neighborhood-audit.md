@@ -204,3 +204,22 @@ at 480×270, while every other pose rendered — the aircraft showcase models th
 
 Hudson Yards and Music Row are over the ~1500 draw-call budget (auto row showroom cars and construction slots);
 not from this work, reported.
+
+## Second pass (render only the changed block: `?lab=block&pose=…`)
+
+All shots below are `?lab=block` (the one changed chunk by the real generator at its world position, camera at
+the world pose, `&ring=1` neighbours as HLOD), 30–60 s each, no world lock, no crashes.
+- **Midtown sidewalks** (`nb/blk-midtown.png`): granite planters with clipped shrubs and flowers, litter baskets,
+  bike staples, newsstands, Citi Bike docks, diamond-plate vault doors, all collider- and door-checked on top of
+  streetExtras' hydrants, standpipes, meters and bollards. qa: 25 → 41 sidewalk pieces on the spawn block.
+- **Times Square** (`nb/blk-tkts.png`, `nb/tkts-1.png`): Duffy Square on the avenue end of (2,-3): plaza pavers,
+  27 red glass TKTS steps (≈5 m) over the booth, glass cheeks, planters, red café tables; no billboards hang on
+  that (now open) side.
+- **Hudson Yards** (`nb/blk-hy.png`, `nb/blk-hy2.png`): 30 HY (~300 m, sloped glass crown, the Edge's cantilevered
+  triangular deck) and 10 HY (~245 m) built as real towers on the construction blocks' avenue ends, so their
+  HLOD hulls carry them across the city. Left: they are 20 m deep (the avenue frontage) and read slender; the
+  Vessel.
+- **Central Park wall** (`nb/blk-cpwall.png`): grey schist/granite ashlar with a lighter coping.
+- **Greenmarket** (`nb/blk-market.png`): white market tents with produce crates along the avenue sidewalks.
+- **Hudson River Park railing** (`nb/blk-hrp.png`): brushed-steel square posts, a round top rail and four wavy
+  pipe rails (as in the reference) on the bulkhead and piers; the East River seawalls keep the picket rail.
