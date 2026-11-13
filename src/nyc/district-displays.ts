@@ -1,4 +1,5 @@
 import { tktsAt } from './nbhd'; // [nbhd]
+import { ScreenBatch } from './billboards'; // [nbhd]
 import * as THREE from 'three';
 import { rect } from '../level';
 import { Rng, hashN } from '../rng';
@@ -32,58 +33,17 @@ function table(parent: THREE.Object3D, x: number, z: number, ry: number) {
 
 // ---------------------------------------------------------------- Times Square billboards
 
-const ADS: [string, string, string][] = [
-  ['#e8202a', '#ffffff', 'COLA'], ['#101820', '#f5c400', 'BROADWAY'], ['#1d4fd8', '#ffffff', 'NEWS 24'], ['#f5c400', '#101820', 'TOYS'], ['#0c0c0c', '#2fe0ff', 'STREAM NOW'],
-  ['#ff4f9a', '#ffffff', 'MUSICAL'], ['#14a34a', '#ffffff', 'BANK'], ['#6b2fd8', '#ffe14f', 'PHONE X'], ['#ff7a00', '#ffffff', 'BURGERS'], ['#0a2a6b', '#ff3b3b', 'SPORTS'],
-];
-let adTex: THREE.Texture | null = null;
-/** one atlas of 10 ads (2 x 5 cells): bold colour fields, a headline, a product silhouette */
-function adAtlas() {
-  if (adTex) return adTex;
-  const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 1280;
-  const g = c.getContext('2d');
-  if (g) {
-    ADS.forEach(([bg, fg, text], i) => {
-      const x = (i % 2) * 512, y = Math.floor(i / 2) * 256;
-      g.fillStyle = bg;
-      g.fillRect(x, y, 512, 256);
-      const gr = g.createLinearGradient(x, y, x + 512, y + 256);
-      gr.addColorStop(0, 'rgba(255,255,255,0.18)');
-      gr.addColorStop(1, 'rgba(0,0,0,0.25)');
-      g.fillStyle = gr;
-      g.fillRect(x, y, 512, 256);
-      g.fillStyle = fg;
-      g.beginPath();
-      g.arc(x + 400, y + 128, 80, 0, Math.PI * 2);
-      g.fill();
-      g.font = 'bold 72px Impact, sans-serif';
-      g.fillText(text, x + 24, y + 150, 330);
-      g.fillRect(x + 24, y + 175, 200, 10);
-    });
-  }
-  adTex = new THREE.CanvasTexture(c);
-  adTex.colorSpace = THREE.SRGBColorSpace;
-  return adTex;
-}
-let adMat: THREE.MeshStandardMaterial | null = null;
+// [nbhd] the ad atlas, LED material and screen batch live in nyc/billboards.ts
 
 /**
  * Giant lit billboards stacked on the avenue facades, the signature of Times Square: each a
  * plane with one cell of the ad atlas, self-lit (emissive) so they glow at dusk.
  */
 function billboards(ctx: BCtx, r: Rng) {
-  adMat ??= new THREE.MeshStandardMaterial({ map: adAtlas(), emissiveMap: adAtlas(), emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.9, roughness: 0.6 });
-  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  const screens = new ScreenBatch(r); // [nbhd] procedural LED ad atlas, tickers, crossfades (nyc/billboards.ts)
   const frame = flatFrame();
-  const quad = (cx: number, cy: number, cz: number, w: number, h: number, ry: number, cell: number) => {
-    const u0 = (cell % 2) / 2, v1 = 1 - Math.floor(cell / 2) / 5, v0 = v1 - 1 / 5;
-    const dx = Math.cos(ry) * (w / 2), dz = -Math.sin(ry) * (w / 2);
-    const b = pos.length / 3;
-    pos.push(cx - dx, cy - h / 2, cz - dz, cx + dx, cy - h / 2, cz + dz, cx + dx, cy + h / 2, cz + dz, cx - dx, cy + h / 2, cz - dz);
-    uv.push(u0, v0, u0 + 0.5, v0, u0 + 0.5, v1, u0, v1);
-    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  const quad = (cx: number, cy: number, cz: number, w: number, h: number, ry: number, cell: number | 'ticker') => {
+    screens.add(cx, cy, cz, w, h, ry, cell === 'ticker' ? 'ticker' : 'ad');
     // a dark steel frame behind it
     const f = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, h + 0.4, 0.3), frame);
     f.position.set(cx - Math.sin(ry) * 0.2, cy, cz - Math.cos(ry) * 0.2);
@@ -99,12 +59,14 @@ function billboards(ctx: BCtx, r: Rng) {
     const ry = s > 0 ? Math.PI / 2 : -Math.PI / 2;
     const x = s * (plaza ? LX - 20 + 0.45 : LX + 0.45);
     // two columns of stacked screens, nearly wall to wall
+    // [nbhd] a news / stock ticker wrapping the facade just over the storefronts
+    quad(x, 5.4, 0, 2 * LZ - 2, 1.4, ry, 'ticker');
     for (const col of [-1, 1]) {
-      let y = r.range(4.7, 5.4); // [nbhd] screens start right over the storefronts and run higher (street-level audit)
+      let y = r.range(6.6, 7.2); // [nbhd] screens start right over the ticker and run higher (street-level audit)
       for (let k = 0; k < 7 && y < wallTop - 5; k++) {
         const h = Math.min(r.range(5, 10), wallTop - y), w = r.range(14, LZ - 2);
         const z = col * (w / 2 + 0.6);
-        quad(x, y + h / 2, z, w, h, ry, r.int(0, ADS.length - 1));
+        quad(x, y + h / 2, z, w, h, ry, r.int(0, 9));
         y += h + r.range(0.8, 2.5);
       }
     }
@@ -112,17 +74,10 @@ function billboards(ctx: BCtx, r: Rng) {
     for (const sz of plaza ? [] : [-1, 1]) {
       const zf = sz * (LZ + 0.45);
       const w = r.range(10, 16);
-      quad(s * (LX - w / 2 - 1), r.range(8, 14), zf, w, r.range(3.5, 6), sz > 0 ? 0 : Math.PI, r.int(0, ADS.length - 1));
+      quad(s * (LX - w / 2 - 1), r.range(8, 14), zf, w, r.range(3.5, 6), sz > 0 ? 0 : Math.PI, r.int(0, 9));
     }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  const m = new THREE.Mesh(g, adMat);
-  m.userData.owned = true;
-  ctx.group.add(m);
+  ctx.group.add(screens.mesh());
 }
 let frameM: THREE.MeshStandardMaterial | null = null;
 function flatFrame() {

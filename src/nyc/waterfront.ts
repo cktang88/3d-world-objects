@@ -34,6 +34,8 @@ export const HUDSON_W = 1250, EAST_W = 620;
 const SPAN_Z = 4000, SNAP = 500, TILE = 10;
 
 const U = { time: { value: 0 }, night: { value: 0 }, fogK: { value: 0.4 } };
+/** shared animation clock and night factor (Times Square screens use them too) */
+export const WF_TIME = U.time, WF_NIGHT = U.night;
 onTimeChange((_t, n) => (U.night.value = n));
 
 /** lighter haze for open-water views: FogExp2 with `k` times the exponent */

@@ -892,7 +892,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
   const addrName = front === 'E' || front === 'W' ? avenueName(ctx.cx + (front === 'E' ? 0 : -1)) : streetName(ctx.cz + (front === 'S' ? 0 : -1));
   const addr = `${rng.int(1, 650)} ${addrName}`;
 
-  if (type === 'tower') return tower(ctx, r, front, floors, fm, tint, addr);
+  if (type === 'tower') return tower(ctx, r, front, floors, fm, tint, addr, opts.material === 'glass'); // [nbhd] glass: full curtain wall
 
   // ---- vertical layout
   const parlor = type === 'brownstone' ? (opts.parlor ?? rng.range(1.4, 1.7)) : 0; // [nbhd] rows share it
@@ -1276,14 +1276,14 @@ let revGlass: THREE.MeshStandardMaterial | null = null;
 const revolvingGlass = () => (revGlass ??= new THREE.MeshStandardMaterial({ color: '#cfdde2', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
 
 /** glass tower with setbacks: curtain wall, mullion fins, a double-height lobby and a crown */
-function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Material, tint: string, addr: string) {
+function tower(ctx: BCtx, r: Rect, front: Side, floors: number, fm: THREE.Material, tint: string, addr: string, glassOnly = false) {
   const { rng, stat, colliders } = ctx;
   const sides: Side[] = ['N', 'S', 'E', 'W'];
   const lobby = 7.2;
   const h = lobby + floors * 3.6;
   const finM = mat(rng.pick(['#8a9096', '#b8bcc0', '#3a3e42', '#6a6258']), { rough: 0.35, metal: 0.8 });
   rng.pick(['#2a2c2e', '#8a8680', '#c9c4b8']); // (the lobby stone: towerLobby picks its own; keeps the rng sequence)
-  const curtain = rng.chance(0.6);
+  const curtain = rng.chance(0.6) || glassOnly; // [nbhd] (the draw always happens: same rng sequence)
   const spandrelHex = rng.pick(['#2a3138', '#3a4048', '#1e2428', '#4a5058', '#5a5650']);
   const spandrel = mat(spandrelHex, { rough: 0.25, metal: 0.7 });
   const spandrelC = new THREE.Color(spandrelHex);
