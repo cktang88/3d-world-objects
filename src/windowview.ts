@@ -175,7 +175,14 @@ void main() {
   vec3 tf = max(tA, tB);
   float t = min(min(tf.x, tf.y), tf.z);
   vec3 dir = o2 + d * t - uCap;
-  gl_FragColor = vec4(textureCube(uCube, dir).rgb * uGain, 1.0);
+  vec3 sky = textureCube(uCube, dir).rgb;
+  // night: the captured sky (above the horizon, blue-dominant) at 0.4x and towards a neutral navy,
+  // before tone mapping; warm things (sodium lamps, lit windows) are not blue-dominant: kept
+  float sl = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+  float blue = (sky.b - max(sky.r, sky.g)) / max(sl, 1e-4);
+  float ks = uNight * smoothstep(0.0, 0.12, normalize(dir).y) * smoothstep(0.05, 0.4, blue);
+  sky = mix(sky, sl * vec3(0.8, 0.88, 1.15), 0.75 * ks) * mix(1.0, 0.4, ks);
+  gl_FragColor = vec4(sky * uGain, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
   // the street's colour grade (gain / lift, saturation, contrast) on display values, as the grade
@@ -272,6 +279,8 @@ export class WindowViews {
   private warm = 0;
   private asked = false;
   private refreshing = false;
+  private tick = 0;
+  private mat: THREE.Material | null = null;
   private lastRefresh = -1e9;
   private cam: THREE.CubeCamera | null = null;
   constructor(private o: WindowViewOpts) {}
@@ -286,6 +295,7 @@ export class WindowViews {
     this.asked = false;
     this.meshes = [];
     this.local = null;
+    this.mat = null;
     // on the street (or anywhere not in the city): the building's captures go
     if (!world || street) {
       if (this.cache.map.size) this.stats.freed += this.cache.map.size;
@@ -317,7 +327,17 @@ export class WindowViews {
   }
   /** once a frame (city: the live city level, or null when it is not built) */
   update(city: City | null = null) {
-    if (!this.level || !this.world || !this.local || this.o.enabled === false) return;
+    if (!this.level || !this.world || this.o.enabled === false) return;
+    // rooms are built in stages and cells lazily: backdrops that appear later get the view too
+    if (++this.tick % 30 === 0) {
+      const more = windowMeshes(this.level.group);
+      if (more.length) {
+        this.meshes.push(...more.filter((m) => !this.meshes.includes(m)));
+        if (!this.local) this.local = windowCentre(this.meshes);
+        if (this.mat) for (const m of more) m.material = this.mat;
+      }
+    }
+    if (!this.local) return;
     if (city) this.hulls = city.hulls;
     // time of day / weather changed while indoors: recompute the outdoor light first
     if (this.o.stale?.()) {
@@ -434,6 +454,7 @@ export class WindowViews {
       if (old.userData.realView) old.dispose(); // an earlier capture of this room (time of day changed)
       mesh.material = m;
     }
+    this.mat = m;
     this.applied = e.key;
     this.stats.applied++;
   }
