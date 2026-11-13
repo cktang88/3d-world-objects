@@ -772,7 +772,8 @@ const clothing: Layout = {
     const brick = r.chance(0.4);
     return {
       W: r.range(7.5, 10), D: r.range(13, 17), H: r.range(3.2, 3.8), ceil: brick ? 'exposed' : 'plain', ceilColor: '#2a2a2a',
-      floor: pbrS(r.pick(['floor_parquet', 'floor_laminate', 'floor_concrete']), { color: r.pick(['#b8977a', '#d8c8b0', '#a8a49c']), rough: 0.7 }),
+      // wide oak planks or polished concrete
+      floor: r.chance(0.55) ? pbrS('oak', { color: r.pick(['#b8977a', '#d8c8b0', '#9a7656']) }) : pbrS('floor_concrete', { color: r.pick(['#a8a49c', '#bdb6aa']), rough: 0.3 }),
       wall: brick ? pbrS('nyc_brick', { color: '#c8b0a0' }) : paint(r.pick(['#f6f4ef', '#eef0f0', '#f3ece2'])),
       env: { ...WARM, hemi: { sky: '#fff6ea', ground: '#5a4a3a', intensity: 0.5 }, exposure: 0.95 },
     };
@@ -780,25 +781,33 @@ const clothing: Layout = {
   *build(k, r, st) {
     const { W, D, H } = st;
     const xi = W / 2, zb = -D / 2, zf = D / 2;
-    // wall rails both sides: shirts high, pants low
+    // wall rails: one side double-hung (shirts over folded pants), the other long-hang (coats, dresses);
+    // folded stacks on a shelf above both
+    const dbl = r.chance(0.5) ? -1 : 1;
     for (const s of [-1, 1]) {
       const len = D - 5.5;
       k.at(s * (xi - 0.02), zb + 2.2 + len / 2, -s * Math.PI / 2);
-      A.garmentRack(k, len, r, { double: true, wall: true, h: 1.5 });
+      A.garmentRack(k, len, r, s === dbl ? { double: true, wall: true, h: 1.5, shelf: H > 3.1 } : { wall: true, h: 1.8, shelf: H > 3.1 });
       yield;
     }
     // fitting rooms across the back
     k.at(-xi + 0.2 + 1.5, zb + 1.25);
     A.fittingRooms(k, 3, r);
     yield;
-    // middle: alternating free-standing rails and folding tables, aisles >= 1 m either side
-    const cx = -0.3;
+    // middle: round racks between a table of folded tees and a straight rail, aisles >= 1 m either side
+    const cx = -0.5;
+    const mid = ['round', 'table', 'round', 'rail', 'round', 'table'];
     for (let j = 0, z = zb + 3.6; z < zf - 4.2; j++, z += 2.2) {
-      k.at(cx, z, j % 2 ? 0 : Math.PI / 2);
-      if (j % 2) A.foldTable(k, 1.6, 0.9, r);
+      k.at(cx, z, 0);
+      const f = mid[j % mid.length];
+      if (f === 'round') A.roundRack(k, r);
+      else if (f === 'table') A.foldTable(k, 1.6, 0.9, r);
       else A.garmentRack(k, 1.5, r, { cut: r.pick(['shirt', 'dress', 'coat'] as const) });
       yield;
     }
+    // a full-length mirror on the left wall by the front
+    k.at(-xi + 0.01, zf - 2.0, Math.PI / 2);
+    A.mirror(k, r);
     // dress forms near the front, clear of the door
     for (const s of [-1, 1]) {
       k.at(s * (xi - 1.6), zf - 2.4, s * 0.4);
@@ -809,10 +818,12 @@ const clothing: Layout = {
     k.at(xi - 1.95, zb + 3.6, -Math.PI / 2); // 0.95 m for the clerk between it and the wall rail
     A.cashWrap(k, 1.8, r);
     yield;
-    tracks(k, st, [zb + 3, 0, zf - 3], 5);
-    lights(k, st, '#ffe6c8', 0.95, 1, 3);
+    // warm track spots: a run every ~2.5 m
+    const rows: number[] = [];
+    for (let z = zb + 2.5; z < zf - 1.5; z += 2.5) rows.push(z);
+    tracks(k, st, rows, 6);
+    lights(k, st, '#ffd9b0', 0.95, 1, 3);
     yield;
-    void H;
   },
 };
 
@@ -844,9 +855,14 @@ const cafe: Layout = {
     k.at(xi - 1.0 - cLen / 2, cz, 0);
     A.espressoBar(k, cLen, r, { diner });
     yield;
-    // back counter and menu board on the back wall
-    k.at(xi - 1.0 - cLen / 2, zb + 0.35);
-    F.gondola(k, cLen, { double: false, height: 1.0, shelves: 2, color: diner ? '#c0c0c0' : '#3a2e24', messy: 0.2 });
+    // back counter and menu board on the back wall: a diner's back-bar has the coffee urns and the shake mixer
+    if (diner) {
+      k.at(xi - 1.0 - cLen / 2, zb + 0.02);
+      A.dinerBackBar(k, cLen, r);
+    } else {
+      k.at(xi - 1.0 - cLen / 2, zb + 0.35);
+      F.gondola(k, cLen, { double: false, height: 1.0, shelves: 2, color: '#3a2e24', messy: 0.2 });
+    }
     yield;
     k.at(xi - 1.0 - cLen / 2, zb + 0.02);
     F.menu(k, Math.min(cLen, 3.2), r.int(0, 999), H - 0.6);
@@ -860,11 +876,17 @@ const cafe: Layout = {
       k.at(xi - 1.0 - cLen / 2, cz + 0.72); // stools tucked against the counter front
       A.stools(k, Math.floor(cLen / 0.75), 0.75, r);
       yield;
+      const boothZ: number[] = [];
       for (let z = cz + 2.0; z + 2.0 < zf - 1.6; z += 2.2) {
         k.at(-xi + 0.62, z, Math.PI / 2);
         A.booth(k, r);
+        boothZ.push(z);
         yield;
       }
+      // a pendant over each booth table
+      k.at(0, 0);
+      const shade = r.pick(['#b71c1c', '#e4e6ea', '#1f4e79']);
+      for (const z of boothZ) F.pendantAt(k, -xi + 0.62 + 0.95, H - 0.95, z - 0.0, H, shade);
       for (let z = cz + 2.9; z < zf - 2.6; z += 2.6) {
         k.at(xi - 1.6, z);
         A.cafeTable(k, r, { square: true, seats: 4, diner: true });
@@ -880,6 +902,17 @@ const cafe: Layout = {
           yield;
         }
     }
+    // wall dressing: framed photos down both side walls, a neon sign by the counter
+    const z0 = cz + 1.9, z1 = zf - 1.4;
+    k.at(-xi + 0.005, (z0 + z1) / 2, Math.PI / 2);
+    A.framedPhotos(k, z1 - z0, 1.7, r, { food: diner ? 0.35 : 0.2 });
+    k.at(xi - 0.005, (z0 + 1.6 + z1) / 2, -Math.PI / 2);
+    A.framedPhotos(k, z1 - z0 - 1.6, 1.7, r, { food: diner ? 0.35 : 0.2 });
+    if (diner || r.chance(0.6)) {
+      k.at(xi - 0.005, cz + 1.0, -Math.PI / 2);
+      A.neonSign(k, r.pick(diner ? ['Pie & Coffee', 'Open 24 Hours', 'Eat', 'Diner'] : ['Coffee', 'Espresso', 'Fresh Pastry']), r.pick(['#ff4f8b', '#4fc3ff', '#ff6a2a', '#ffe14f']), 1.5, 2.05);
+    }
+    yield;
     k.at(0, 0);
     if (diner) troffers(k, st);
     else for (let x = -W / 4; x <= W / 4 + 0.01; x += W / 2) for (let z = cz + 2.4; z < zf - 1.5; z += 2.6) F.pendantAt(k, x, H - 1.1, z, H, r.pick(['#1d3b2e', '#1c1c1c', '#b08a5a']));
