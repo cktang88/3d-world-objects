@@ -83,7 +83,11 @@
     px.push(`(${x},${y}) ${hits.join(' > ')}`);
   }
   const progs = (W.renderer.info.programs || []).filter((p) => /window-view|ShaderMaterial/.test(p.name)).map((p) => `${p.name} usedTimes ${p.usedTimes} runnable ${p.diagnostics ? p.diagnostics.runnable : 'ok'}`);
-  const pick = `pixels: ${px.join(' ; ')} | programs: ${progs.join(', ') || 'none named'}`;
+  // which server / checkout, and is the night code in the shader actually drawn
+  const served = await fetch('/src/windowview.ts').then((r) => r.text()).catch(() => '');
+  const marker = 'bounded dark navy';
+  const which = `port ${location.port}; served source has night code ${served.includes(marker)}; drawn shader has it ${!!(mesh.material.fragmentShader && mesh.material.fragmentShader.includes(marker))}`;
+  const pick = `${which} | pixels: ${px.join(' ; ')} | programs: ${progs.join(', ') || 'none named'}`;
   const s = W.views.stats;
   const tw = W.toWorld ? new V().setFromMatrixPosition(W.toWorld) : null;
   return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | ${diag} | ${pick} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;

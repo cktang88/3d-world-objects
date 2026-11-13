@@ -181,11 +181,9 @@ void main() {
   // mapping; warm things (sodium lamps, lit windows) are not blue-dominant: kept
   float sl = dot(sky, vec3(0.2126, 0.7152, 0.0722));
   float blue = (sky.b - max(sky.r, sky.g)) / max(sl, 1e-4);
-  float ks = uNight * mix(0.7, 1.0, smoothstep(-0.1, 0.12, normalize(dir).y)) * smoothstep(0.05, 0.4, blue);
+  float ks = uNight * smoothstep(0.05, 0.4, blue);
   // (the captured night sky can be far past the tone curve's knee: a scale alone still clips to
-  // royal blue, so it is replaced by a bounded dark navy, a little brighter where it was brighter)
-  vec3 navy = vec3(0.010, 0.012, 0.022) * (1.0 + 0.6 * smoothstep(0.0, 4.0, sl)) / max(uGain, 0.05);
-  sky = mix(sky, navy, ks);
+  // royal blue, so after tone mapping it is replaced by a bounded dark navy: see below)
   gl_FragColor = vec4(sky * uGain, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -202,6 +200,9 @@ void main() {
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col = mix(vec3(l), col, uSat * mix(1.0, 0.55, uNight));
   gl_FragColor.rgb = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0);
+  // night sky -> a bounded dark navy, sRGB ~20 / 25 / 52 (linear here, converted the way this pass
+  // outputs: sRGB on screen, linear into post), last so the grade's contrast cannot crush it
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(vec3(0.0125, 0.0135, 0.034) * (1.0 + 0.3 * smoothstep(0.0, 4.0, sl)), 1.0)).rgb, ks);
 }`;
 
 export interface Grade {
