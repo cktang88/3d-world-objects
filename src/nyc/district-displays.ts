@@ -145,6 +145,7 @@ export function sidewalkDisplays(ctx: BCtx, d: District) {
   if (!d.displays.length || !ctx.doors.length) return;
   const r = new Rng(hashN(ctx.seed, 808));
   const slot = slotter(ctx);
+  const placed: [number, number][] = [];
   let n = 0;
   for (const door of ctx.doors) {
     if (n >= 7 || !r.chance(0.55)) continue;
@@ -156,6 +157,9 @@ export function sidewalkDisplays(ctx: BCtx, d: District) {
     const tx = street ? fx + side * 1.9 : fx + nx * 1.0, tz = street ? fz + nz * 1.0 : fz + side * 1.9;
     const ry = street ? (nz > 0 ? 0 : Math.PI) : nx > 0 ? Math.PI / 2 : -Math.PI / 2;
     const kind = r.pick(d.displays);
+    // two doors close together (a shop beside a building door) would stack their displays: one each
+    if (placed.some(([px, pz]) => Math.hypot(px - tx, pz - tz) < 2.2)) continue;
+    placed.push([tx, tz]);
     if (BIG.has(kind)) {
       slot({ kind, x: tx, y: CURB, z: tz, rot: ry + Math.PI / 2, w: 1.6, d: 1.0, h: 2.2, min: 0.3, radius: 55, maxTris: 100_000 });
     } else {

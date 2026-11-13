@@ -519,20 +519,37 @@ function shade(hex: string, f: number) {
  * pilasters, a sign band, display windows over a bulkhead, a recessed glass door, and
  * sometimes a roll-down gate (open or shut), an awning, a projecting blade sign and neon.
  */
-/** the shop type of the last storefront built in each block (variety along a frontage) */
-const lastShop = new WeakMap<BCtx, number>();
+/**
+ * [districts] the storefronts built so far in each block: side, extent along the frontage, shop index.
+ * Variety is checked by position along the frontage, not build order: buildings and faces are not built
+ * in street order, so "the last one built" missed real neighbours (two pharmacies side by side). Shops
+ * stocked from the same pool (a deli and a cafe: food and drink) count as one kind; a corner shop's
+ * neighbour round the corner (the other face) counts too.
+ */
+const builtShops = new WeakMap<BCtx, { side: string; a: number; b: number; ends: THREE.Vector3[]; idx: number }[]>();
+/** no two shops of a kind on one frontage with less than this between their units (m) */
+export const SHOP_SAME_KIND_GAP = 14;
+const kindOf = (i: number) => SHOPS[i].pools[0];
 export function storefront(ctx: BCtx, F: Face, u0: number, u1: number, top: number, addr: string, btype: BType) {
   const { rng } = ctx;
   const st = ctx.style;
   const pool = st.shops?.length ? SHOPS.map((x, i) => (st.shops!.includes(x.type) ? i : -1)).filter((i) => i >= 0) : [];
   let shopIdx = pool.length ? rng.pick(pool) : rng.int(0, SHOPS.length - 1);
-  // never the same kind of shop as the unit just built next to it (four pharmacies in a row)
-  const prev = lastShop.get(ctx);
-  if (shopIdx === prev) {
-    const others = (pool.length ? pool : SHOPS.map((_, i) => i)).filter((i) => i !== prev);
+  // never the same kind of shop as a unit next to it on the same frontage (four pharmacies in a row)
+  const along = F.side === 'N' || F.side === 'S' ? 'x' : 'z';
+  const ends = [F.at(u0, 0, 0), F.at(u1, 0, 0)];
+  const a = Math.min(ends[0][along], ends[1][along]), b = Math.max(ends[0][along], ends[1][along]);
+  const close = (o: { side: string; a: number; b: number; ends: THREE.Vector3[] }) =>
+    o.side === F.side ? Math.max(o.a, a) - Math.min(o.b, b) < SHOP_SAME_KIND_GAP : o.ends.some((e) => ends.some((f) => e.distanceTo(f) < SHOP_SAME_KIND_GAP));
+  let built = builtShops.get(ctx);
+  if (!built) builtShops.set(ctx, (built = []));
+  const near = new Set(built.filter(close).map((o) => kindOf(o.idx)));
+  if (near.has(kindOf(shopIdx))) {
+    const all = pool.length ? pool : SHOPS.map((_, i) => i);
+    const others = all.filter((i) => !near.has(kindOf(i)));
     if (others.length) shopIdx = rng.pick(others);
   }
-  lastShop.set(ctx, shopIdx);
+  built.push({ side: F.side, a, b, ends, idx: shopIdx });
   const shop = SHOPS[shopIdx];
   const name = `${rng.chance(0.5) ? rng.pick(PREFIX) + ' ' : ''}${rng.pick(shop.names)}`;
   const color = rng.pick(shop.colors);
