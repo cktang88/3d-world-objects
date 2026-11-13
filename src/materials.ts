@@ -54,14 +54,23 @@ interface KindSpec {
   wear?: number;
   /** wood: lacquer when sand3d asked for a glossy finish */
   varnish?: boolean;
+  /** wood: how much the procedural figure (rings' darker latewood, pores) darkens the photo, 0..1 */
+  figure?: number;
+  /** wood: the species' colour, sand3d's colour is nudged toward it (sand3d's woods are often pale) */
+  species?: string;
+  /** the photo set to use when the kind has none of its own */
+  photo?: string;
 }
 
 const STAINLESS: [number, number, number] = [0.669, 0.639, 0.598];
 const KINDS: Record<string, KindSpec> = {
-  oak: { tex: 'grain', tile: 0.45, strength: 0.55, bump: 0.9, rough: 0.2, dark: 0.55, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
-  walnut: { tex: 'grain', tile: 0.4, strength: 0.6, bump: 0.9, rough: 0.2, dark: 0.45, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
-  pine: { tex: 'grain', tile: 0.5, strength: 0.45, bump: 0.7, rough: 0.2, dark: 0.62, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
-  birch: { tex: 'grain', tile: 0.5, strength: 0.3, bump: 0.5, rough: 0.15, dark: 0.75, diff: 0.9, arm: 0.6, nor: 0.7, detail: 0, r: [0.3, 0.85], varnish: true, wear: 0.5 },
+  // woods: the photo veneer, with a procedural figure kept on top (growth rings about 2-3 cm apart with
+  // darker latewood, open pores along the grain) so the grain reads at 1-3 m even on pale sand3d colours
+  oak: { tex: 'grain', tile: 0.45, strength: 0.55, bump: 0.9, rough: 0.2, dark: 0.55, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0.25, r: [0.3, 0.85], varnish: true, wear: 0.5, contrast: 1.3, figure: 0.45, species: '#9c6b3f' },
+  walnut: { tex: 'grain', tile: 0.4, strength: 0.6, bump: 0.9, rough: 0.2, dark: 0.45, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0.2, r: [0.3, 0.85], varnish: true, wear: 0.5, contrast: 1.6, figure: 0.55, species: '#523424' },
+  pine: { tex: 'grain', tile: 0.5, strength: 0.45, bump: 0.7, rough: 0.2, dark: 0.62, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0.2, r: [0.3, 0.85], varnish: true, wear: 0.5, contrast: 1.2, figure: 0.4, species: '#c99a5c' },
+  birch: { tex: 'grain', tile: 0.5, strength: 0.3, bump: 0.5, rough: 0.15, dark: 0.75, diff: 0.9, arm: 0.6, nor: 0.7, detail: 0.15, r: [0.3, 0.85], varnish: true, wear: 0.5, contrast: 1.7, figure: 0.3, species: '#d8b98a' },
+  mahogany: { tex: 'grain', tile: 0.4, strength: 0.55, bump: 0.8, rough: 0.2, dark: 0.5, diff: 0.95, arm: 0.6, nor: 0.8, detail: 0.2, r: [0.25, 0.8], varnish: true, wear: 0.5, contrast: 1.5, figure: 0.5, species: '#7b3b24', photo: 'walnut' },
   steel: { tex: 'brushed', tile: 0.25, strength: 0.14, bump: 0.25, rough: 0.3, dark: 0.75, diff: 0.12, arm: 1, nor: 0.4, detail: 0, r: [0.18, 0.55], metal: STAINLESS, tint: 0.35, aniso: 0.35, wear: 0.4 },
   brushed_steel: { tex: 'brushed', tile: 0.2, strength: 0.18, bump: 0.3, rough: 0.35, dark: 0.7, diff: 0.15, arm: 1, nor: 0.5, detail: 0, r: [0.22, 0.5], metal: STAINLESS, tint: 0.3, aniso: 0.8, wear: 0.3 },
   aluminium: { tex: 'brushed', tile: 0.2, strength: 0.12, bump: 0.2, rough: 0.3, dark: 0.8, diff: 0.08, arm: 1, nor: 0.4, detail: 0, r: [0.2, 0.5], metal: [0.916, 0.923, 0.924], tint: 0.35, aniso: 0.45, wear: 0.3 },
@@ -117,10 +126,16 @@ function makeTex(kind: Proc): THREE.DataTexture {
       let h = 0.5;
       switch (kind) {
         case 'grain': {
-          const warp = fbm(u, v, 4, 4, 1) * 6;
-          const ring = (u * 9 + warp) % 1;
-          const fine = fbm(u * 1, v, 64, 2, 2);
-          h = 0.55 + 0.35 * Math.pow(Math.abs(Math.sin(ring * Math.PI)), 6) * -1 + 0.25 * fine + 0.15 * vnoise(u, v, 8, 3);
+          // flat-sawn figure: growth rings (18 per tile) bent by a slow warp; each ring light earlywood
+          // fading into a darker latewood band, then a sharp step to the next year's earlywood
+          // (rings arch and wander: a strong low-frequency warp, mostly across the grain)
+          const warp = fbm(u, v, 2, 4, 1) * 5 + (vnoise(u, v, 1, 4) - 0.5) * 3;
+          const ring = (((u * 10 + warp) % 1) + 1) % 1;
+          const late = Math.pow(ring, 2.5 + 2.5 * vnoise(u, v, 4, 6));
+          // open pores: short dark streaks along the grain (v)
+          const pore = vnoise(u, v * 0.125, 256, 51);
+          const fine = fbm(u, v, 64, 2, 2);
+          h = 0.86 - 0.5 * late + 0.1 * (fine - 0.5) + 0.08 * (vnoise(u, v, 8, 3) - 0.5) - (pore > 0.8 ? 0.22 * (0.5 + late) : 0);
           break;
         }
         case 'brushed':
@@ -354,7 +369,8 @@ float triProc = mix(1.0, mix(uTriDark, 1.0, triH), uTriStrength);
 vec3 triPhoto = clamp(pow(triDiff.rgb / max(uTriMean, vec3(0.02)), vec3(uContrast)), 0.0, 3.0);
 // low-frequency macro variation so large surfaces are not uniformly tinted
 float triMacro = 1.0 + (triNoise(vTriPos.xz * 2.3 + vTriPos.y * 1.7) - 0.5) * 0.12 * uDiffMix;
-diffuseColor.rgb *= mix(vec3(triProc), triPhoto, uDiffMix) * mix(1.0, triArm.r, uArmMix * 0.7) * triMacro;
+// the procedural figure multiplies the photo (only woods keep it once the photo is in: uTriStrength)
+diffuseColor.rgb *= mix(vec3(1.0), triPhoto, uDiffMix) * triProc * mix(1.0, triArm.r, uArmMix * 0.7) * triMacro;
 #ifdef TRI_WEAR_PAINT
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.54, 0.52), triWear);
 #elif defined(TRI_WEAR_LIGHTEN)
@@ -526,7 +542,7 @@ function uniformsFor(kind: string, spec: KindSpec): KindUniforms {
   };
   kindUniforms.set(kind, uu);
   // real scanned textures, tiled at their physical size
-  const set: PbrMaps | null = pbr(kind, '1k');
+  const set: PbrMaps | null = pbr(spec.photo ?? kind, '1k');
   if (set) {
     pending.push(set.ready);
     set.ready.then(() => {
@@ -541,7 +557,9 @@ function uniformsFor(kind: string, spec: KindSpec): KindUniforms {
       uu.uArmMix.value = spec.arm;
       uu.uNorMix.value = set.nor ? spec.nor : 0;
       uu.uTriBump.value = spec.bump * spec.detail;
-      uu.uTriStrength.value = 0;
+      // woods keep their figure: latewood and pores darken the photo by up to `figure`
+      uu.uTriStrength.value = spec.figure ? 1 : 0;
+      if (spec.figure) uu.uTriDark.value = 1 - spec.figure;
     });
   }
   return uu;
@@ -570,6 +588,13 @@ function physical(m: THREE.MeshStandardMaterial, kind: string, spec: KindSpec): 
     p.metalness = Math.min(m.metalness, 0.4); // metallic-flake paint at most
   } else {
     p.metalness = 0;
+  }
+  // woods: part of the way toward the species' colour, keeping sand3d's light/dark (a pale "oak" stays
+  // a pale oak, but reads as oak rather than beige plastic)
+  if (spec.species) {
+    const sp = new THREE.Color(spec.species);
+    sp.multiplyScalar(Math.min(1.6, Math.max(0.5, lum(m.color) / Math.max(1e-3, lum(sp)))) ** 0.5);
+    p.color.lerp(sp, 0.45);
   }
   if (spec.aniso) {
     p.anisotropy = spec.aniso;
@@ -604,7 +629,7 @@ function physical(m: THREE.MeshStandardMaterial, kind: string, spec: KindSpec): 
 
 const WEAR_MODE: Record<string, string> = {
   painted_metal: 'TRI_WEAR_PAINT',
-  oak: 'TRI_WEAR_LIGHTEN', walnut: 'TRI_WEAR_LIGHTEN', pine: 'TRI_WEAR_LIGHTEN', birch: 'TRI_WEAR_LIGHTEN', leather: 'TRI_WEAR_LIGHTEN', plastic: 'TRI_WEAR_LIGHTEN',
+  oak: 'TRI_WEAR_LIGHTEN', walnut: 'TRI_WEAR_LIGHTEN', pine: 'TRI_WEAR_LIGHTEN', birch: 'TRI_WEAR_LIGHTEN', mahogany: 'TRI_WEAR_LIGHTEN', leather: 'TRI_WEAR_LIGHTEN', plastic: 'TRI_WEAR_LIGHTEN',
   steel: 'TRI_WEAR_METAL', brushed_steel: 'TRI_WEAR_METAL', aluminium: 'TRI_WEAR_METAL', brass: 'TRI_WEAR_METAL', copper: 'TRI_WEAR_METAL',
 };
 

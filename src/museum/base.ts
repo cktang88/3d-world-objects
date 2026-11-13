@@ -250,6 +250,33 @@ function proportionsMatch(o: THREE.Object3D, raw: THREE.Vector3) {
 
 const _pl = new THREE.Vector3();
 
+/** footprint (x, z extents) and centre of o in parent's frame */
+function footprint(parent: THREE.Object3D, o: THREE.Object3D) {
+  parent.updateMatrixWorld(true);
+  const inv = parent.matrixWorld.clone().invert();
+  const b = new THREE.Box3();
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh || !m.geometry) return;
+    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+    b.union(m.geometry.boundingBox!.clone().applyMatrix4(inv.clone().multiply(m.matrixWorld)));
+  });
+  return b.isEmpty() ? null : { x: b.max.x - b.min.x, z: b.max.z - b.min.z, c: b.getCenter(new THREE.Vector3()) };
+}
+/** turn `o` a quarter about its centre when its footprint lies across `ref`'s (both clearly long) */
+function alignFootprint(parent: THREE.Object3D, ref: THREE.Object3D, o: THREE.Object3D) {
+  const a = footprint(parent, ref), b = footprint(parent, o);
+  if (!a || !b) return;
+  const long = (p: { x: number; z: number }) => (p.x > p.z * 1.4 ? 'x' : p.z > p.x * 1.4 ? 'z' : '');
+  const la = long(a), lb = long(b);
+  if (!la || !lb || la === lb) return;
+  // rotate about the footprint's centre (in the parent's frame): position' = c + R (position - c)
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+  o.position.sub(b.c).applyQuaternion(q).add(b.c);
+  o.quaternion.premultiply(q);
+  o.updateMatrixWorld(true);
+}
+
 /** run `f` when the browser is idle (one queue, one job per idle period: no frame pays for more than one) */
 const idleQueue: (() => void)[] = [];
 let idleArmed = false;
@@ -671,17 +698,26 @@ export abstract class MuseumBase implements Level {
     holder.userData.exhibit = true;
     // whatever is shown here (the model, a detail swap, an original) gets the museum's material flags
     // before it is drawn: no new shader programs room after room (looks.ts)
-    holder.addEventListener('childadded', (ev) => normalizeExhibit((ev as unknown as { child: THREE.Object3D }).child));
+    holder.addEventListener('childadded', (ev) => {
+      const child = (ev as unknown as { child: THREE.Object3D }).child;
+      normalizeExhibit(child);
+      // a detailed original (detail.ts) can come in turned a quarter from the sand3d model the
+      // display was planned for (a cart lying across its plinth): turn it to match
+      const sand = slotRef?.model?.object;
+      if (sand && child !== sand && child !== placeholder) alignFootprint(holder, sand, child);
+    });
     holder.position.copy(at);
     holder.rotation.y = f.rot + rot;
     // a stand-in of its real size while it streams: the room reads furnished, not as empty plinths
     const placeholder: THREE.Mesh = new THREE.Mesh(standInGeo, standInMat);
+    let slotRef: Slot | null = null;
     placeholder.scale.set(m.real.x * 0.9, m.real.y * 0.9, m.real.z * 0.9);
     placeholder.position.y = m.real.y * 0.45;
     placeholder.userData.still = true;
     holder.add(placeholder);
     this.group.add(holder);
     const slot: Slot = { m, holder, at, spin: opts.spin ?? 0, placeholder };
+    slotRef = slot;
     this.slots.push(slot);
     // the inspect box: the object's real bounds, turned
     const a = f.rot + rot, cs = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
