@@ -8,6 +8,9 @@ brownstone and waterfront commits, before the High Line / Meatpacking / park-edg
 waterfront befores are the earlier lab / world shots named in each section.
 
 Shots live in the session scratchpad (`…/scratchpad/nb/b-<district>.png` before, `a-<district>.png` after).
+Two lessons for whoever repeats this: wait for streaming by polling `__world.level` (`pending` empty and 9
+chunks built), not a fixed time; and shoot from a frozen copy of the source on its own vite port, because the
+live dev server reloads the page whenever a file changes mid-shot.
 
 QA: `npm run qa -- nbhd` (tests/neighborhoods.test.ts) measures what can be measured: brownstone storeys and the
 shared cornice line, ashlar present, pier detail counts (rail panels, piles, bollards, riprap, foam), no doubled
@@ -66,7 +69,8 @@ tinted to chocolate/pink brownstone; rows built in developer runs (3–7 identic
 the garden level, parlour height, colour, cornice); iron newels with urns and sunburst panels; gated garden-level
 door under the stoop; tall scrolled door consoles with a triangular or segmental pediment; shrubs in the front
 areaways; Park Slope bow fronts (three-sided bays with windows on every facet) on a third of the runs.
-After: `nb/bs-2.png`, `nb/bs-3.png` (close-up), `nb/bs-bow.png`, world `nb/a-brownstone.png`.
+After: `nb/bs-2.png`, `nb/bs-3.png` (close-up), `nb/bs-bow.png`, world `nb/a-brownstone.png` (a newel with its
+urn and the sunburst rail beside a stoop).
 Left: carved window lintels are still the generic Italianate hood; no stoop-sale clutter or bins in the areaways.
 
 ## Midtown (5 Av & 34 St, the spawn)
@@ -81,24 +85,29 @@ Shot: `nb/b-midtown.png` (1118 calls, 3.8M tris).
 ## Times Square
 
 Reference: https://commons.wikimedia.org/wiki/File:Street-level_view_of_Times_Square.jpg
-Shot: `nb/b-timesq.png`. The stacked LED billboards exist (district-displays.ts) but from the avenue sidewalk a
-sidewalk shed hides them; gaps: 1. screens start at 5.5–8 m (real ones begin at the storefront head, ~4 m, and
-wrap the corners continuously); 2. no pedestrian plaza / red TKTS steps / concrete planters. Left.
+Shot: `nb/b-timesq.png` (480×270: the 768×432 world shot crashed the headless page twice, "Target page closed").
+1. Too few screens: the stack started 5.5–8 m up and stopped after ~5, leaving bare walk-up facades between
+   them; the real square is wall-to-wall LED from the storefront heads (~4.5 m) to 30–50 m. **Fixed**
+   (district-displays.ts, `[nbhd]`: screens start at 4.7–5.4 m, up to 7 per column, to ~50 m; lab `nb/ts-1.png`,
+   world after `nb/a-timesq.png`: screens on both sides now come down to the shop heads and fill the facades).
+2. Sidewalk sheds and plain walk-ups at street level; no pedestrian plaza, red TKTS steps, planters. Left.
 
 ## Music Row (W 48 St)
 
 Reference: https://commons.wikimedia.org/wiki/File:Gun_Free_48th_Street_HDR_2022_jeh.jpg
-Shot: `nb/b-music.png` (2075 calls, 4.6M tris — over the ~1500 call budget, the auto row showrooms across the
-avenue). 1. Nothing reads as music from the avenue: the instrument shops are on the side streets (as in the real
-48th St) but no projecting blade signs ("GUITARS", "DRUMS") advertise them to the avenue. 2. Sidewalk sheds on
-most fronts block the walk-up facades (in the reference: red-brick walk-ups, fire escapes, stoop-like entrance
-bays). Left.
+Shot: `nb/b-music.png` (2075 calls, 4.6M tris — over the ~1500 call budget, mostly the auto row showrooms
+across the avenue) → lab `nb/music-2.png` (a blade sign down the street), world `nb/a-music.png` (same avenue pose: the
+shed is gone after other agents' changes; the blades hang on the side streets, not visible from it).
+1. Nothing reads as music down the street: **fixed** in part — vertical blade signs (GUITARS, DRUMS, PIANOS,
+   AMPS…) with lit letters hang off the facades (nbhd.ts musicBlades).
+2. Sidewalk sheds on most fronts hide the walk-ups (red brick, fire escapes, ornamented entrance bays). Left.
 
 ## Garment District
 
 Reference: https://commons.wikimedia.org/wiki/File:Garment-district-39th-and-ninth.JPG and
 https://commons.wikimedia.org/wiki/File:Garment_District_button_and_needle.jpg
-Shot: `nb/b-garment.png` → after `nb/a-garment.png`. 1. Sidewalks empty — the district's rolling garment racks
+Shot: `nb/b-garment.png` → after `nb/a-garment.png` (same pose; that frontage is now a glass tower, so no racks)
+and lab `nb/garment-lab.png` (racks along the 38th St fronts). 1. Sidewalks empty — the district's rolling garment racks
 were missing: **fixed** (nbhd.ts garmentRacks: chrome Z-racks of coats and dresses along fronts, clear of doors).
 2. The real loft buildings are 12–20 storey brick/terracotta lofts with water towers, ours are a mix with glass
 offices across the avenue; the button-and-needle sculpture is missing. Left.
@@ -116,7 +125,9 @@ Reference: https://commons.wikimedia.org/wiki/File:14th_St_9th_Av_Hudson_St_td_(
 https://commons.wikimedia.org/wiki/File:Cobblestone_(14629258476).jpg, High Line:
 https://commons.wikimedia.org/wiki/File:High_Line_td_19_-_Chelsea_Park.jpg,
 https://commons.wikimedia.org/wiki/File:Chelsea_Manhattan_as_seen_from_High_Line_Park.jpg
-Shots: `nb/b-meatpacking.png` → `nb/a-meatpacking.png`, `nb/a-highline.png`, lab `nb/hl-1.png`.
+Shots: `nb/b-meatpacking.png` → `nb/a-meatpacking.png` (12 Av pose: the salvage-yard frontage, unchanged),
+`nb/a-highline.png` (under the High Line on a Belgian-block street, 1002 calls / 2.4M tris), lab `nb/hl-1.png`
+(canopies, cobbles, the viaduct).
 1. Asphalt where the real streets are Belgian block: **fixed** (all industrial blocks south of 34th cobbled).
 2. No High Line and no steel loading-dock canopies: **fixed** (nbhd.ts: plate girders on bents 8.6 m up, planted
 deck, picket rails, trees, benches; canopies with tie rods over the low market buildings). Left: High Line stairs
@@ -156,7 +167,7 @@ reads well (trees, crook lamps, wall). The real Met front: wide granite steps, f
 
 Reference: the park side of Fifth Avenue in https://commons.wikimedia.org/wiki/File:Metropolitan_Museum_of_Art_entrance_NYC.JPG
 (hex-paver sidewalk, low stone wall, benches against it, plane trees, lamps).
-Shot: `nb/b-cpedge.png` → `nb/a-cpedge.png`, lab `nb/cp-1.png`.
+Shot: `nb/b-cpedge.png` → lab `nb/cp-1.png` (the world after-shot crashed the headless page once; not retried).
 1. The park-side sidewalk was bare city flags: **fixed** — the park's hexagonal asphalt pavers and a long row of
    Central Park settees against the wall, facing the street (district-park.ts, `[nbhd]`).
 2. The wall reads dark brown and continuous; the real perimeter wall is grey Manhattan schist / granite with a
@@ -169,3 +180,27 @@ https://commons.wikimedia.org/wiki/File:100_Eleventh_Avenue_(24234).jpg
 Shot: `nb/b-autorow.png`. Car lot with a pennant sign and a glass showroom read right. 1. The showroom glass
 reads flat grey; the real showrooms are bright, double-height and full of lit cars. 2. Lots lack the bunting
 strings / balloon arches and windshield price signs. Left (districts agent's auto row).
+
+## LaGuardia
+
+Reference: https://commons.wikimedia.org/wiki/File:Delta_Connection_fleet_at_LaGuardia_Airport_Terminal_C.jpg,
+https://commons.wikimedia.org/wiki/File:Marine_Air_Terminal,_LaGuardia,_facade.jpg
+No shot: the world page crashed ("Target page closed" / "Target crashed") at (-291, -119) twice, at 768×432 and
+at 480×270, while every other pose rendered — the aircraft showcase models there are the likely memory spike
+(reported, not investigated further). Not compared.
+
+## Perf at the waterfront and in the districts (r=1, people off, from the shots' eval)
+
+| pose | calls | tris |
+|---|---|---|
+| esplanade, before (`before-water`) | 141 | 548k |
+| esplanade, after (`after-water`) | 117 | 661k |
+| Midtown spawn | 1118 | 3.8M |
+| Music Row (auto row across) | 2075 | 4.6M |
+| Garment | 1715 | 3.6M |
+| Hudson Yards | 2549 | 3.4M |
+| Meatpacking (12 Av) | 1076 | 2.1M |
+| Canal | 1463 | 3.3M |
+
+Hudson Yards and Music Row are over the ~1500 draw-call budget (auto row showroom cars and construction slots);
+not from this work, reported.
