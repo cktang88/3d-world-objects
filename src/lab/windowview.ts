@@ -14,9 +14,12 @@ const scene: LabScene = {
   look: [0, 1.5, 0],
   env: 'studio',
   ground: false,
-  build({ group, renderer }) {
+  build({ group, renderer, params }) {
     const rt = new THREE.WebGLCubeRenderTarget(32, { type: THREE.HalfFloatType, generateMipmaps: false });
-    const faces: [number, number, number][] = [[0.05, 0.08, 0.6], [0.05, 0.08, 0.6], [0.1, 0.2, 4.0], [1.5, 0.9, 0.4], [0.05, 0.08, 0.6], [0.05, 0.08, 0.6]];
+    // &sky=dark: a dim neutral night sky (the world's capture) instead of a saturated blue one
+    const dark = params.get('sky') === 'dark';
+    const side: [number, number, number] = dark ? [0.012, 0.011, 0.012] : [0.05, 0.08, 0.6];
+    const faces: [number, number, number][] = [side, side, dark ? [0.004, 0.004, 0.005] : [0.1, 0.2, 4.0], [1.5, 0.9, 0.4], side, side];
     const prev = renderer.getRenderTarget(), clear = renderer.getClearColor(new THREE.Color()), a = renderer.getClearAlpha();
     faces.forEach(([r, g, b], i) => {
       renderer.setRenderTarget(rt, i);

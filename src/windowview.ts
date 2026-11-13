@@ -202,7 +202,12 @@ void main() {
   gl_FragColor.rgb = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0);
   // night sky -> a bounded dark navy, sRGB ~20 / 25 / 52 (linear here, converted the way this pass
   // outputs: sRGB on screen, linear into post), last so the grade's contrast cannot crush it
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(vec3(0.0125, 0.0135, 0.034) * (1.0 + 0.3 * smoothstep(0.0, 4.0, sl)), 1.0)).rgb, ks);
+  // and a dark night sky of any hue (above the horizon, dim: not a lamp or a lit window) is lifted
+  // to the same navy, lighter and a little warmer towards the horizon (the city's light haze)
+  float up = normalize(dir).y;
+  float kd = uNight * smoothstep(-0.02, 0.08, up) * (1.0 - smoothstep(0.03, 0.25, sl * uGain));
+  vec3 navy = mix(vec3(0.022, 0.020, 0.030), vec3(0.0125, 0.0135, 0.034), smoothstep(0.0, 0.45, up));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(navy * (1.0 + 0.3 * smoothstep(0.0, 4.0, sl)), 1.0)).rgb, max(ks, kd));
 }`;
 
 export interface Grade {
