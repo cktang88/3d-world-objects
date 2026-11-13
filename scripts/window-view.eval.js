@@ -44,6 +44,18 @@
     if (!mesh && o.isMesh && m && (m.userData.realView || (m.userData.windowView && m.emissiveMap))) mesh = o;
   });
   if (!mesh) { const mats = new Set(); W.level.group.traverse((o) => o.isMesh && o.material && mats.add((o.material.name || o.material.type) + (o.material.userData.windowView ? '*' : ''))); return 'no window in ' + W.level.name + ' stats ' + JSON.stringify(W.views.stats) + ' mats ' + [...mats].slice(0, 30).join(','); }
+  // diagnostic: backdrops still painted vs on the capture, and the chosen window's room and material
+  let painted = 0, real = 0;
+  const paintedRooms = new Set();
+  W.level.group.traverse((o) => {
+    const m = o.material;
+    if (!o.isMesh || !m) return;
+    if (m.userData.realView) real++;
+    else if (m.userData.windowView && m.emissiveMap) { painted++; let p = o; while (p.parent && !/^room:/.test(p.name)) p = p.parent; paintedRooms.add(p.name || '?'); }
+  });
+  let room = mesh; while (room.parent && !/^room:/.test(room.name)) room = room.parent;
+  const u = mesh.material.uniforms;
+  const diag = `diag: painted ${painted} [${[...paintedRooms]}] real ${real}; chosen in ${room.name || '?'} ${mesh.material.type}${u ? ` uNight ${u.uNight.value.toFixed(2)} uGain ${u.uGain.value.toFixed(2)}` : ''}`;
   mesh.updateWorldMatrix(true, false);
   const pos = mesh.geometry.attributes.position;
   const v = [0, 1, 2].map((i) => new V().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld));
@@ -53,8 +65,10 @@
   const p = c.clone().addScaledVector(n, 2.7).setY(0);
   W.player.place(p, Math.atan2(n.x, n.z));
   W.player.pitch = -0.12;
+  // &wvdiag=1: the real-view material drawn black: is the pane in the shot ours?
+  if (/[?&]wvdiag=1/.test(location.search)) W.level.group.traverse((o) => { if (o.isMesh && o.material && o.material.userData.realView) o.material.uniforms.uGain.value = 0; });
   await sl(1500);
   const s = W.views.stats;
   const tw = W.toWorld ? new V().setFromMatrixPosition(W.toWorld) : null;
-  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
+  return `${W.level.name} via ${ps[0].label}; window ${s.lastWindow ? s.lastWindow.toArray().map((x) => x.toFixed(1)) : '-'} capture ${s.lastSpot ? s.lastSpot.toArray().map((x) => x.toFixed(1)) : '-'}; faces ${s.faces} (max ${s.maxFaceMs.toFixed(0)} ms) applied ${s.applied}; frame origin ${tw ? tw.toArray().map((x) => x.toFixed(1)) : '-'} | ${diag} | mem during capture: ${memAlive} | after: ${mem1}${mem2}`;
 })();

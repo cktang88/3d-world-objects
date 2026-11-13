@@ -144,3 +144,34 @@ test('office suites and lobbies have window-view planes too, and window panes ar
   apt.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === g) panes++; });
   expect(panes > 0, 'apartment windows use the clear window glass');
 });
+
+test('after capture no painted backdrop remains, also in rooms built after you entered', async () => {
+  const { finishBuilding } = await import('../src/level');
+  const lobby = new FloorLevel(lobbyDesc);
+  const w3 = floorWorld(enterWorld(new THREE.Matrix4(), street, entryOf(lobby) ?? null), lobbyDesc, { ...lobbyDesc, floor: 3 })!;
+  const floor = new FloorLevel({ ...lobbyDesc, floor: 3 });
+  const door = floor.portals().find((p) => typeof p.target === 'object' && p.target.kind === 'interior')!;
+  const apt = new InteriorLevel(door.target as Extract<LevelDesc, { kind: 'interior' }>, { staged: true });
+  // a few construction slices only: some rooms (and their windows) do not exist yet
+  for (let i = 0; i < 3 && apt.staging; i++) apt.staging.next();
+  const wApt = enterWorld(w3, doorOf(door), entryOf(apt) ?? null) ?? enterWorld(w3, doorOf(door), { pos: new THREE.Vector3(), yaw: 0 })!;
+  const renderer = {
+    getRenderTarget: () => null, getActiveCubeFace: () => 0, setRenderTarget() {}, clear() {}, render() {},
+    shadowMap: { autoUpdate: true }, xr: { enabled: false }, toneMappingExposure: 1,
+  } as unknown as THREE.WebGLRenderer;
+  const views = new WindowViews({ renderer, scene: new THREE.Scene(), asOutdoor: (fn) => (fn(), true), outdoorKey: () => 'night', gain: () => 1 });
+  const hulls: Hullish[] = [{ rect: { minX: -200, maxX: 200, minZ: -200, maxZ: 200 }, top: 30 }];
+  const city = { group: new THREE.Group(), hulls };
+  views.setLevel(apt, wApt);
+  const early = windowMeshes(apt.group).length;
+  for (let i = 0; i < 40; i++) views.update(city);
+  finishBuilding(apt);
+  const late = windowMeshes(apt.group).length;
+  for (let i = 0; i < 40; i++) views.update(city);
+  const left = windowMeshes(apt.group).length;
+  let real = 0;
+  apt.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && ((o as THREE.Mesh).material as THREE.Material).userData?.realView) real++; });
+  console.log(`   painted backdrops: ${early} when entered, ${late} once built, ${left} left; ${real} on the capture`);
+  expect(late > 0 && real > 0, 'the finished apartment has windows on the capture');
+  expect(left === 0, `${left} painted backdrops left after capture`);
+});

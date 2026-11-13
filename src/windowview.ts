@@ -176,12 +176,16 @@ void main() {
   float t = min(min(tf.x, tf.y), tf.z);
   vec3 dir = o2 + d * t - uCap;
   vec3 sky = textureCube(uCube, dir).rgb;
-  // night: the captured sky (above the horizon, blue-dominant) at 0.4x and towards a neutral navy,
-  // before tone mapping; warm things (sodium lamps, lit windows) are not blue-dominant: kept
+  // night: blue-dominant pixels (the sky, and facades and street under the night sky's blue
+  // fog and light; it was a royal-blue wall) at 0.4x and towards a neutral navy, before tone
+  // mapping; warm things (sodium lamps, lit windows) are not blue-dominant: kept
   float sl = dot(sky, vec3(0.2126, 0.7152, 0.0722));
   float blue = (sky.b - max(sky.r, sky.g)) / max(sl, 1e-4);
-  float ks = uNight * smoothstep(0.0, 0.12, normalize(dir).y) * smoothstep(0.05, 0.4, blue);
-  sky = mix(sky, sl * vec3(0.8, 0.88, 1.15), 0.75 * ks) * mix(1.0, 0.4, ks);
+  float ks = uNight * mix(0.7, 1.0, smoothstep(-0.1, 0.12, normalize(dir).y)) * smoothstep(0.05, 0.4, blue);
+  // (the captured night sky can be far past the tone curve's knee: a scale alone still clips to
+  // royal blue, so it is replaced by a bounded dark navy, a little brighter where it was brighter)
+  vec3 navy = vec3(0.010, 0.012, 0.022) * (1.0 + 0.6 * smoothstep(0.0, 4.0, sl)) / max(uGain, 0.05);
+  sky = mix(sky, navy, ks);
   gl_FragColor = vec4(sky * uGain, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -191,7 +195,10 @@ void main() {
   // the sodium lamps stay warm
   vec3 gg = mix(uGradeGain, vec3(dot(uGradeGain, vec3(0.3333))), 0.7 * uNight);
   vec3 col = clamp(gl_FragColor.rgb, 0.0, 1.0);
-  col = col * gg + uGradeLift * (1.0 - col);
+  // the night grade's lift is blue: added to every dark pixel it made the whole view a uniform
+  // royal blue (the screen adds it over a darker, post-processed image); neutral and halved at night
+  vec3 gl = mix(uGradeLift, vec3(dot(uGradeLift, vec3(0.3333))), 0.85 * uNight) * mix(1.0, 0.5, uNight);
+  col = col * gg + gl * (1.0 - col);
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col = mix(vec3(l), col, uSat * mix(1.0, 0.55, uNight));
   gl_FragColor.rgb = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0);
@@ -432,7 +439,7 @@ export class WindowViews {
         for (const l of lights) l.visible = true;
         if (added) sc.remove(city.group);
       }
-    }, CAPTURE_FOG);
+    }, CAPTURE_FOG * (1 - 0.6 * (this.o.grade?.()?.night ?? 0))); // night fog is the sky's blue: less of it
     if (!ok) return;
     e.faces++;
     this.stats.maxFaceMs = Math.max(this.stats.maxFaceMs, performance.now() - t0);
