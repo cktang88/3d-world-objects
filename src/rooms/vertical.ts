@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { Env, Level, LevelDesc, Portal, Rect } from '../level';
 import { disposeTree, finishBuilding } from '../level';
 import { Kit } from './kit';
+import { lobbyStyleFor, furnishLobby, type LobbyStyle, type StaffPost, type LobbyBuilt } from './lobbies';
+import { Person, loadPeopleAssets, type Uniform } from '../nyc/people';
+import { updateShowcases } from '../nyc/district-showcase';
 import { M } from './mats';
 import * as F from './furniture';
 import { Rng, hashN } from '../rng';
@@ -58,7 +61,7 @@ export const SPECS: Record<BType, Spec> = {
   office: { H: 3.9, risers: 22, fw: 1.15, gap: 0.25, run: 0.28, hw: 2.7, hallL: 10.5, lifts: [{ side: 1, at: 6.7 }, { side: 1, at: 9.0 }, { side: -1, at: 6.7 }, { side: -1, at: 9.0 }], units: 3, lobbyUnits: 0, unitStyles: ['office'], enclosed: true, lobbyW: 12, lobbyL: 9, roofW: 24, speed: 3 },
   /** a house's own stair (brownstone): a stair hall behind the back wall, wood treads, closed doors on other floors (InteriorLevel, houseCore()) */
   house: { H: 3.35, risers: 18, fw: 0.95, gap: 0.1, run: 0.26, hw: 0, hallL: 0, lifts: [], units: 0, lobbyUnits: 0, unitStyles: [], enclosed: true, lobbyW: 0, lobbyL: 0, roofW: 0, speed: 1 },
-  loft: { H: 3.8, risers: 22, fw: 1.1, gap: 0.2, run: 0.27, hw: 2.2, hallL: 5.5, lifts: [{ side: 1, at: 4.1 }], units: 2, lobbyUnits: 1, unitStyles: ['office', 'workshop', 'apartment'], enclosed: true, lobbyW: 0, lobbyL: 4.5, roofW: 12, speed: 0.8 },
+  loft: { H: 3.8, risers: 22, fw: 1.1, gap: 0.2, run: 0.27, hw: 2.2, hallL: 5.5, lifts: [{ side: 1, at: 4.1 }], units: 2, lobbyUnits: 1, unitStyles: ['office', 'workshop', 'apartment'], enclosed: true, lobbyW: 6.5, lobbyL: 6, roofW: 12, speed: 0.8 },
 };
 
 const T = 0.2; // wall thickness
@@ -907,7 +910,11 @@ export class FloorLevel implements Level, VCore {
   constructor(public desc: FloorDesc, opts: { staged?: boolean } = {}) {
     this.type = (SPECS[desc.type as BType] ? desc.type : 'walkup') as BType;
     this.spec = SPECS[this.type];
-    this.d = dims(this.spec);
+    // the lobby's style (src/rooms/lobbies.ts) sets the lobby room's depth and width for every floor of the
+    // building (they only shape floor 0, but the plan must agree on every floor)
+    this.lobbyStyle = this.type === 'walkup' ? null : lobbyStyleFor(this.type, desc.seed);
+    const ls = this.lobbyStyle;
+    this.d = dims(ls ? { ...this.spec, lobbyL: this.spec.lobbyL * ls.depth, lobbyW: this.spec.lobbyW * ls.width } : this.spec);
     this.floor = desc.floor;
     this.floors = desc.floors;
     this.roof = desc.floor >= desc.floors;
@@ -939,7 +946,35 @@ export class FloorLevel implements Level, VCore {
   portals() {
     return this.extra.length ? this.ports.concat(this.extra) : this.ports;
   }
-  update() {}
+  /** the lobby's style, staff posts and what was placed (floor 0 of prewar / office / loft buildings) */
+  lobbyStyle: LobbyStyle | null = null;
+  lobbyBuilt: LobbyBuilt | null = null;
+  private staff: Person[] = [];
+  private staffWanted = false;
+  update(dt = 0, player?: THREE.Vector3) {
+    if (this.staffWanted && !this.staff.length && this.lobbyBuilt) this.hireStaff();
+    for (const p of this.staff) p.update(dt);
+    // the lobby's sculptures stream in (showcase slots) as you come near
+    if (player && this.lobbyBuilt?.plinths.length) updateShowcases(player);
+  }
+  /** doormen, guards and a visitor: people-system bodies, idling at their posts (loaded on first view) */
+  private hireStaff() {
+    this.staffWanted = false;
+    const posts = this.lobbyBuilt!.staff;
+    loadPeopleAssets().then((assets) => {
+      if (this.group.userData.disposed) return;
+      posts.forEach((post: StaffPost, i: number) => {
+        const r = new Rng(hashN(this.desc.seed, i, 31));
+        const uni: Uniform | undefined = post.role === 'doorman' ? { top: '#1a2436', bottom: '#14161c', cap: '#1a2436', long: true } : post.role === 'guard' ? { top: '#22262c', bottom: '#16181c' } : undefined;
+        const p = new Person(assets, r, post.role === 'visitor' ? (r.chance(0.5) ? 'male' : 'female') : 'male', uni);
+        p.setActivity(post.role === 'visitor' && r.chance(0.6) ? 'phone' : 'idle', r.range(0, 4));
+        p.root.position.set(post.x, 0, post.z);
+        p.root.rotation.y = post.yaw;
+        this.group.add(p.root);
+        this.staff.push(p);
+      });
+    }, () => {});
+  }
   dispose() {
     disposeTree(this.group);
     if (this.hasColumn) releaseColumn(this.colKey);
@@ -1380,29 +1415,31 @@ export class FloorLevel implements Level, VCore {
   // ------------------------------------------------------------ lobby
 
   private *lobby() {
-    const d = this.d, s = this.spec, k = this.kit, m = this.m, r = this.rng;
+    const d = this.d, s = this.spec, k = this.kit, m = this.m;
     const z0 = d.zH1, z1 = d.zS, lw = d.lw, hw = d.hw;
-    const H = this.type === 'walkup' ? d.Hc : Math.min(d.H - 0.25, 3.6);
-    k.box(m.lobbyFloor, lw, 0.02, z1 - z0, 0, -0.02, (z0 + z1) / 2);
-    k.box(m.ceiling, lw, 0.02, z1 - z0, 0, H, (z0 + z1) / 2);
+    const st = this.lobbyStyle;
+    const H = st ? st.H : d.Hc;
+    const lobbyWall = st ? st.wall() : m.hallWall;
+    k.box(st ? st.floor() : m.lobbyFloor, lw, 0.02, z1 - z0, 0, -0.02, (z0 + z1) / 2);
+    k.box(st ? st.ceiling() : m.ceiling, lw, 0.02, z1 - z0, 0, H, (z0 + z1) / 2);
     // walls: sides, the junction with the hall, the street wall with the entrance
     const door = 1.3;
-    this.wallLine('x', -lw / 2, z0, z1, -1, H, [], m.hallWall);
+    this.wallLine('x', -lw / 2, z0, z1, -1, H, [], lobbyWall);
     const mailSide = 1;
-    this.wallLine('x', lw / 2, z0, z1, 1, H, [], m.hallWall);
+    this.wallLine('x', lw / 2, z0, z1, 1, H, [], lobbyWall);
     if (lw > hw) {
       for (const sx of [-1, 1] as const) {
         const a = hw / 2, b = lw / 2 + T;
-        k.box(m.hallWall, b - a, H, T, sx * (a + b) / 2, 0, z0 - T / 2);
+        k.box(lobbyWall, b - a, H, T, sx * (a + b) / 2, 0, z0 - T / 2);
         this.cols.push({ minX: Math.min(sx * a, sx * b), maxX: Math.max(sx * a, sx * b), minZ: z0 - T, maxZ: z0 });
-        if (H > d.Hc) k.box(m.hallWall, hw, H - d.Hc, T, 0, d.Hc, z0 - T / 2);
+        if (H > d.Hc) k.box(lobbyWall, hw, H - d.Hc, T, 0, d.Hc, z0 - T / 2);
       }
     }
     // the street wall and door in their own group: hidden while the lobby is seen through the
     // building's glass from the street (seamless.ts doorway.hide; the facade is the wall then)
     this.kit = new Kit();
     const fk = this.kit;
-    this.wallLine('z', z1, -lw / 2 - T, lw / 2 + T, 1, H, [{ a: -door / 2, b: door / 2, top: 2.5, solid: true }], m.hallWall);
+    this.wallLine('z', z1, -lw / 2 - T, lw / 2 + T, 1, H, [{ a: -door / 2, b: door / 2, top: 2.5, solid: true }], lobbyWall);
     // the street door (glass in a dark frame), seen from inside
     fk.at(0, 0, z1, Math.PI, () => {
       fk.box(M.black(), door, 0.06, 0.06, 0, 2.44, 0);
@@ -1427,12 +1464,13 @@ export class FloorLevel implements Level, VCore {
       target: 'back',
     });
 
-    // mailboxes: a brass (or steel) panel of little doors with slots, one per apartment
+    // mailboxes: a brass (or steel) panel of little doors with slots, one per apartment (offices: none)
+    if (this.type !== 'office') {
     const nBox = Math.max(4, Math.min(48, (this.floors - 1) * s.units + s.lobbyUnits));
     const cols = Math.min(nBox, this.type === 'walkup' ? 4 : 8), rows = Math.ceil(nBox / cols);
     const bw = 0.14, bh = 0.32;
-    const mx = mailSide * (lw / 2) - mailSide * 0.012, mz = z1 - 1.2 - (cols * bw) / 2;
-    const mailM = this.type === 'office' || this.type === 'loft' ? M.steel() : M.brass();
+    const mx = mailSide * (lw / 2) - mailSide * 0.012, mz = st ? z0 + 0.9 + (cols * bw) / 2 : z1 - 1.2 - (cols * bw) / 2;
+    const mailM = this.type === 'loft' ? M.steel() : M.brass();
     k.at(mx, 0, mz, -mailSide * Math.PI / 2, () => {
       const W = cols * bw + 0.08, Hh = rows * bh + 0.08, y0 = 1.65 - Hh;
       k.box(M.black(), W, Hh, 0.02, 0, y0, 0);
@@ -1446,6 +1484,7 @@ export class FloorLevel implements Level, VCore {
         }
       if (this.type !== 'office') k.box(mailM, W, 0.18, 0.015, 0, 1.68, 0.01);
     });
+    }
     yield;
 
     if (this.type === 'walkup') {
@@ -1455,34 +1494,13 @@ export class FloorLevel implements Level, VCore {
       k.box(m.trim, hw, 0.5, 0.12, 0, d.Hc - 0.5, zv);
       k.box(M.glass(), hw - 0.2, 0.4, 0.01, 0, d.Hc - 0.45, zv);
       k.at(-hw / 2 + 0.1, 0, z1 - 3.4, Math.PI / 2, () => F.radiator(k, 0.9));
-    } else if (this.type === 'prewar') {
-      // marble wainscot already on the walls; a bench, a mirror over a console, a chandelier, plants
-      k.at(-lw / 2 + 0.3, 0, (z0 + z1) / 2, Math.PI / 2, () => {
-        k.box(M.walnut('#7a5a40'), 1.6, 0.45, 0.45, 0, 0, 0.1);
-        k.box(M.velvet(r.pick(['#5a1d1d', '#1d3b2e', '#2a2a4a'])), 1.55, 0.08, 0.42, 0, 0.45, 0.1);
-        for (const sx of [-0.7, 0.7]) k.box(M.walnut('#7a5a40'), 0.06, 0.3, 0.06, sx, 0.45, -0.05);
-        k.box(M.mirror(), 1.2, 0.9, 0.02, 0, 1.25, -0.1);
-        k.box(M.brass(), 1.28, 0.98, 0.015, 0, 1.21, -0.115);
-      });
-      k.at(lw / 2 - 0.5, 0, z0 + 0.6, 0, () => F.plant(k, r, 1.5));
-      k.unshadowed(() => {
-        const cz = (z0 + z1) / 2;
-        k.cyl(M.brass(), 0.01, 0.01, 0.5, 0, H - 0.5, cz, 6);
-        k.cyl(M.brass(), 0.35, 0.12, 0.08, 0, H - 0.6, cz, 16);
-        for (let i = 0; i < 6; i++) {
-          const a = (i / 6) * Math.PI * 2;
-          k.sphere(M.shade('#f6e2b8'), 0.07, Math.cos(a) * 0.32, H - 0.48, cz + Math.sin(a) * 0.32);
-        }
-      });
-      k.box(M.carpet(r.pick(['#5a2a2a', '#2a3a5a', '#3a2a20'])), 1.4, 0.012, z1 - z0 - 1.2, 0, 0, (z0 + z1) / 2 + 0.3);
-    } else if (this.type === 'office') {
-      // security desk, turnstiles across the lobby, a directory
-      k.at(-lw / 2 + 1.6, 0, z1 - 3.2, Math.PI / 2, () => {
-        k.box(M.marble('#2a2826'), 2.4, 1.05, 0.7, 0, 0, 0);
-        k.box(M.marble('#d8d2c8'), 2.5, 0.04, 0.8, 0, 1.05, 0);
-        F.monitor(k, 0.4, 1.09, -0.1, true, 0.5);
-      });
-      this.cols.push({ minX: -lw / 2 + 1.25, maxX: -lw / 2 + 1.95, minZ: z1 - 4.45, maxZ: z1 - 1.95 });
+    } else {
+      // the style's furnishing: desk or doorman's podium, art, sculpture, seating, plants, fittings, staff
+      this.lobbyBuilt = furnishLobby(st!, { k, group: this.group, cols: this.cols, ports: this.ports, z0, z1, lw, hw, H, seed: this.desc.seed, name: this.desc.name, office: this.type === 'office' || this.type === 'loft' });
+      this.staffWanted = true;
+    }
+    if (this.type === 'office') {
+      // turnstiles across the lobby, a directory
       const zt = z0 + 1.6;
       const gate = 0.72;
       const n = 6;
@@ -1509,10 +1527,6 @@ export class FloorLevel implements Level, VCore {
       dir.position.set(lw / 2 - 0.02, 2.2, z1 - 3);
       dir.rotation.y = -Math.PI / 2;
       this.group.add(dir);
-      k.at(lw / 2 - 0.6, 0, z1 - 1.0, 0, () => F.plant(k, r, 1.7));
-      k.at(-lw / 2 + 0.6, 0, z1 - 0.8, 0, () => F.plant(k, r, 1.7));
-    } else {
-      k.at(-hw / 2 + 0.1, 0, z1 - 2.4, Math.PI / 2, () => F.radiator(k, 0.9));
     }
   }
 

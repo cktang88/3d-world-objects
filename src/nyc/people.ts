@@ -927,6 +927,13 @@ function hairMat(base: THREE.MeshStandardMaterial, color: string) {
 }
 
 // ---------------------------------------------------------------- one person
+/** a work uniform (lobby doormen and guards): jacket / coat colour, trousers, an optional cap colour */
+export interface Uniform {
+  top: string;
+  bottom: string;
+  cap?: string;
+  long?: boolean;
+}
 export type Activity = 'walk' | 'idle' | 'phone' | 'talk';
 /** the walk clips' ground speed at a 1.83 m body (m/s), from foot-plant measurement */
 const CLIP_SPEED: Record<Gender, number> = { male: 1.045, female: 1.085 };
@@ -954,12 +961,14 @@ export class Person {
     for (const m of this.faceMeshes) m.visible = l === 0;
     for (const m of this.detail) m.visible = l === 0;
   }
-  constructor(public assets: PeopleAssets, r: Rng, public gender: Gender = r.chance(0.5) ? 'male' : 'female') {
+  constructor(public assets: PeopleAssets, r: Rng, public gender: Gender = r.chance(0.5) ? 'male' : 'female', uniform?: Uniform) {
     const A = assets.body[gender];
     const model = skeletonClone(A.scene);
     this.root = new THREE.Group();
     this.root.add(model);
     const o = pickOutfit(r, gender);
+    // lobby staff (src/rooms/lobbies.ts): a doorman's or guard's uniform over the random outfit
+    if (uniform) Object.assign(o, { top: uniform.top, topStyle: uniform.long ? 3 : 1, bottom: uniform.bottom, bottomStyle: 1, shoe: '#121212', sole: '#1a1a1a', coatLen: uniform.long ? 0.08 : -1 });
     this.slow = r.chance(0.1);
     this.walkSpeed = this.slow ? r.range(0.8, 1.0) : r.range(1.15, 1.5);
     if (this.slow) o.hair = r.pick(['#8a8a86', '#b0aea8', '#d0cec8', '#6b6b6b']);
@@ -1013,7 +1022,7 @@ export class Person {
       if ((obj as THREE.Mesh).isMesh) this.meshes.push(obj as THREE.Mesh);
       return obj;
     };
-    const hat = r.chance(season === 'mild' ? 0.15 : 0.28);
+    const hat = uniform ? !!uniform.cap : r.chance(season === 'mild' ? 0.15 : 0.28);
     this.hasHat = hat;
     this.weatherRoll = r.next();
     this.bindInvOf = (bone) => A.bindInv.get(bone)!;
@@ -1048,8 +1057,8 @@ export class Person {
     const parts: RigidPart[] = [];
     if (hat) {
       // cold: mostly knit beanies, some caps; mild: mostly caps
-      const cap = r.chance(season === 'mild' ? 0.85 : 0.35);
-      const hc = cap ? r.pick(['#151515', '#1f3d5a', '#2a2c30', '#e8e6e0', '#7a1d1d', '#3b4232', '#c8b48c']) : r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a', '#b03a3a']);
+      const cap = uniform ? true : r.chance(season === 'mild' ? 0.85 : 0.35);
+      const hc = uniform?.cap ? uniform.cap : cap ? r.pick(['#151515', '#1f3d5a', '#2a2c30', '#e8e6e0', '#7a1d1d', '#3b4232', '#c8b48c']) : r.pick(['#151515', '#2a2a2e', '#4a1f22', '#c8c4ba', '#1f3d5a', '#5a5a5a', '#8a6c4a', '#b03a3a']);
       this.far.hair.set(hc);
       parts.push({ geo: cap ? propGeo.cap : propGeo.beanie, bone: 'Head', m: hatMatrix(gender, cap ? 'cap' : 'beanie'), color: hc });
     }
