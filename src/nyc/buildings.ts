@@ -11,7 +11,8 @@ import { ShopGlass, TextBatch, storefront, HALL_CELL, OFFICE_LOBBY_CELL } from '
 import { SW } from './common';
 import { buildingDesc } from '../rooms/vertical';
 import { districtAt } from './districts';
-import { brownstoneMat, brownTint, BROWN_WALLS, stoopDressing, doorHood, areawayGarden } from './brownstone'; // [nbhd]
+import { brownstoneMat, brownTint, BROWN_WALLS, stoopDressing, doorHood, areawayGarden, bowFront } from './brownstone'; // [nbhd]
+const cColorOf = (o: BuildingStyle, wall: string) => o.cornicePaint ?? shade(wall, 0.85); // [nbhd]
 
 export { setNight } from './buildings-win';
 export { SHOPS } from './buildings-shop';
@@ -368,6 +369,17 @@ export class Face {
     if (tint) o.userData.tint = tint;
     o.userData.ao = true;
     this.g.add(o);
+  }
+  /** [nbhd] a facet of this face in its own frame (bay windows): centre (u, z) on this face, turned by yaw, len long */
+  sub(u: number, z: number, yaw: number, len: number): Face {
+    const s = Object.create(Face.prototype) as Face;
+    Object.assign(s, { ctx: this.ctx, r: this.r, side: this.side, len, holes: [], g: new THREE.Group(), f: new THREE.Group() });
+    s.m = this.m.clone().multiply(new THREE.Matrix4().makeRotationY(yaw).setPosition(u, 0, z));
+    for (const g of [s.g, s.f]) s.m.decompose(g.position, g.quaternion, g.scale);
+    this.ctx.stat.add(s.g);
+    this.ctx.faceGroups.push(s.g);
+    this.ctx.fine.add(s.f);
+    return s;
   }
   /** a horizontal band along the whole face */
   band(m: THREE.Material, y: number, h: number, out: number, extra = 0, fine = false, tint = '#e3dccb') {
@@ -817,6 +829,8 @@ export interface BuildingStyle {
   wall?: string;
   /** [nbhd] brownstone parlour-floor height over the pavement (a row shares it, so its cornice line is continuous) */
   parlor?: number;
+  /** [nbhd] brownstone bow-front bay */
+  bow?: boolean;
   /** facade material family */
   material?: 'brick' | 'brownstone' | 'limestone' | 'castiron' | 'panel' | 'glass';
   /** window lintels/sills */
@@ -936,6 +950,9 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       if (style === 'panel') ww = L / n - 0.6;
     }
     const centres = bays(L, n, type === 'castiron' ? 0.2 : 0.35);
+    // [nbhd] Park Slope bow front: a three-sided bay from the garden level to under the cornice, beside the stoop
+    const bow = type === 'brownstone' && isFront && opts.bow && L >= 6.0 ? { u0: centres[0] + 1.75, u1: L / 2 - 0.3 } : null;
+    const inBow = (c: number) => !!bow && c > bow.u0 - 0.2 && c < bow.u1 + 0.2;
     const flowers = rng.chance(0.4);
     // floors with balconettes on pre-war fronts
     const balcony = new Set<number>(type === 'prewar' && isFront ? [1, levels.length - 3].filter(() => rng.chance(0.6)) : []);
@@ -950,6 +967,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       for (const c of centres) {
         // brownstone parlour door bay
         if (type === 'brownstone' && i === 0 && isFront && c === centres[0]) continue;
+        if (inBow(c)) continue; // [nbhd]
         F.window(c - ww / 2, wy, ww, whh, { ...winOpts, trim: type === 'prewar' && top ? 'arch' : winOpts.trim });
         // flower boxes on brownstone parlour sills
         if (type === 'brownstone' && i === 0 && isFront && flowers) {
@@ -1010,7 +1028,7 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
       // English basement with barred windows under a parlour floor reached by the stoop
       const du = centres[0];
       for (const c of centres) {
-        if (c === du) continue;
+        if (c === du || inBow(c)) continue; // [nbhd]
         F.window(c - ww / 2, 0.3, ww, Math.min(1.05, parlor - 0.55), { ...winOpts, trim: 'flat', ac: 0 });
         for (let k = 1; k < 5; k++) B(F.f, M.iron(), 0.025, Math.min(1.05, parlor - 0.55), 0.025, c - ww / 2 + (k * ww) / 5, 0.3, 0.06, false);
       }
@@ -1029,9 +1047,10 @@ function buildingBody(ctx: BCtx, r: Rect, front: Side, type: BType, floors: numb
         B(F.g, mat('#5a5650', { rough: 0.9 }), au1 - au0, 0.155, 0.2, (au0 + au1) / 2, 0, ar); // [zfix] 5 mm over the sidewalk plane
         for (let u = au0; u < au1; u += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, u, 0.1, ar, false);
         for (let z = 0.1; z < ar; z += 0.13) B(F.f, M.iron(), 0.02, 1.0, 0.02, au1, 0.1, z, false);
-        areawayGarden(F, au0 + 0.25, au1 - 0.05, ar, rng); // [nbhd] planted front yard
+        if (!bow) areawayGarden(F, au0 + 0.25, au1 - 0.05, ar, rng); // [nbhd] planted front yard
         colliders.push(F.rectOf(au0, au1, 0, ar + 0.1));
       }
+      if (bow) bowFront(F, bow.u0, bow.u1, levels, parlor, levels[0] + 4.0, h - 0.9, tint, winOpts, cColorOf(opts, wall)); // [nbhd]
       portalDoor(ctx, F, du, stoopSteps(parlor).length + 0.5, alongX, addr, floors, 'brownstone', 'house');
     } else if (isFront) {
       const grilles = type !== 'prewar' && rng.chance(0.6);

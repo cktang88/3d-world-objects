@@ -284,7 +284,7 @@ export class NycLevel implements Level {
         const floors = run ? run.floors : floorsFor(D, type === 'brownstone' ? rng.int(3, 5) : type === 'tenement' ? rng.int(4, 6) : type === 'castiron' ? rng.int(5, 7) : type === 'prewar' ? rng.int(9, 14) : rng.int(7, 12));
         const store = type !== 'brownstone' && rng.chance(Math.min(1, (type === 'tenement' ? 0.6 : 0.75) * D.stores));
         const bstyle = districtStyle(D, rng, cx, cz);
-        if (run) Object.assign(bstyle, { wall: run.wall, parlor: run.parlor, cornicePaint: run.cornicePaint }); // [nbhd]
+        if (run) Object.assign(bstyle, { wall: run.wall, parlor: run.parlor, cornicePaint: run.cornicePaint, bow: run.bow }); // [nbhd]
         building(ctx, r, side, type, floors, store, [false, false], bstyle); yield; // [vis]
         x += w;
       }

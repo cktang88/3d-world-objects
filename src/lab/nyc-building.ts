@@ -36,10 +36,10 @@ const scene: LabScene = {
     }
     let run: BrownRun | null = null; // [nbhd] brownstones come in runs of identical houses
     for (let w of ws) {
-      if (type === 'brownstone') { run = brownRun(rng, run); w = run.w; }
+      if (type === 'brownstone') { run = brownRun(rng, run); w = run.w; if (params.has('bow')) run.bow = params.get('bow') === '1'; }
       const store = params.has('store') ? params.get('store') === '1' : type !== 'brownstone' && rng.chance(0.7);
       const floors = params.has('floors') ? Math.max(1, Number(params.get('floors')) || 1) : run ? run.floors : rng.int(...floorsOf[type]);
-      building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, floors, store, [false, false], run ? { wall: run.wall, parlor: run.parlor, cornicePaint: run.cornicePaint } : {});
+      building(ctx, { minX: x, maxX: x + w, minZ: -18, maxZ: 0 }, 'S', type, floors, store, [false, false], run ? { wall: run.wall, parlor: run.parlor, cornicePaint: run.cornicePaint, bow: run.bow } : {});
       x += w;
     }
     // sidewalk and street

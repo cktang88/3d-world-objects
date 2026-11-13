@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { B, C, M, canvasTex, unitSphere } from './common';
 import { mat } from '../build';
 import type { Rng } from '../rng';
+import type { Face } from './buildings';
 
 /**
  * [nbhd] Brownstone rows (docs/research/neighborhood-audit.md, Brownstone Row): what makes a Park Slope /
@@ -102,6 +103,7 @@ export interface BrownRun {
   parlor: number;
   wall: string;
   cornicePaint: string;
+  bow: boolean;
 }
 /** the next brownstone of a row: continue the run, or start a new one (3–7 houses) */
 export function brownRun(rng: Rng, prev: BrownRun | null): BrownRun {
@@ -116,6 +118,7 @@ export function brownRun(rng: Rng, prev: BrownRun | null): BrownRun {
     parlor: rng.range(1.45, 1.7),
     wall: rng.pick(BROWN_WALLS),
     cornicePaint: rng.pick(['#3a2a20', '#2a2420', '#4a3a2e', '#33291f']),
+    bow: rng.chance(0.35),
   };
   return run;
 }
@@ -263,4 +266,46 @@ export function areawayGarden(F: FaceLike, u0: number, u1: number, depth: number
     sh.castShadow = true;
     F.g.add(sh);
   }
+}
+
+/**
+ * Park Slope bow front (angled three-sided bay) between u0 and u1 of the front face, from the garden level up
+ * to yTop (under the main cornice), 0.75 m deep: rusticated to baseTop like the house, the same windows on
+ * every level (a wide front facet, a narrow window in each 45° side), a flat lead roof and a small cornice.
+ */
+export function bowFront(F: Face, u0: number, u1: number, levels: number[], parlor: number, baseTop: number, yTop: number, tint: string, win: Parameters<Face['window']>[4], cornice: string) {
+  const D = 0.75, W = u1 - u0;
+  if (W - 2 * D < 1.2) return;
+  F.cut(u0, u1, 0, yTop);
+  const side = D * Math.SQRT2;
+  const facets = [
+    { f: F.sub(u0 + D / 2, D / 2, -Math.PI / 4, side), n: 1, ww: Math.min(0.7, side - 0.4) },
+    { f: F.sub((u0 + u1) / 2, D, 0, W - 2 * D), n: Math.max(1, Math.round((W - 2 * D) / 1.5)), ww: 1.05 },
+    { f: F.sub(u1 - D / 2, D / 2, Math.PI / 4, side), n: 1, ww: Math.min(0.7, side - 0.4) },
+  ];
+  const cm = mat(cornice, { rough: 0.6, metal: 0.15 });
+  for (const { f, n, ww } of facets) {
+    const cs = Array.from({ length: n }, (_, i) => -f.len / 2 + (f.len * (i + 0.5)) / n);
+    levels.forEach((ly, i) => {
+      const top = i === levels.length - 1;
+      const wy = i === 0 ? ly + 0.45 : ly + 0.75, wh = i === 0 ? 2.55 : top ? 1.6 : 1.95;
+      if (wy + wh > yTop - 0.3) return;
+      for (const c of cs) f.window(c - ww / 2, wy, ww, wh, win);
+    });
+    for (const c of cs) f.window(c - ww / 2, 0.3, ww, Math.min(1.05, parlor - 0.55), { ...win, trim: 'flat', ac: 0 });
+    f.wall(brownstoneMat(), 0, baseTop, tint, 0.42);
+    f.wall(brownstoneMat(), baseTop, yTop, tint);
+    f.band(cm, yTop - 0.32, 0.32, 0.2, 0.05);
+  }
+  // the bay's flat roof
+  const sh = new THREE.Shape();
+  sh.moveTo(u0, 0);
+  sh.lineTo(u0 + D, D);
+  sh.lineTo(u1 - D, D);
+  sh.lineTo(u1, 0);
+  sh.closePath();
+  const g = new THREE.ShapeGeometry(sh);
+  g.rotateX(Math.PI / 2);
+  g.translate(0, yTop - 0.02, 0);
+  F.g.add(new THREE.Mesh(g, mat('#3a3633', { rough: 0.9 })));
 }
