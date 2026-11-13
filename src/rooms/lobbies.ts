@@ -43,16 +43,73 @@ export interface LobbyStyle {
   residential: boolean;
 }
 
-const travertine = () => M.marble('#d8c8a8');
+/**
+ * Lobby stone, painted on canvases (calmer than the scanned marble, whose grey veins dominated every
+ * frame): a warm rouge marble with soft cream veins, travertine with its horizontal pores, speckled
+ * granite, white terrazzo, pale limestone. Repeats every `size` metres (Kit world UVs).
+ */
+const stones = new Map<string, THREE.MeshStandardMaterial>();
+function stone(kind: 'rouge' | 'travertine' | 'granite' | 'graniteDark' | 'terrazzo' | 'limestone', rough = 0.35): THREE.MeshStandardMaterial {
+  const key = kind + rough;
+  let m = stones.get(key);
+  if (m) return m;
+  const size = kind === 'travertine' || kind === 'limestone' ? 1.2 : kind === 'rouge' ? 1.6 : 0.8;
+  const r = new Rng(hashN(kind.length, 4141));
+  const t = canvasTex(512, 512, (g) => {
+    const base = { rouge: '#8e4430', travertine: '#d6c6a6', granite: '#b89088', graniteDark: '#4e4848', terrazzo: '#ece8e0', limestone: '#dcd8d0' }[kind];
+    g.fillStyle = base;
+    g.fillRect(0, 0, 512, 512);
+    if (kind === 'rouge') {
+      // soft clouds of deeper red, a few thin cream veins
+      for (let i = 0; i < 40; i++) {
+        g.fillStyle = `rgba(${r.int(70, 120)},${r.int(20, 40)},${r.int(14, 30)},0.18)`;
+        g.beginPath();
+        g.ellipse(r.range(0, 512), r.range(0, 512), r.range(30, 110), r.range(20, 70), r.range(0, 3), 0, Math.PI * 2);
+        g.fill();
+      }
+      g.strokeStyle = 'rgba(236,214,180,0.35)';
+      g.lineWidth = 1.5;
+      for (let i = 0; i < 5; i++) {
+        g.beginPath();
+        let x = r.range(0, 512), y = 0;
+        g.moveTo(x, y);
+        while (y < 512) { x += r.range(-14, 14); y += r.range(10, 30); g.lineTo(x, y); }
+        g.stroke();
+      }
+    } else if (kind === 'travertine' || kind === 'limestone') {
+      for (let y = 0; y < 512; y += r.int(3, 9)) {
+        g.fillStyle = `rgba(${kind === 'travertine' ? '150,120,80' : '140,136,128'},${r.range(0.03, 0.1)})`;
+        g.fillRect(0, y, 512, r.int(1, 3));
+      }
+      if (kind === 'travertine') for (let i = 0; i < 160; i++) {
+        g.fillStyle = 'rgba(120,96,64,0.25)';
+        g.fillRect(r.range(0, 512), r.range(0, 512), r.range(4, 22), r.range(1, 3));
+      }
+    } else {
+      const chips = kind === 'granite' ? ['#e8d0c8', '#6a4a44', '#2a2224', '#c89890'] : kind === 'graniteDark' ? ['#8a8280', '#1e1a1c', '#6a5a58', '#b0a8a4'] : ['#cfc8bc', '#9a9288', '#b8a890', '#f8f6f2'];
+      for (let i = 0; i < 9000; i++) {
+        g.fillStyle = r.pick(chips);
+        const s2 = r.range(1, kind === 'terrazzo' ? 5 : 3);
+        g.fillRect(r.range(0, 512), r.range(0, 512), s2, s2);
+      }
+    }
+  });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1 / size, 1 / size);
+  t.anisotropy = 8;
+  stones.set(key, (m = new THREE.MeshStandardMaterial({ map: t, roughness: rough, envMapIntensity: 0.6 })));
+  return m;
+}
+const travertine = () => stone('travertine', 0.45);
 export const LOBBY_STYLES: Record<LobbyStyleId, LobbyStyle> = {
   // Chrysler / Empire State: red-brown marble, travertine floor, gold leaf, a radiant mural, coves
-  deco: { id: 'deco', label: 'Art Deco', depth: 1.25, width: 1.05, H: 5.4, mezzanine: false, floor: travertine, wall: () => M.marble('#c4704a'), ceiling: () => mat('#b8925a', { rough: 0.35, metal: 0.6 }), dado: null, desk: 'deco', art: 'mural', sculptures: 0, light: 'cove', seating: 'bench', plants: 0, residential: false },
+  deco: { id: 'deco', label: 'Art Deco', depth: 1.25, width: 1.05, H: 5.4, mezzanine: false, floor: travertine, wall: () => stone('rouge', 0.25), ceiling: () => mat('#b8925a', { rough: 0.35, metal: 0.6 }), dado: null, desk: 'deco', art: 'mural', sculptures: 1, light: 'cove', seating: 'bench', plants: 0, residential: false },
   // Lever House / Seagram: white terrazzo, travertine or green marble, low ceiling of pin lights, a colour field
-  midcentury: { id: 'midcentury', label: 'International Style', depth: 0.9, width: 1.2, H: 3.7, mezzanine: false, floor: () => M.marble('#ece8e0'), wall: () => M.marble('#c9c2ae'), ceiling: () => M.paint('#f2f1ee'), dado: null, desk: 'slab', art: 'colourfield', sculptures: 1, light: 'pins', seating: 'barcelona', plants: 2, residential: false },
+  midcentury: { id: 'midcentury', label: 'International Style', depth: 0.9, width: 1.2, H: 3.7, mezzanine: false, floor: () => stone('terrazzo', 0.4), wall: () => travertine(), ceiling: () => M.paint('#f2f1ee'), dado: null, desk: 'slab', art: 'colourfield', sculptures: 1, light: 'pins', seating: 'barcelona', plants: 2, residential: false },
   // 1980s granite: pink and grey polished granite bands, drum pendants, a tapestry, big planters
-  postmodern: { id: 'postmodern', label: 'Postmodern granite', depth: 1.1, width: 1.0, H: 4.6, mezzanine: false, floor: () => M.marble('#7a6a66'), wall: () => M.marble('#b8948a'), ceiling: () => M.paint('#e8e2da'), dado: () => M.marble('#4a4446'), desk: 'granite', art: 'tapestry', sculptures: 2, light: 'drums', seating: 'armchairs', plants: 3, residential: false },
+  postmodern: { id: 'postmodern', label: 'Postmodern granite', depth: 1.1, width: 1.0, H: 4.6, mezzanine: false, floor: () => stone('graniteDark', 0.3), wall: () => stone('granite', 0.3), ceiling: () => M.paint('#e8e2da'), dado: () => stone('graniteDark', 0.3), desk: 'granite', art: 'tapestry', sculptures: 2, light: 'drums', seating: 'armchairs', plants: 3, residential: false },
   // a glass atrium: tall, white, a mezzanine, trees, a big sculpture, framed photographs
-  atrium: { id: 'atrium', label: 'Glass atrium', depth: 1.5, width: 1.25, H: 8.5, mezzanine: true, floor: () => M.marble('#d8d6d2'), wall: () => M.paint('#f4f4f2'), ceiling: () => mat('#f8f8f6', { emissive: '#f4f8ff', ei: 0.35, rough: 0.8 }), dado: null, desk: 'long', art: 'photos', sculptures: 1, light: 'pendants', seating: 'bench', plants: 4, residential: false },
+  atrium: { id: 'atrium', label: 'Glass atrium', depth: 1.5, width: 1.25, H: 8.5, mezzanine: true, floor: () => stone('limestone', 0.35), wall: () => M.paint('#f4f4f2'), ceiling: () => mat('#f8f8f6', { emissive: '#f4f8ff', ei: 0.35, rough: 0.8 }), dado: null, desk: 'long', art: 'photos', sculptures: 1, light: 'pendants', seating: 'bench', plants: 4, residential: false },
   // a pre-war co-op: walnut panelling, black and white marble, a chandelier, oils, a doorman
   coop: { id: 'coop', label: 'Pre-war co-op', depth: 1.0, width: 0.95, H: 3.9, mezzanine: false, floor: () => M.checker(), wall: () => M.paint('#e8dcc4'), ceiling: () => M.paint('#f4efe4'), dado: () => M.walnut('#6a4a30'), desk: 'podium', art: 'paintings', sculptures: 0, light: 'chandelier', seating: 'sofa', plants: 2, residential: true },
   // a converted loft: whitewashed brick, concrete, steel columns, bare bulbs, big photographs
@@ -227,7 +284,7 @@ export function furnishLobby(st: LobbyStyle, c: LobbyCtx): LobbyBuilt {
   }
   // ---- the security desk / doorman's podium on the right, by the door
   const dx = lw / 2 - 1.3, dz = z1 - Math.min(3.5, L * 0.35);
-  const deskM = st.desk === 'deco' ? M.marble('#3a1e14') : st.desk === 'slab' ? M.walnut('#6a4a30') : st.desk === 'granite' ? M.marble('#4a4446') : st.desk === 'long' ? mat('#f4f4f2', { rough: 0.3 }) : st.desk === 'trestle' ? M.oak('#9a7a5a') : M.walnut('#5a3a20');
+  const deskM = st.desk === 'deco' ? stone('rouge', 0.25) : st.desk === 'slab' ? M.walnut('#6a4a30') : st.desk === 'granite' ? stone('graniteDark', 0.3) : st.desk === 'long' ? mat('#f4f4f2', { rough: 0.3 }) : st.desk === 'trestle' ? M.oak('#9a7a5a') : M.walnut('#5a3a20');
   if (st.desk === 'podium') {
     k.at(dx + 0.4, 0, z1 - 1.6, -Math.PI / 2, () => {
       k.box(deskM, 0.7, 1.1, 0.5, 0, 0, 0);
@@ -245,9 +302,9 @@ export function furnishLobby(st: LobbyStyle, c: LobbyCtx): LobbyBuilt {
         k.box(deskM, dw - 0.3, 0.7, 0.03, 0, 0.25, dd / 2 - 0.05);
       } else {
         k.box(deskM, dw, 1.05, dd, 0, 0, 0);
-        k.box(st.desk === 'deco' ? M.brass() : st.desk === 'long' ? M.glass() : M.marble('#d8d2c8'), dw + 0.1, 0.05, dd + 0.1, 0, 1.05, 0);
+        k.box(st.desk === 'deco' ? M.brass() : st.desk === 'long' ? M.glass() : stone('limestone', 0.3), dw + 0.1, 0.05, dd + 0.1, 0, 1.05, 0);
         if (st.desk === 'deco') for (let i = 0; i < 5; i++) k.box(M.brass(), 0.04, 0.9, 0.02, -dw / 2 + (i + 0.5) * (dw / 5), 0.08, dd / 2 + 0.01);
-        if (st.desk === 'granite') k.box(M.marble('#b8948a'), dw - 0.2, 0.2, dd + 0.02, 0, 0.6, 0);
+        if (st.desk === 'granite') k.box(stone('granite', 0.3), dw - 0.2, 0.2, dd + 0.02, 0, 0.6, 0);
       }
       F.monitor(k, 0.4, 1.09, -0.1, true, 0.5);
     });
@@ -270,7 +327,7 @@ export function furnishLobby(st: LobbyStyle, c: LobbyCtx): LobbyBuilt {
         for (const lx of [-0.33, 0.33]) k.box(M.chrome(), 0.02, 0.32, 0.6, ox + lx, 0, 0);
       }
     } else {
-      const bm = st.seating === 'industrial' ? M.oak('#8a6a4a') : M.marble('#e0d8c8');
+      const bm = st.seating === 'industrial' ? M.oak('#8a6a4a') : travertine();
       k.box(bm, 2.2, 0.08, 0.5, 0, 0.42, 0);
       for (const lx of [-0.95, 0.95]) k.box(st.seating === 'industrial' ? M.iron() : bm, 0.12, 0.42, 0.45, lx, 0, 0);
     }
@@ -290,9 +347,9 @@ export function furnishLobby(st: LobbyStyle, c: LobbyCtx): LobbyBuilt {
     const [px, pz] = spots[i];
     if (Math.abs(px) < 2.0) continue;
     const pw = st.id === 'atrium' ? 1.8 : 1.1, ph = st.id === 'atrium' ? 0.45 : 0.9;
-    const stone = st.id === 'loft' ? M.iron() : st.id === 'postmodern' ? M.marble('#4a4446') : M.marble('#ece8e0');
-    k.box(stone, pw, ph, pw, px, 0, pz);
-    k.box(stone, pw + 0.08, 0.04, pw + 0.08, px, ph, pz);
+    const plM = st.id === 'loft' ? M.iron() : st.id === 'postmodern' ? stone('graniteDark', 0.3) : st.id === 'deco' ? stone('rouge', 0.25) : stone('limestone', 0.4);
+    k.box(plM, pw, ph, pw, px, 0, pz);
+    k.box(plM, pw + 0.08, 0.04, pw + 0.08, px, ph, pz);
     solid(px - pw / 2, px + pw / 2, pz - pw / 2, pz + pw / 2);
     addSlot(c.group, c.ports, { kind: ['statue', 'statueShow'], x: px, y: ph + 0.04, z: pz, rot: Math.atan2(-px, 0), w: pw * 1.1, d: pw * 1.1, h: Math.min(H - ph - 0.5, st.id === 'atrium' ? 4.5 : 2.4), min: 0.5, radius: 40, maxTris: 150_000, seed: hashN(c.seed, i, 77) });
     plinths.push({ x: px, z: pz, top: ph + 0.04, w: pw });
