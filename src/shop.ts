@@ -232,7 +232,7 @@ export class ShopLevel implements Level {
     const r = new Rng(hashN(desc.seed, 31));
     const type = desc.shop ?? 'deli';
     const layout = LAYOUTS[type] ?? LAYOUTS.deli;
-    const st = layout.style(r);
+    const st = layout.style(r, desc.name);
     const { W, D } = st;
     const doorX = layout.door?.(W, r) ?? 0;
     // the cheap facts first, so a caller can place the shop before it is built

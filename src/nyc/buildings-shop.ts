@@ -29,7 +29,7 @@ export const SHOPS: { type: string; names: string[]; pools: string[]; colors: st
   { type: 'machines', names: ['MACHINE PARTS', 'INDUSTRIAL SUPPLY', 'BEARINGS & GEARS'], pools: ['cad', 'machine or industrial', 'automate', 'articraft'], colors: ['#3b3b3b', '#1d4a5c'] },
   // [shops] clothing boutiques and cafés / diners: garments, tables and the espresso bar are built by the layout
   { type: 'clothing', names: ['BOUTIQUE', 'APPAREL', 'DENIM & CO', 'VINTAGE CLOTHING', 'MENSWEAR'], pools: ['simready:textile furnishing', 'animal gear'], colors: ['#1c1c1c', '#7a5a3a', '#5b2333'] },
-  { type: 'cafe', names: ['CAFE', 'COFFEE', 'ESPRESSO BAR', 'DINER', 'COFFEE SHOP'], pools: ['food and drink', 'tableware', 'simready:food and drink', 'simready:tableware'], colors: ['#3a2e24', '#1d5c2e', '#a3201d'] },
+  { type: 'cafe', names: ['CAFE', 'COFFEE', 'ESPRESSO BAR', 'DINER', 'COFFEE SHOP', 'LUNCHEONETTE'], pools: ['food and drink', 'tableware', 'simready:food and drink', 'simready:tableware'], colors: ['#3a2e24', '#1d5c2e', '#a3201d'] },
 ];
 /** atlas cell of a building's entrance hall (after the shop types' cells) */
 export const HALL_CELL = 23;

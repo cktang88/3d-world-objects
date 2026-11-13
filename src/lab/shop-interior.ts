@@ -24,7 +24,7 @@ const scene: LabScene = {
     const info = SHOPS.find((s) => s.type === type) ?? SHOPS[0];
     if (params.get('budget')) SHOP_BUDGET.tris = Number(params.get('budget'));
     PRODUCT_LOD.on = params.get('plod') !== '0'; // &plod=0: no product LODs (comparison)
-    const lv = new ShopLevel({ kind: 'interior', seed, name: `${info.names[0]}`, style: 'shop', floor: 0, floors: 1, biome: 'temperate', shop: type });
+    const lv = new ShopLevel({ kind: 'interior', seed, name: `${info.names[seed % info.names.length]}`, style: 'shop', floor: 0, floors: 1, biome: 'temperate', shop: type });
     group.add(lv.group);
     (window as unknown as { __shop: ShopLevel }).__shop = lv;
     labShop = { lv, cam: camera }; // [lod] update() runs the shop's per-frame work (product LODs)

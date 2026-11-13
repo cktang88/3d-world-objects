@@ -45,7 +45,8 @@ export interface Ctx {
   plan?: RetailPlan;
 }
 export interface Layout {
-  style(r: Rng): Style;
+  /** name: the shop's sign, for layouts whose variant must match it (a DINER is a diner) */
+  style(r: Rng, name?: string): Style;
   door?(W: number, r: Rng): number;
   /** a generator: yields between fixtures so a shop can be built a slice per frame */
   build(k: Kit, r: Rng, st: Style, c: Ctx): Generator<void, void, unknown>;
@@ -833,8 +834,10 @@ const clothing: Layout = {
  * vinyl, checkerboard floor, a menu board and pie case.
  */
 const cafe: Layout = {
-  style(r) {
-    const diner = r.chance(0.4);
+  style(r, name) {
+    // the variant follows the sign (a New York "coffee shop" or luncheonette is a diner); no name: a coin flip
+    const roll = r.chance(0.4);
+    const diner = name ? /DINER|COFFEE SHOP|LUNCHEONETTE/i.test(name) : roll;
     return {
       W: r.range(7, 10), D: r.range(12, 16), H: diner ? 3.1 : r.range(3.2, 3.8), ceil: diner ? 'drop' : r.pick(['tin', 'exposed'] as const),
       tin: r.pick(['#efe9da', '#e8e2d0']), ceilColor: '#2a2622',
