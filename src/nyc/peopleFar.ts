@@ -424,6 +424,13 @@ export class FarCrowd {
     }
     return true;
   }
+  /** [districts] a near (skinned) person's umbrella, at its world matrix: same instanced draw */
+  addUmbrella(matrix: THREE.Matrix4, color: THREE.Color) {
+    if (!this.umbrellas || this.nUmb >= this.umbrellas.instanceMatrix.count) return false;
+    this.umbrellas.setMatrixAt(this.nUmb, matrix);
+    this.umbrellas.setColorAt(this.nUmb++, color);
+    return true;
+  }
   end() {
     if (this.umbrellas) {
       this.umbrellas.count = this.nUmb;

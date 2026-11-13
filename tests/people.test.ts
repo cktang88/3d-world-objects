@@ -102,7 +102,16 @@ test('rain: most people with a free hand open an umbrella and walk faster; snow 
   P.update(DT, player, 2, []);
   const peds = P.peds as unknown as PedView[];
   const share = peds.filter((pd) => pd.p.umbrellaOn).length / peds.length;
-  between(share, 0.35, 0.8, 'share of people with umbrellas in rain');
+  // [districts] street audit: about 40 % (was 65 %: a sea of canopies)
+  between(share, 0.3, 0.5, `share of people with umbrellas in rain (${peds.length} people)`);
+  // everyone's umbrella is one instanced draw in the street crowd's group (so none indoors): no per-person canopies drawn
+  const grp = (P as unknown as { group: THREE.Group }).group;
+  const inst = grp.children.find((c) => c.name === 'far-umbrellas') as THREE.InstancedMesh | undefined;
+  if (inst) {
+    const perPerson = peds.filter((pd) => (pd.p as { umbrellaMesh?: THREE.Mesh | null }).umbrellaMesh?.visible && pd.p.root.visible).length;
+    expect(perPerson === 0, `${perPerson} per-person umbrella meshes drawn beside the instanced draw`);
+    expect(inst.count >= peds.filter((pd) => pd.p.umbrellaOn && pd.p.root.visible).length, `instanced umbrellas ${inst.count} < people under umbrellas in view`);
+  }
   expect(peds.every((pd) => pd.p.weatherSpeed > 1), 'rain should hurry everyone');
   m.setPeopleWeather({ rain: 0, snow: 1 });
   P.update(DT, player, 2.1, []);

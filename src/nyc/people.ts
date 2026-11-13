@@ -1334,6 +1334,8 @@ export class Person {
   /** fixed per person: decides umbrella / hood / hat / scarf in bad weather */
   weatherRoll = 0;
   umbrella: THREE.Object3D | null = null;
+  /** [districts] the per-person canopy: hidden while the crowd draws every umbrella in one instanced draw */
+  umbrellaMesh: THREE.Mesh | null = null;
   umbrellaOn = false;
   private weatherProps: { hoodUp?: THREE.Object3D; beanie?: THREE.Object3D; scarf?: THREE.Object3D } = {};
   private bindInvOf: (bone: string) => THREE.Matrix4 = () => new THREE.Matrix4();
@@ -1353,8 +1355,8 @@ export class Person {
       return obj;
     };
     const headTop = this.gender === 'male' ? 1.712 : 1.655;
-    // umbrella: 65 % of people with a free right hand
-    const wantUmbrella = rain && this.weatherRoll < 0.65 && !this.noPhone;
+    // umbrella: ~40 % of people ([districts] street audit: was 65 %, a sea of canopies), free right hand only
+    const wantUmbrella = rain && this.weatherRoll < UMBRELLA_SHARE && !this.noPhone;
     if (wantUmbrella && !this.umbrella) {
       const holder = new THREE.Object3D();
       new THREE.Matrix4().multiplyMatrices(this.bindInvOf('hand_r'), at(-b.wristX - 0.07, b.armY - 0.02, b.armZ + 0.02)).decompose(holder.position, holder.quaternion, holder.scale);
@@ -1365,6 +1367,7 @@ export class Person {
       holder.add(u);
       this.meshes.push(u);
       this.umbrella = holder;
+      this.umbrellaMesh = u;
     }
     this.umbrellaOn = wantUmbrella;
     if (this.umbrella) this.umbrella.visible = wantUmbrella;
@@ -1700,6 +1703,8 @@ const _sphere = new THREE.Sphere();
 const _v4 = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const _m4 = new THREE.Matrix4();
+/** [districts] street audit: share of people (with a free hand) under an umbrella in the rain */
+export const UMBRELLA_SHARE = 0.33;
 
 export class Pedestrians {
   peds: Ped[] = [];
@@ -1970,6 +1975,15 @@ export class Pedestrians {
         pd.acc = 0;
       } else pd.p.frozen = true;
       pd.p.setLod(d < 22 ? 0 : 1);
+      // [districts] near umbrellas join the crowd's instanced umbrella draw (one draw for everyone)
+      const um = pd.p.umbrellaMesh;
+      if (um && pd.p.umbrellaOn) {
+        um.visible = !far;
+        if (far) {
+          um.updateWorldMatrix(true, false);
+          far.addUmbrella(um.matrixWorld, pd.p.umbrellaColor);
+        }
+      }
     }
     far?.end();
     // shadows only for the nearest SHADOWS people (skinned shadow casters cost a full skinning pass)
