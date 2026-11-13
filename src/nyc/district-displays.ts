@@ -96,8 +96,8 @@ function billboards(ctx: BCtx, r: Rng) {
     const x = s * (LX + 0.45);
     // two columns of stacked screens, nearly wall to wall
     for (const col of [-1, 1]) {
-      let y = r.range(5.5, 8);
-      for (let k = 0; k < 5 && y < 40; k++) {
+      let y = r.range(4.7, 5.4); // [nbhd] screens start right over the storefronts and run higher (street-level audit)
+      for (let k = 0; k < 7 && y < 52; k++) {
         const h = r.range(5, 10), w = r.range(14, LZ - 2);
         const z = col * (w / 2 + 0.6);
         quad(x, y + h / 2, z, w, h, ry, r.int(0, ADS.length - 1));
