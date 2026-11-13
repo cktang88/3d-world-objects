@@ -223,3 +223,9 @@ the world pose, `&ring=1` neighbours as HLOD), 30–60 s each, no world lock, no
 - **Greenmarket** (`nb/blk-market.png`): white market tents with produce crates along the avenue sidewalks.
 - **Hudson River Park railing** (`nb/blk-hrp.png`): brushed-steel square posts, a round top rail and four wavy
   pipe rails (as in the reference) on the bulkhead and piers; the East River seawalls keep the picket rail.
+- **Detail pass** (`nb/blk-planter.png`, `nb/blk-tkts2.png` with `&ring=2`, `nb/blk-tkts3.png`, `nb/blk-hy3.png`):
+  boxwood/annual leaf-card shrubs (~0.65 m) instead of faceted blobs; TKTS as 27 lit red glass treads with risers,
+  a steel substructure, glass cheeks, four sloped handrails and the booth; red bistro chairs and café tables;
+  Duffy Square framed by the billboards on the walls behind it; the Hudson Yards supertall on a 40 × 25 m
+  footprint (taking 20 m of the row) with a glass podium. Left: the tower facade comes out as panel, not full
+  curtain-wall glass, at this seed (tower() picks it); the Vessel.
