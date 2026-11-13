@@ -49,6 +49,14 @@ await journey('cpuprofile', import.meta.url, async (h) => {
     await h.page.waitForTimeout(5000);
     await profile('street spawn');
   }
+  if (only === 'pose') {
+    // any pose: --at x,z,yaw (e.g. the LaGuardia edge that crashed headless pages: -291,-119,1.5708)
+    const [x, z, yaw] = String(h.args.at ?? '-291,-119,1.5708').split(',').map(Number);
+    await h.boot(`/?mode=world&r=0&people=0${h.args.q ? '&' + h.args.q : ''}`);
+    await h.run((e, a) => e.W.player.place(e.W.player.pos.clone().set(a[0], 0, a[1]), a[2]), [x, z, yaw]);
+    await h.page.waitForTimeout(3000);
+    await profile(`pose ${x},${z}`);
+  }
   if (!only || only === 'gallery') {
     await h.boot('/?mode=museum&fast=1&seamless=1');
     // into the first north gallery and stand in it, looking at its next doorway
