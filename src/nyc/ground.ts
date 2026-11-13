@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { AX, SZ, BX, BZ, LX, LZ, SW, CURB } from './common';
+import { AX, SZ, BX, BZ, LX, LZ, SW, CURB, avenueName } from './common';
 import { wetSurface } from '../lighting';
 import { Rng, hashN } from '../rng';
 import { FLAGS } from '../flags';
@@ -99,7 +99,11 @@ export function groundReady() {
 // ---------------------------------------------------------------- shaders
 
 const f = (n: number) => (Number.isInteger(n) ? `${n}.0` : `${n}`);
+/** [districts] street audit: road base albedo (linear) and how much rain darkens the ground (qa: ground.test.ts) */
+export const ROAD_ALB = 0.115, WET_DARK = 0.5, LANE_W = 0.145;
 const GLSL_CONST = `
+#define ROAD_ALB ${f(ROAD_ALB)}
+#define WET_DARK ${f(WET_DARK)}
 #define G_AX ${f(AX)}
 #define G_SZ ${f(SZ)}
 #define G_BX ${f(BX)}
@@ -140,8 +144,9 @@ void gWeather(inout vec3 alb, inout float rough, inout vec3 nW, float low, float
   vec2 w = vGW.xz;
   float pud = gPuddle * gExpo * smoothstep(.62, .72, gFbm(w * .3 + 19.) * .55 + low * .6) * step(.97, vGN.y);
   float wet = gWet * gExpo;
-  alb *= 1. - .38 * wet - .2 * pud;
-  rough = mix(rough, .22, wet * .75);
+  // [districts] street audit: rain reads as wet (darker, glossier); puddles mirror-flat
+  alb *= 1. - WET_DARK * wet - .25 * pud;
+  rough = mix(rough, .14, wet * .85);
   rough = mix(rough, .02, pud);
   nW = normalize(mix(nW, vGN, max(pud, wet * .5)));
   float sn = gSnow * gExpo * smoothstep(.25, .6, gFbm(w * .9 + 5.) * .5 + gSnow * .7 - clear * .55) * smoothstep(.3, .9, vGN.y);
@@ -285,8 +290,9 @@ void gEval(out vec3 alb, out float rough, out vec3 nW) {
   vec4 t1 = texture2D(gAsp, w / 2.08);
   vec4 t2 = texture2D(gAsp, mat2(.8, .6, -.6, .8) * w / 2.71 + .37);
   vec4 t = mix(vec4(.5, .7, .5, .5), mix(t1, t2, smoothstep(.3, .7, gN(w * .23))), gReady);
-  alb = vec3(.08, .079, .08) * mix(1., t.r * 2., .95);
-  rough = mix(.92, t.g, .35);
+  // [districts] street audit: worn mid-grey (was .08: near black), the photo's roughness plus slow wear/polish
+  alb = vec3(ROAD_ALB) * mix(1., t.r * 2., .95);
+  rough = mix(.92, t.g, .35) * mix(.8, 1.08, gFbm(w * .09 + 23.));
   vec2 tn = t.ba * 2. - 1.;
   float nk = 1.;
 #ifdef G_COBBLE
@@ -559,7 +565,9 @@ const BUSRED = new THREE.Color('#a24a3a');
 /** One-way directions, matching vehicles.ts: avenue k (x = (k+0.5)·AX) and street k (z = (k+0.5)·SZ). */
 const aveDir = (k: number) => (k % 2 === 0 ? -1 : 1);
 const strDir = (k: number) => (k % 2 === 0 ? 1 : -1);
-const busAve = (k: number) => hashN(k, 7311) % 3 === 0;
+/** [districts] street audit: the avenues with red offset bus lanes in Midtown (5 Av past the spawn's bus stop), else a third at random */
+export const BUS_AVENUES = new Set(['1 Av', '2 Av', 'Lexington Av', 'Madison Av', '5 Av']);
+export const busAve = (k: number) => BUS_AVENUES.has(avenueName(k)) || (!/^\d|Av$/.test(avenueName(k)) && hashN(k, 7311) % 3 === 0);
 
 function markings(q: QuadBuf, cx: number, cz: number) {
   const Y = 0.004;
@@ -600,7 +608,7 @@ function markings(q: QuadBuf, cx: number, cz: number) {
       const lx = avx - sx * off;
       for (let wz = Math.ceil((oz + zA) / 12) * 12; wz < oz + zB; wz += 12) {
         const a = Math.max(wz - oz, zA), b = Math.min(wz - oz + 3, zB);
-        if (b > a) q.quad(lx - 0.06, a, lx + 0.06, b, Y, S, W, H, '-z', WHITE);
+        if (b > a) q.quad(lx - LANE_W / 2, a, lx + LANE_W / 2, b, Y, S, W, H, '-z', WHITE); // [districts] ~6 in lines (were 4.7 in, lost past 25 m)
       }
     }
     // a red offset bus lane (1.8–5.4 m from the centre line) on the west side of some avenues

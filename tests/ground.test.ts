@@ -67,6 +67,23 @@ test('markings: real dimensions, never on the sidewalk', () => {
   none(bad, 'paint on the sidewalk or outside the chunk');
 });
 
+test('street audit: worn mid-grey asphalt, wet rain, 6 in lane lines, red bus lanes on the Midtown bus avenues', async () => {
+  const { ROAD_ALB, WET_DARK, LANE_W, busAve, BUS_AVENUES } = await import('../src/nyc/ground');
+  const { avenueName } = await import('../src/nyc/common');
+  // dry asphalt photographs at roughly 85-115 sRGB (it was ~80: near black under the grade)
+  const srgb = new THREE.Color(ROAD_ALB, ROAD_ALB, ROAD_ALB).getStyle().match(/\d+/)![0];
+  between(+srgb, 85, 115, 'dry road base (sRGB)');
+  // wet asphalt is roughly half as bright as dry
+  between(WET_DARK, 0.45, 0.6, 'rain darkening of the ground');
+  between(LANE_W, 0.1, 0.152, 'lane line width (m)');
+  // 5 Av past the spawn has its offset bus lane and BUS / ONLY legends
+  expect(avenueName(0) === '5 Av' && busAve(0), `avenue 0 is ${avenueName(0)}, bus lane ${busAve(0)}`);
+  const m = markingsPlan(0, 0);
+  expect(m.some((r) => r.kind === 'BUS') && m.some((r) => r.kind === 'ONLY'), 'no BUS ONLY legend on the spawn block');
+  const named = [...BUS_AVENUES];
+  for (let k = -8; k < 8; k++) if (named.includes(avenueName(k))) expect(busAve(k), `${avenueName(k)} has no bus lane`);
+});
+
 test('no street furniture on the corner ramps', () => {
   const bad: string[] = [];
   for (const [cx, cz] of BLOCKS) {
