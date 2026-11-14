@@ -5,7 +5,8 @@
  * death shows its FATAL / Check failed / OOM line. --hide a,b,c hides scene children by name before the wait
  * (bisect whole systems: e.g. waterfront-far,hlod,sky-dome,weather).
  *
- *   flock -w 300 /tmp/claude-0/world-shot.lock node scripts/e2e/crashlog.mjs --port 5173 [--at -291,-119,1.5708] [--secs 60] [--hide ...]
+ *   flock -w 300 /tmp/claude-0/world-shot.lock node scripts/e2e/crashlog.mjs --port 5173 [--at -291,-119,1.5708] [--secs 60] [--hide ...] [--r 1] [--probe file.js]
+ * --probe: a JS expression file evaluated at the end (its value is printed).
  */
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -25,7 +26,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
 let crashed = false;
 page.on('crash', () => { crashed = true; log('PAGE CRASHED'); });
-await page.goto(`http://localhost:${port}/?mode=world&r=0&people=0${args.q ? '&' + args.q : ''}`, { waitUntil: 'load' });
+await page.goto(`http://localhost:${port}/?mode=world&r=${args.r ?? 0}&people=0${args.q ? '&' + args.q : ''}`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.__boot?.firstFrame, null, { timeout: 200000 });
 log('booted');
 await page.evaluate(([x, z, yaw, hide]) => {
@@ -40,6 +41,10 @@ for (let s = 0; s < secs && !crashed; s += 5) {
   if (crashed) break;
   const st = await page.evaluate(() => { const i = window.__world.renderer.info; return `calls ${i.render.calls} tris ${i.render.triangles} geo ${i.memory.geometries} tex ${i.memory.textures} heap ${Math.round(performance.memory.usedJSHeapSize / 1e6)}`; }).catch(() => 'gone');
   log(`t=${s + 5}s ${st}`);
+}
+if (args.probe && !crashed) {
+  const { readFileSync } = await import('fs');
+  log('probe:', await page.evaluate(readFileSync(args.probe, 'utf8')).catch((e) => 'ERR ' + e.message));
 }
 const bad = lines.filter((l) => /FATAL|Check failed|OOM|out of memory|Out of memory|crash|GPU process|lost|abort|SwiftShader|ERROR:/i.test(l) && !/ERROR:.*(dbus|bus\.cc|object_proxy|policy)/.test(l));
 log(`${crashed ? 'CRASHED' : 'alive'}; ${lines.length} stderr lines, ${bad.length} notable:`);

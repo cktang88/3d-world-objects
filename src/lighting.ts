@@ -282,6 +282,9 @@ let tod: TimeOfDay = 'day';
 const listeners: ((t: TimeOfDay, night: number) => void)[] = [];
 
 /** 0 = full daylight, 1 = full night. Read it every frame or subscribe with onTimeChange. */
+/** [districts] meshes smaller than this (bounding radius, m, world) cast no shadow (see scanMarkers) */
+export const SHADOW_PART_MIN = 0.3;
+
 export function getNight() {
   return night;
 }
@@ -1693,6 +1696,16 @@ export class Lighting {
     const found: THREE.Object3D[] = [];
     this.scene.traverse((o) => {
       if (o.userData.streetLight) found.push(o);
+      // [districts] tiny parts (bolts, rings, a model's 20 cm pieces) cast no cascade shadow: under a texel or two
+      // in the far cascades, and 685 of Hudson Yards' 805 casters (the shadow pass alone was 760 draw calls)
+      const sm = o as THREE.Mesh;
+      if (sm.isMesh && sm.castShadow && !sm.userData.shadowSized && !(sm as THREE.SkinnedMesh).isSkinnedMesh && !(sm as THREE.InstancedMesh).isInstancedMesh) {
+        sm.userData.shadowSized = true;
+        sm.updateWorldMatrix(true, false);
+        const g = sm.geometry;
+        if (!g.boundingSphere) g.computeBoundingSphere();
+        if (g.boundingSphere && g.boundingSphere.radius * sm.matrixWorld.getMaxScaleOnAxis() < SHADOW_PART_MIN) sm.castShadow = false;
+      }
       // bright things show in wet-ground reflections
       const mm = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
       if ((o as THREE.Mesh).isMesh && mm && !Array.isArray(mm) && (mm.userData?.litWindows || (mm.emissive && mm.emissiveIntensity > 0 && mm.emissive.getHex() !== 0)) && !o.layers.isEnabled(REFLECT_LAYER)) o.layers.enable(REFLECT_LAYER);
