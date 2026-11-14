@@ -60,3 +60,21 @@ test('showcase models carry no transmissive glass (it re-renders the whole scene
   });
   expect(tx === 0, `${tx} transmissive materials left`);
 });
+
+test('every GLTFLoader in src/ is configured (meshopt + Draco) through configureLoader()', async () => {
+  // a bare loader failed every meshopt-compressed vehicle / street prop GLB and left placeholders
+  const { readdirSync, readFileSync, statSync } = await import('fs');
+  const bad: string[] = [];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir)) {
+      const p = `${dir}/${f}`;
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.ts$/.test(f))
+        readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
+          if (/new GLTFLoader\(/.test(line) && !/configureLoader\(new GLTFLoader\(/.test(line)) bad.push(`${p}:${i + 1}: ${line.trim()}`);
+        });
+    }
+  };
+  walk('src');
+  expect(bad.length === 0, `unconfigured GLTFLoader:\n${bad.join('\n')}`);
+});

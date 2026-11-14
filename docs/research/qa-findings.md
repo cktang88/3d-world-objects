@@ -54,5 +54,6 @@ Minor items:
   350–515 calls. So this is a headless-shell bug made more likely by heavy pages on a loaded machine. It is not
   reproducible as a game bug, so this note stops here.
 - Seen in the same log: `THREE.GLTFLoader: setMeshoptDecoder must be called before loading compressed files` for
-  `vehicle/*.glb` and `streetprop/*.glb`. These street models fail to load (the load is a real bug for the
-  vehicles / street props owners).
+  `vehicle/*.glb` and `streetprop/*.glb`. These street models failed to load. **Fixed**: every GLTFLoader goes
+  through `configureLoader()` (detail.ts: meshopt + Draco, KTX2 once a renderer exists). qa originals-guard greps
+  src/ for any bare `new GLTFLoader(`. A spawn shot now logs 0 model failures.

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Rng } from './rng';
 import { enhanceTree } from './materials';
-import { trackForDetail } from './detail';
+import { trackForDetail, configureLoader, gltf } from './detail';
 import { realScale, typicalSize } from './realscale';
 
 export interface ModelEntry {
@@ -118,13 +118,13 @@ export function scaleTo(e: ModelEntry, value: number, m: Norm['m'] = 'max'): num
   return v > 0 ? value / v : 1;
 }
 
-const loader = new GLTFLoader();
+const loader = configureLoader(new GLTFLoader()); // [districts] meshopt + Draco: vehicle/ and streetprop/ GLBs are meshopt-compressed
 const cache = new Map<string, Promise<THREE.Object3D>>();
 
 function load(file: string): Promise<THREE.Object3D> {
   let p = cache.get(file);
   if (!p) {
-    p = loader.loadAsync(`${import.meta.env.BASE_URL}models/${file}`).then((g) => {
+    p = (gltf() ?? loader).loadAsync(`${import.meta.env.BASE_URL}models/${file}`).then((g) => {
       enhanceTree(g.scene);
       g.scene.traverse((o) => {
         const m = o as THREE.Mesh;

@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { FLAGS } from '../flags';
 import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { gltf } from '../detail';
+import { gltf, configureLoader } from '../detail';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { getNight } from '../lighting';
 
 /**
@@ -164,7 +163,7 @@ const avgs = () =>
 let lite: GLTFLoader | null = null;
 function liteLoader() {
   if (!lite) {
-    lite = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    lite = configureLoader(new GLTFLoader()); // [districts] meshopt + Draco like every loader
     // replaces the built-in EXT_texture_webp handler (same name): no image fetch, no decode
     lite.register((parser) => ({
       name: 'EXT_texture_webp',

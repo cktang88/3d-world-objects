@@ -22,11 +22,23 @@ export function setOriginals(v: boolean) {
   originalsEnabled = v;
 }
 
+let draco: DRACOLoader | null = null;
+let ktx2: KTX2Loader | null = null;
+/**
+ * Every GLTFLoader in the app goes through here (qa: tests/originals-guard.test.ts greps for it): Meshopt and
+ * Draco always, KTX2 once a renderer is known. A bare loader failed every meshopt-compressed vehicle and street
+ * prop ("setMeshoptDecoder must be called before loading compressed files") and left placeholders.
+ */
+export function configureLoader(l: GLTFLoader) {
+  draco ??= new DRACOLoader().setDecoderPath(`${import.meta.env.BASE_URL}libs/draco/`);
+  l.setDRACOLoader(draco).setMeshoptDecoder(MeshoptDecoder);
+  if (ktx2) l.setKTX2Loader(ktx2);
+  return l;
+}
 export function initDetail(renderer: THREE.WebGLRenderer) {
   const base = import.meta.env.BASE_URL;
-  const draco = new DRACOLoader().setDecoderPath(`${base}libs/draco/`);
-  const ktx2 = new KTX2Loader().setTranscoderPath(`${base}libs/basis/`).detectSupport(renderer);
-  loader = new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
+  ktx2 = new KTX2Loader().setTranscoderPath(`${base}libs/basis/`).detectSupport(renderer);
+  loader = configureLoader(new GLTFLoader());
   maxAniso = renderer.capabilities.getMaxAnisotropy();
 }
 let maxAniso = 8;
