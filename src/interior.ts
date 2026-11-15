@@ -273,11 +273,19 @@ export class InteriorLevel implements Level {
   portals() {
     return this.ports;
   }
+  private shadowRoom: unknown = null;
+  private shadowTick = 0;
   update(_dt: number, p: THREE.Vector3, _time: number) {
     // the room you stand in gets the one shadow-casting light, so furniture grounds itself
     if (!this.shadowLight) return;
     const here = this.lights.find((l) => p.x >= l.room.x0 && p.x <= l.room.x1 && p.z >= l.room.z0 && p.z <= l.room.z1) ?? this.lights[0];
     if (!here) return;
+    // [perf] rooms are static: the cube shadow (6 scene renders) is drawn when the light moves to another
+    // room, and refreshed twice a second for doors and drawers, not every frame
+    const sl = this.shadowLight;
+    sl.shadow.autoUpdate = false;
+    if (here !== this.shadowRoom || ++this.shadowTick % 30 === 0) sl.shadow.needsUpdate = true;
+    this.shadowRoom = here;
     for (const l of this.lights) l.light.intensity = l === here ? 0 : l.light.userData.base;
     this.shadowLight.position.copy(here.light.position);
     this.shadowLight.intensity = here.light.userData.base;

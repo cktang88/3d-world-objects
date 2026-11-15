@@ -4,6 +4,8 @@ Target: desktop GPU, **< 1500 draw calls, ~5M triangles on screen, 60 fps** (16.
 Starting point (stated by the team): streamed NYC with 49 resident chunks, ~1,950 meshes and ~10.6M triangles before culling.
 three.js r170, WebGLRenderer, EffectComposer (4x MSAA HalfFloat target, GTAO, Unreal bloom, grade), CSM shadows.
 
+> **Status (2026-11):** done on main: chunk builds are time-sliced (4 ms/frame, `nyc.ts update()`); light pools are fixed (`lighting.ts padLights`, no recompile between rooms); GTAO reuses the main depth at half resolution; bloom half-res; DPR capped. Latest: starting quality is picked from the GPU (software/integrated/mobile → low, else high; ultra is opt-in, Q choice remembered); high uses 2K sun shadows; below ultra materials use one triplanar projection and no texture bombing (~6 reads per pixel instead of ~20, `materials.ts setCheapShading`); the interior cube shadow redraws on room change and twice a second, not every frame.
+
 This doc is for this codebase, not general advice. Every recommendation names the files and functions it changes.
 "Win" figures are estimates from reading the code. They are **not measured**. Work package 1 builds the counters to measure them, and every other package should record before/after counts in its commit message.
 

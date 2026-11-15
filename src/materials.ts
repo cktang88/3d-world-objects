@@ -1,3 +1,4 @@
+import { WeakList } from './dispose';
 import * as THREE from 'three';
 import { pbr, type PbrMaps } from './pbr';
 
@@ -342,6 +343,18 @@ vec4 triDiff, triArm; vec3 triNorO; float triH;
   vec2 uvX = vec2(triP.z * triSg.x, triP.y);
   vec2 uvY = vec2(triP.x * triSg.y, triP.z);
   vec2 uvZ = vec2(-triP.x * triSg.z, triP.y);
+#ifdef TRI_DOMINANT
+  // [perf] high/low quality: only the dominant projection (3 texture reads + 1 detail instead of
+  // 9 + 3); boxes, which are most of the world, look identical, curved parts get a hard seam
+  vec3 triAn = abs(triN);
+  triW = triAn.x >= triAn.y && triAn.x >= triAn.z ? vec3(1.0, 0.0, 0.0) : triAn.y >= triAn.z ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+  vec2 uvD = uvX * triW.x + uvY * triW.y + uvZ * triW.z;
+  TriAT aD = triAT(uvD + 17.0 * triW.y + 31.0 * triW.z);
+  triDiff = triS(uTriDiff, uvD, aD);
+  triArm = triS(uTriArm, uvD, aD);
+  vec3 tnX = triS(uTriNor, uvD, aD).xyz * 2.0 - 1.0;
+  vec3 tnY = tnX, tnZ = tnX;
+#else
   TriAT aX = triAT(uvX), aY = triAT(uvY + 17.0), aZ = triAT(uvZ + 31.0);
   triDiff = triS(uTriDiff, uvX, aX) * triW.x + triS(uTriDiff, uvY, aY) * triW.y + triS(uTriDiff, uvZ, aZ) * triW.z;
   triArm = triS(uTriArm, uvX, aX) * triW.x + triS(uTriArm, uvY, aY) * triW.y + triS(uTriArm, uvZ, aZ) * triW.z;
@@ -349,6 +362,7 @@ vec4 triDiff, triArm; vec3 triNorO; float triH;
   vec3 tnX = triS(uTriNor, uvX, aX).xyz * 2.0 - 1.0;
   vec3 tnY = triS(uTriNor, uvY, aY).xyz * 2.0 - 1.0;
   vec3 tnZ = triS(uTriNor, uvZ, aZ).xyz * 2.0 - 1.0;
+#endif
   tnX.xy *= uNorMix; tnY.xy *= uNorMix; tnZ.xy *= uNorMix;
   tnX.x *= triSg.x; tnY.x *= triSg.y; tnZ.x *= -triSg.z;
   tnX = vec3(tnX.xy + triN.zy, abs(tnX.z) * triN.x);
@@ -356,7 +370,11 @@ vec4 triDiff, triArm; vec3 triNorO; float triH;
   tnZ = vec3(tnZ.xy + triN.xy, abs(tnZ.z) * triN.z);
   triNorO = normalize(tnX.zyx * triW.x + tnY.xzy * triW.y + tnZ.xyz * triW.z);
   vec3 triQ = vTriPos * uProcScale;
+#ifdef TRI_DOMINANT
+  triH = texture2D(uTriDetail, triQ.zy * triW.x + triQ.xz * triW.y + triQ.xy * triW.z).r;
+#else
   triH = texture2D(uTriDetail, triQ.zy).r * triW.x + texture2D(uTriDetail, triQ.xz).r * triW.y + texture2D(uTriDetail, triQ.xy).r * triW.z;
+#endif
   // the texture's u axis on this surface: brushing direction for anisotropy
   vec3 triBrush = vec3(0.0, 0.0, 1.0) * triW.x + vec3(1.0, 0.0, 0.0) * (triW.y + triW.z);
 #endif
@@ -502,6 +520,15 @@ const flatNormal = pixel(128, 128, 255);
 /** shared by every material: baked AO strength and dust on upward faces */
 const globals = { uBakeAo: { value: 1 }, uWearAll: { value: 0 }, uDust: { value: 0 }, uDbg: { value: 0 } };
 /** Strength of the ambient occlusion baked into rebuilt objects (0 = ignore the bake). */
+/** [perf] ultra: full triplanar + texture bombing (~20 reads per pixel); below: ~6 */
+let cheapShading = false;
+const enhanced = new WeakList<THREE.Material>();
+export function setCheapShading(v: boolean) {
+  if (v === cheapShading) return;
+  cheapShading = v;
+  for (const m of enhanced) m.needsUpdate = true;
+}
+
 export function setBakeStrength(v: number) {
   globals.uBakeAo.value = v;
 }
@@ -672,6 +699,8 @@ export function enhance(m: THREE.MeshStandardMaterial, kind: string, hasUv = fal
   p.defines = defs;
   p.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
+    // [perf] cheap shading below ultra: one triplanar projection, no texture bombing (2 reads -> 1)
+    if (cheapShading) sh.fragmentShader = '#define TRI_DOMINANT\n#undef TRI_ANTITILE\n' + sh.fragmentShader;
     sh.vertexShader = VERT_DECL + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT_BODY);
     sh.fragmentShader = FRAG_DECL + sh.fragmentShader
       .replace('#include <color_fragment>', '#include <color_fragment>\n' + SAMPLE)
@@ -681,7 +710,8 @@ export function enhance(m: THREE.MeshStandardMaterial, kind: string, hasUv = fal
       .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n' + AO)
       .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n' + DEBUG);
   };
-  p.customProgramCacheKey = () => 'tri3';
+  p.customProgramCacheKey = () => (cheapShading ? 'tri3c' : 'tri3');
+  enhanced.add(p);
   return p;
 }
 

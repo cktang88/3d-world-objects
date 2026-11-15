@@ -1,5 +1,6 @@
 // ?fast=1 / ?notex=1 / ?post=0 / ?shadows=0 (src/flags.ts): first, so modules that read location.search see them
 import { FLAGS, stripTextures } from './flags';
+import { setCheapShading } from './materials'; // [perf]
 import { minimap } from './minimap'; // [minimap]
 import { mark, timed } from './boot'; // boot stage marks (scripts/boot.mjs)
 import * as THREE from 'three';
@@ -80,7 +81,27 @@ const params0 = new URLSearchParams(location.search);
 // decoder with facade/PBR textures: in the city their parse otherwise finished a minute after the download
 if (!params0.has('lab')) void preloadFleet();
 // ---- end vehicles
-let quality: Quality = (params0.get('quality') as Quality) || 'ultra';
+/**
+ * [perf] starting quality: ?quality= wins, then the player's last choice (Q), then a guess from the GPU.
+ * Ultra (GTAO, 4K shadows, full triplanar shading) is opt-in: it is built for a big desktop GPU.
+ */
+function autoQuality(): Quality {
+  try {
+    const saved = localStorage.getItem('quality') as Quality | null;
+    if (saved === 'ultra' || saved === 'high' || saved === 'low') return saved;
+  } catch { /* storage blocked */ }
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)).toLowerCase();
+    if (/swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/.test(gpu)) return 'low';
+    const mobile = /android|iphone|ipad|mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /mac/i.test(navigator.platform));
+    if (mobile || /mali|adreno|powervr|apple gpu/.test(gpu)) return 'low';
+    if (/intel|uhd|iris/.test(gpu) || (navigator.hardwareConcurrency ?? 8) <= 4) return 'low';
+  } catch { /* no context info */ }
+  return 'high';
+}
+let quality: Quality = (params0.get('quality') as Quality) || autoQuality();
 const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
 // Each composer buffer owns its depth: sharing lets later MSAA resolves overwrite scene depth.
 rt.depthTexture = new THREE.DepthTexture(1, 1);
@@ -129,7 +150,8 @@ function applyQuality() {
   bloom.enabled = quality !== 'low';
   dynScale = 1;
   applySize();
-  sun.shadow.mapSize.setScalar(quality === 'low' ? 2048 : 4096);
+  sun.shadow.mapSize.setScalar(quality === 'ultra' ? 4096 : quality === 'high' ? 2048 : 1024);
+  setCheapShading(quality !== 'ultra');
   sun.shadow.map?.dispose();
   sun.shadow.map = null;
   lighting.setQuality(quality);
@@ -699,7 +721,8 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'KeyG') {
     quality = quality === 'ultra' ? 'high' : quality === 'high' ? 'low' : 'ultra';
     applyQuality();
-    toast(`Graphics: ${quality === 'ultra' ? 'ultra (ambient occlusion, bloom, 4K shadows)' : quality === 'high' ? 'high (bloom, 4K shadows)' : 'low'}`);
+    try { localStorage.setItem('quality', quality); } catch { /* storage blocked */ }
+    toast(`Graphics: ${quality === 'ultra' ? 'ultra (ambient occlusion, bloom, 4K shadows, full shading)' : quality === 'high' ? 'high (bloom, 2K shadows)' : 'low'}`);
   } else if (e.code === 'KeyT') {
     const label = lighting.cycle(e.shiftKey ? -1 : 1);
     toast(lighting.place === 'outdoor' ? `Time of day: ${label}` : `Time of day: ${label} (outside)`);
